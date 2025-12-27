@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon></ApplicationIcon>
+    <StartupObject>GamesLocalShare.App</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- For JSON configuration parsing (Steam uses VDF but we'll parse it) -->
+    <PackageReference Include="Gameloop.Vdf" Version="0.6.2" />
+    <!-- For MVVM pattern -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <!-- For modern UI controls -->
+    <PackageReference Include="MahApps.Metro" Version="2.4.10" />
+  </ItemGroup>
+
+</Project>
