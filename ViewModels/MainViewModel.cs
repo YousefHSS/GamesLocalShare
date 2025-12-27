@@ -90,6 +90,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.PeerGamesUpdated += OnPeerGamesUpdated;
         _networkService.ScanProgress += OnScanProgress;
         _networkService.ConnectionError += OnConnectionError;
+        _networkService.GamesRequestedButEmpty += OnGamesRequestedButEmpty;
 
         // Subscribe to transfer events
         _fileTransferService.ProgressChanged += OnTransferProgress;
@@ -102,6 +103,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = "?? Firewall not configured - click 'Configure Firewall' to fix connection issues";
         }
+    }
+
+    private void OnGamesRequestedButEmpty(object? sender, EventArgs e)
+    {
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            StatusMessage = "?? A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
+        });
     }
 
     private void OnConnectionError(object? sender, string error)
@@ -782,6 +791,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;
         _networkService.ScanProgress -= OnScanProgress;
         _networkService.ConnectionError -= OnConnectionError;
+        _networkService.GamesRequestedButEmpty -= OnGamesRequestedButEmpty;
         _fileTransferService.ProgressChanged -= OnTransferProgress;
         _fileTransferService.TransferCompleted -= OnTransferCompleted;
 

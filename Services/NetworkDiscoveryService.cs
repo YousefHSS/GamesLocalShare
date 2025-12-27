@@ -54,6 +54,12 @@ public class NetworkDiscoveryService : IDisposable
     /// </summary>
     public event EventHandler<string>? ConnectionError;
 
+    /// <summary>
+    /// Event raised when games are requested but LocalPeer.Games is empty
+    /// This allows the ViewModel to trigger a scan
+    /// </summary>
+    public event EventHandler? GamesRequestedButEmpty;
+
     public NetworkDiscoveryService()
     {
         LocalPeer = new NetworkPeer
@@ -226,13 +232,14 @@ public class NetworkDiscoveryService : IDisposable
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
-            // Send discovery request
+            // Send discovery request - also include OUR games so they know about us
             var request = new NetworkMessage
             {
                 Type = MessageType.RequestGameList,
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
-                SenderPort = LocalPeer.Port
+                SenderPort = LocalPeer.Port,
+                Games = LocalPeer.Games // Include our games in the request!
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
 
@@ -399,6 +406,8 @@ public class NetworkDiscoveryService : IDisposable
     {
         LocalPeer.Games = games;
         
+        System.Diagnostics.Debug.WriteLine($"LocalPeer.Games updated with {games.Count} games");
+        
         // Notify all peers of our updated game list
         foreach (var peer in GetPeers())
         {
@@ -426,13 +435,14 @@ public class NetworkDiscoveryService : IDisposable
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
-            // Send request
+            // Send request - include our games so they can update their view of us
             var request = new NetworkMessage
             {
                 Type = MessageType.RequestGameList,
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
-                SenderPort = LocalPeer.Port
+                SenderPort = LocalPeer.Port,
+                Games = LocalPeer.Games // Include our games!
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
 
@@ -634,42 +644,67 @@ public class NetworkDiscoveryService : IDisposable
                 if (request == null)
                     return;
 
-                // If we received a request, add the sender as a peer
+                System.Diagnostics.Debug.WriteLine($"Received {request.Type} from {request.SenderName} ({remoteIp})");
+
+                // If we received a request, add/update the sender as a peer
                 if (!string.IsNullOrEmpty(request.SenderId) && request.SenderId != LocalPeer.PeerId)
                 {
                     bool isNew = false;
-                    NetworkPeer? newPeer = null;
+                    NetworkPeer? peerToUpdate = null;
                     
                     lock (_peersLock)
                     {
                         if (!_peers.ContainsKey(request.SenderId))
                         {
-                            newPeer = new NetworkPeer
+                            peerToUpdate = new NetworkPeer
                             {
                                 PeerId = request.SenderId,
                                 DisplayName = request.SenderName ?? remoteIp,
                                 IpAddress = remoteIp,
                                 Port = request.SenderPort > 0 ? request.SenderPort : TcpPort,
+                                Games = request.Games ?? [], // Capture their games from the request!
                                 LastSeen = DateTime.Now
                             };
-                            _peers[request.SenderId] = newPeer;
+                            _peers[request.SenderId] = peerToUpdate;
                             isNew = true;
                         }
                         else
                         {
-                            _peers[request.SenderId].LastSeen = DateTime.Now;
+                            peerToUpdate = _peers[request.SenderId];
+                            peerToUpdate.LastSeen = DateTime.Now;
+                            
+                            // Update their games if they sent them
+                            if (request.Games != null && request.Games.Count > 0)
+                            {
+                                peerToUpdate.Games = request.Games;
+                            }
                         }
                     }
                     
-                    if (isNew && newPeer != null)
+                    if (isNew && peerToUpdate != null)
                     {
-                        PeerDiscovered?.Invoke(this, newPeer);
+                        PeerDiscovered?.Invoke(this, peerToUpdate);
+                    }
+                    
+                    // If they sent games with the request, notify about the update
+                    if (peerToUpdate != null && request.Games != null && request.Games.Count > 0)
+                    {
+                        PeerGamesUpdated?.Invoke(this, peerToUpdate);
                     }
                 }
 
                 switch (request.Type)
                 {
                     case MessageType.RequestGameList:
+                        // Log what we're about to send
+                        System.Diagnostics.Debug.WriteLine($"Responding with {LocalPeer.Games.Count} games to {request.SenderName}");
+                        
+                        // If we have no games, raise an event so the UI can notify the user
+                        if (LocalPeer.Games.Count == 0)
+                        {
+                            GamesRequestedButEmpty?.Invoke(this, EventArgs.Empty);
+                        }
+                        
                         var response = new NetworkMessage
                         {
                             Type = MessageType.GameList,
@@ -777,6 +812,8 @@ public class NetworkDiscoveryService : IDisposable
                 Games = LocalPeer.Games
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(message));
+            
+            System.Diagnostics.Debug.WriteLine($"Sent {LocalPeer.Games.Count} games to {peer.DisplayName}");
         }
         catch (Exception ex)
         {
