@@ -17,13 +17,15 @@ public partial class App : Application
         {
             // We're running as admin to configure firewall
             ConfigureFirewallAndContinue();
-            return;
+            // DON'T return - continue to show the main window after configuration
         }
-
-        // Check if firewall rules exist, prompt user if not
-        if (!FirewallHelper.CheckFirewallRulesExist())
+        else
         {
-            PromptForFirewallConfiguration();
+            // Check if firewall rules exist, prompt user if not
+            if (!FirewallHelper.CheckFirewallRulesExist())
+            {
+                PromptForFirewallConfiguration();
+            }
         }
     }
 
@@ -54,6 +56,7 @@ public partial class App : Application
                 try
                 {
                     FirewallHelper.RestartAsAdmin();
+                    // App will exit and restart - don't continue
                 }
                 catch (Exception ex)
                 {
@@ -97,12 +100,8 @@ public partial class App : Application
         {
             MessageBox.Show(
                 "? FIREWALL CONFIGURED SUCCESSFULLY!\n\n" +
-                $"{message}\n\n" +
-                "Other computers should now be able to connect to you.\n\n" +
-                "If connections still fail:\n" +
-                "1. Make sure both computers are on the same network\n" +
-                "2. Check for third-party antivirus/firewall software\n" +
-                "3. Try the 'Test Connection' button to diagnose",
+                "Firewall rules have been added.\n\n" +
+                "The application will now continue to start.",
                 "Firewall Configured",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -112,12 +111,10 @@ public partial class App : Application
             MessageBox.Show(
                 $"? FIREWALL CONFIGURATION FAILED\n\n" +
                 $"{message}\n\n" +
-                "MANUAL FIX - Run these commands in Administrator PowerShell:\n\n" +
-                "netsh advfirewall firewall add rule name=\"GamesLocalShare\" dir=in action=allow program=\"<path to exe>\" profile=any\n\n" +
-                "Or temporarily disable Windows Firewall to test.",
+                "The application will continue, but other computers may not be able to connect to you.",
                 "Firewall Configuration Failed",
                 MessageBoxButton.OK,
-                MessageBoxImage.Error);
+                MessageBoxImage.Warning);
         }
     }
 }

@@ -39,8 +39,9 @@ public static class FirewallHelper
     {
         try
         {
-            var result = RunNetshCommand($"advfirewall firewall show rule name=all | findstr /i \"{AppName}\"");
-            return result.Contains(AppName);
+            // Check for one of our specific rules (don't use pipe/findstr which can hang)
+            var result = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} Program In\"");
+            return result.Contains(AppName) && !result.Contains("No rules match");
         }
         catch
         {
@@ -69,7 +70,6 @@ public static class FirewallHelper
 
             // Get the path to the current executable
             var exePath = GetExecutablePath();
-            results.Add($"Executable: {exePath}");
 
             // ============================================
             // METHOD 1: Program-based rules (MOST RELIABLE)
@@ -112,17 +112,6 @@ public static class FirewallHelper
                 results.Add($"? UDP {UdpPort} (inbound): FAILED");
             }
 
-            // UDP Discovery - Outbound
-            if (AddRule($"{AppName} UDP {UdpPort} Out", $"dir=out action=allow protocol=UDP localport={UdpPort} profile=any"))
-            {
-                results.Add($"? UDP {UdpPort} (outbound): OK");
-                successCount++;
-            }
-            else
-            {
-                results.Add($"? UDP {UdpPort} (outbound): FAILED");
-            }
-
             // TCP Game List - Inbound
             if (AddRule($"{AppName} TCP {TcpPort1} In", $"dir=in action=allow protocol=TCP localport={TcpPort1} profile=any"))
             {
@@ -144,33 +133,23 @@ public static class FirewallHelper
             {
                 results.Add($"? TCP {TcpPort2} (inbound): FAILED");
             }
-
-            // ============================================
-            // METHOD 3: Allow all local network traffic (FALLBACK)
-            // ============================================
             
-            // Allow all traffic on local subnet (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-            AddRule($"{AppName} LocalNet In", $"dir=in action=allow remoteip=localsubnet profile=any program=\"{exePath}\"");
-            
-            // Verify rules were added
-            var verified = CheckFirewallRulesExist();
-            
-            if (successCount >= 4 && verified)
+            if (successCount >= 3)
             {
-                return (true, $"Firewall configured successfully!\n\n{string.Join("\n", results)}\n\nRules verified: YES");
+                return (true, string.Join("\n", results));
             }
             else if (successCount > 0)
             {
-                return (true, $"Partial success ({successCount} rules added):\n\n{string.Join("\n", results)}\n\nRules verified: {(verified ? "YES" : "NO")}");
+                return (true, $"Partial success ({successCount} rules):\n{string.Join("\n", results)}");
             }
             else
             {
-                return (false, $"Failed to add firewall rules:\n\n{string.Join("\n", results)}");
+                return (false, $"Failed to add rules:\n{string.Join("\n", results)}");
             }
         }
         catch (Exception ex)
         {
-            return (false, $"Error adding firewall rules: {ex.Message}");
+            return (false, $"Error: {ex.Message}");
         }
     }
 
@@ -193,7 +172,7 @@ public static class FirewallHelper
         try
         {
             var result = RunNetshCommand($"advfirewall firewall add rule name=\"{ruleName}\" {ruleParams}");
-            return result.Contains("Ok") || result.Contains("successfully");
+            return result.Contains("Ok") || result.Contains("successfully") || result.Contains("Ok.");
         }
         catch
         {
@@ -203,38 +182,30 @@ public static class FirewallHelper
 
     private static void DeleteAllExistingRules()
     {
-        try
+        var ruleNames = new[]
         {
-            // Delete all rules containing "GamesLocalShare"
-            var existingRules = RunNetshCommand($"advfirewall firewall show rule name=all | findstr /i \"{AppName}\"");
-            
-            // Try to delete by various names we've used
-            var ruleNames = new[]
-            {
-                $"{AppName} Program In",
-                $"{AppName} Program Out",
-                $"{AppName} UDP {UdpPort} In",
-                $"{AppName} UDP {UdpPort} Out",
-                $"{AppName} TCP {TcpPort1} In",
-                $"{AppName} TCP {TcpPort2} In",
-                $"{AppName} LocalNet In",
-                "GamesLocalShare UDP Discovery",
-                "GamesLocalShare TCP GameList",
-                "GamesLocalShare TCP FileTransfer",
-                "GamesLocalShare Program",
-                "GamesLocalShare TCP Communication"
-            };
+            $"{AppName} Program In",
+            $"{AppName} Program Out",
+            $"{AppName} UDP {UdpPort} In",
+            $"{AppName} UDP {UdpPort} Out",
+            $"{AppName} TCP {TcpPort1} In",
+            $"{AppName} TCP {TcpPort2} In",
+            $"{AppName} LocalNet In",
+            "GamesLocalShare UDP Discovery",
+            "GamesLocalShare TCP GameList",
+            "GamesLocalShare TCP FileTransfer",
+            "GamesLocalShare Program",
+            "GamesLocalShare TCP Communication"
+        };
 
-            foreach (var name in ruleNames)
+        foreach (var name in ruleNames)
+        {
+            try
             {
-                try
-                {
-                    RunNetshCommand($"advfirewall firewall delete rule name=\"{name}\"");
-                }
-                catch { }
+                RunNetshCommand($"advfirewall firewall delete rule name=\"{name}\"");
             }
+            catch { }
         }
-        catch { }
     }
 
     /// <summary>
@@ -244,7 +215,7 @@ public static class FirewallHelper
     {
         if (!IsRunningAsAdmin())
         {
-            return (false, "Administrator privileges required to remove firewall rules");
+            return (false, "Administrator privileges required");
         }
 
         try
@@ -254,25 +225,7 @@ public static class FirewallHelper
         }
         catch (Exception ex)
         {
-            return (false, $"Error removing firewall rules: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Tests if a specific port can accept connections
-    /// </summary>
-    public static bool TestPortListening(int port)
-    {
-        try
-        {
-            var listener = new TcpListener(IPAddress.Any, port);
-            listener.Start();
-            listener.Stop();
-            return true;
-        }
-        catch
-        {
-            return false;
+            return (false, $"Error: {ex.Message}");
         }
     }
 
@@ -284,7 +237,6 @@ public static class FirewallHelper
         try
         {
             var exePath = GetExecutablePath();
-            System.Diagnostics.Debug.WriteLine($"Restarting as admin: {exePath}");
 
             var startInfo = new ProcessStartInfo
             {
@@ -315,122 +267,31 @@ public static class FirewallHelper
         
         report.AppendLine($"Running as Admin: {IsRunningAsAdmin()}");
         report.AppendLine($"Firewall Rules Exist: {CheckFirewallRulesExist()}");
-        report.AppendLine($"Executable: {GetExecutablePath()}");
-        report.AppendLine();
-        
-        // Check if Windows Firewall is enabled
-        report.AppendLine("Windows Firewall Status:");
-        try
-        {
-            var fwStatus = RunNetshCommand("advfirewall show allprofiles state");
-            foreach (var line in fwStatus.Split('\n').Where(l => l.Contains("State") || l.Contains("Profile")))
-            {
-                report.AppendLine($"  {line.Trim()}");
-            }
-        }
-        catch
-        {
-            report.AppendLine("  Could not check firewall status");
-        }
         report.AppendLine();
         
         report.AppendLine("Required Ports:");
-        report.AppendLine($"  UDP {UdpPort} - Discovery broadcasts");
-        report.AppendLine($"  TCP {TcpPort1} - Game list exchange");
-        report.AppendLine($"  TCP {TcpPort2} - File transfers");
+        report.AppendLine($"  UDP {UdpPort} - Discovery");
+        report.AppendLine($"  TCP {TcpPort1} - Game list");
+        report.AppendLine($"  TCP {TcpPort2} - File transfer");
         report.AppendLine();
 
-        // Check our specific rules
-        report.AppendLine("GamesLocalShare Firewall Rules:");
+        // Check specific rules
+        report.AppendLine("Checking firewall rules:");
         try
         {
-            var rules = RunNetshCommand($"advfirewall firewall show rule name=all | findstr /i \"{AppName}\"");
-            if (!string.IsNullOrWhiteSpace(rules))
-            {
-                foreach (var line in rules.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).Take(15))
-                {
-                    report.AppendLine($"  {line.Trim()}");
-                }
-            }
-            else
-            {
-                report.AppendLine("  No GamesLocalShare rules found!");
-            }
+            var programRule = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} Program In\"");
+            report.AppendLine(programRule.Contains(AppName) && !programRule.Contains("No rules") 
+                ? "  ? Program rule exists" 
+                : "  ? Program rule missing");
+                
+            var tcpRule = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} TCP {TcpPort2} In\"");
+            report.AppendLine(tcpRule.Contains(AppName) && !tcpRule.Contains("No rules") 
+                ? $"  ? TCP {TcpPort2} rule exists" 
+                : $"  ? TCP {TcpPort2} rule missing");
         }
         catch (Exception ex)
         {
-            report.AppendLine($"  Error checking rules: {ex.Message}");
-        }
-        report.AppendLine();
-
-        // Check current network profile
-        report.AppendLine("Network Profile:");
-        try
-        {
-            var profileResult = RunNetshCommand("advfirewall show currentprofile");
-            if (profileResult.Contains("Domain"))
-                report.AppendLine("  Current: Domain");
-            else if (profileResult.Contains("Private"))
-                report.AppendLine("  Current: Private");
-            else if (profileResult.Contains("Public"))
-                report.AppendLine("  Current: Public (may need extra rules)");
-            else
-                report.AppendLine("  Current: Unknown");
-        }
-        catch
-        {
-            report.AppendLine("  Could not determine network profile");
-        }
-        report.AppendLine();
-
-        // Check if ports are listening
-        report.AppendLine("Listening Ports:");
-        try
-        {
-            var netstatResult = RunCommand("cmd", $"/c netstat -an | findstr \"LISTENING\" | findstr \":{UdpPort} :{TcpPort1} :{TcpPort2}\"");
-            if (!string.IsNullOrWhiteSpace(netstatResult))
-            {
-                foreach (var line in netstatResult.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)))
-                {
-                    report.AppendLine($"  {line.Trim()}");
-                }
-            }
-            else
-            {
-                report.AppendLine("  No ports listening (start network first)");
-            }
-        }
-        catch
-        {
-            report.AppendLine("  Could not check port status");
-        }
-
-        // Check for third-party security software
-        report.AppendLine();
-        report.AppendLine("Security Software Check:");
-        try
-        {
-            var processes = Process.GetProcesses();
-            var securityKeywords = new[] { "mcshield", "avp", "avgnt", "norton", "bdagent", "mbam", "kavfs", "avguard", "avast", "avg", "eset", "sophos", "trend" };
-            var found = processes.Where(p => securityKeywords.Any(s => p.ProcessName.ToLower().Contains(s))).Select(p => p.ProcessName).Distinct().ToList();
-            
-            if (found.Any())
-            {
-                report.AppendLine("  ?? Third-party security detected:");
-                foreach (var name in found)
-                {
-                    report.AppendLine($"    - {name}");
-                }
-                report.AppendLine("  May need to allow app in this software too!");
-            }
-            else
-            {
-                report.AppendLine("  No third-party security software detected");
-            }
-        }
-        catch
-        {
-            report.AppendLine("  Could not check security software");
+            report.AppendLine($"  Error: {ex.Message}");
         }
 
         return report.ToString();
@@ -459,9 +320,20 @@ public static class FirewallHelper
             if (process == null)
                 return string.Empty;
 
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit(5000);
+            // Use timeout to avoid hanging
+            var output = "";
+            var error = "";
+            
+            var outputTask = Task.Run(() => output = process.StandardOutput.ReadToEnd());
+            var errorTask = Task.Run(() => error = process.StandardError.ReadToEnd());
+            
+            if (!process.WaitForExit(5000))
+            {
+                try { process.Kill(); } catch { }
+                return "Command timed out";
+            }
+            
+            Task.WaitAll(new[] { outputTask, errorTask }, 1000);
 
             return string.IsNullOrEmpty(error) ? output : $"{output}\nError: {error}";
         }
