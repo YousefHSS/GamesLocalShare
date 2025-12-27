@@ -176,6 +176,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
             });
 
+            // Update file transfer service with local games
+            _fileTransferService.UpdateLocalGames(games);
+
             if (games.Count == 0)
             {
                 var errors = _steamScanner.ScanErrors;
@@ -402,10 +405,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             
             StatusMessage = status;
 
-            // Share our games with the network
+            // Share our games with the network and file transfer service
             if (LocalGames.Count > 0)
             {
-                await _networkService.UpdateLocalGamesAsync(LocalGames.ToList());
+                var gamesList = LocalGames.ToList();
+                await _networkService.UpdateLocalGamesAsync(gamesList);
+                _fileTransferService.UpdateLocalGames(gamesList);
             }
 
             AddLog("Network discovery started", LogMessageType.Info);

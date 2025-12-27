@@ -23,6 +23,7 @@ public class FileTransferService : IDisposable
     private TransferState? _currentTransferState;
     private bool _isListening;
     private bool _isPaused;
+    private List<GameInfo> _localGames = [];
 
     /// <summary>
     /// Whether the file transfer service is actively listening
@@ -38,6 +39,15 @@ public class FileTransferService : IDisposable
     /// Whether a transfer is currently paused
     /// </summary>
     public bool IsPaused => _isPaused;
+
+    /// <summary>
+    /// Updates the list of local games that can be served to peers
+    /// </summary>
+    public void UpdateLocalGames(IEnumerable<GameInfo> games)
+    {
+        _localGames = games.ToList();
+        System.Diagnostics.Debug.WriteLine($"FileTransferService: Updated local games list ({_localGames.Count} games)");
+    }
 
     /// <summary>
     /// Event raised when transfer progress updates
@@ -561,17 +571,37 @@ public class FileTransferService : IDisposable
                     return;
                 }
 
-                if (!Directory.Exists(request.GamePath))
+                // Look up the game by AppId in our local games list
+                var localGame = _localGames.FirstOrDefault(g => g.AppId == request.GameAppId);
+                string gamePath;
+                
+                if (localGame != null && !string.IsNullOrEmpty(localGame.InstallPath) && Directory.Exists(localGame.InstallPath))
                 {
-                    System.Diagnostics.Debug.WriteLine($"Game path doesn't exist: {request.GamePath}");
+                    gamePath = localGame.InstallPath;
+                    System.Diagnostics.Debug.WriteLine($"Found game by AppId: {request.GameAppId} at {gamePath}");
+                }
+                else if (!string.IsNullOrEmpty(request.GamePath) && Directory.Exists(request.GamePath))
+                {
+                    // Fallback to the path in the request (for backward compatibility)
+                    gamePath = request.GamePath;
+                    System.Diagnostics.Debug.WriteLine($"Using fallback path from request: {gamePath}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"Game not found! AppId: {request.GameAppId}, RequestPath: {request.GamePath}");
+                    System.Diagnostics.Debug.WriteLine($"Local games count: {_localGames.Count}");
+                    foreach (var g in _localGames.Take(5))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"  - {g.Name} ({g.AppId}): {g.InstallPath}");
+                    }
                     writer.Write("{}"); // Empty manifest
                     return;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"Building manifest for: {request.GamePath}");
+                System.Diagnostics.Debug.WriteLine($"Building manifest for: {gamePath}");
 
                 // Build and send file manifest
-                var manifest = await BuildFileManifestAsync(request.GamePath);
+                var manifest = await BuildFileManifestAsync(gamePath);
                 var manifestJson = JsonSerializer.Serialize(manifest);
                 writer.Write(manifestJson);
                 writer.Flush();
@@ -589,7 +619,7 @@ public class FileTransferService : IDisposable
                         break;
                     }
 
-                    var fullPath = Path.Combine(request.GamePath, relativePath);
+                    var fullPath = Path.Combine(gamePath, relativePath);
                     
                     if (!File.Exists(fullPath))
                     {
