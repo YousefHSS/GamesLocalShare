@@ -13,6 +13,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly SteamLibraryScanner _steamScanner;
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
+    private DateTime _lastProgressUpdate = DateTime.MinValue;
 
     [ObservableProperty]
     private string _statusMessage = "Ready";
@@ -107,7 +108,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnGamesRequestedButEmpty(object? sender, EventArgs e)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             StatusMessage = "?? A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
         });
@@ -115,7 +116,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnConnectionError(object? sender, string error)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             LastError = error;
             System.Diagnostics.Debug.WriteLine($"Connection Error: {error}");
@@ -675,7 +676,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnPeerDiscovered(object? sender, NetworkPeer peer)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             if (!NetworkPeers.Any(p => p.PeerId == peer.PeerId))
             {
@@ -687,7 +688,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnPeerLost(object? sender, NetworkPeer peer)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
@@ -703,7 +704,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnPeerGamesUpdated(object? sender, NetworkPeer peer)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             // Update the peer in our collection
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
@@ -727,7 +728,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnScanProgress(object? sender, string message)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             StatusMessage = message;
         });
@@ -809,7 +810,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnTransferProgress(object? sender, TransferProgressEventArgs e)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        // Throttle UI updates to max 10 per second to prevent UI freeze
+        var now = DateTime.Now;
+        if ((now - _lastProgressUpdate).TotalMilliseconds < 100)
+            return;
+        _lastProgressUpdate = now;
+
+        // Use BeginInvoke (async) instead of Invoke (sync) to prevent blocking
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             CurrentTransferProgress = e.Progress;
             CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond);
@@ -825,7 +833,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnTransferCompleted(object? sender, TransferCompletedEventArgs e)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        // Use BeginInvoke for consistency
+        Application.Current.Dispatcher.BeginInvoke(() =>
         {
             IsTransferring = false;
             CurrentTransferProgress = 0;
