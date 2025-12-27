@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -41,6 +42,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private GameSyncInfo? _selectedSyncItem;
 
     [ObservableProperty]
+    private GameInfo? _selectedPeerGame;
+
+    [ObservableProperty]
+    private TransferState? _selectedIncompleteTransfer;
+
+    [ObservableProperty]
     private double _currentTransferProgress;
 
     [ObservableProperty]
@@ -55,6 +62,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
+    public ObservableCollection<GameInfo> AvailableFromPeers { get; } = [];
+    public ObservableCollection<TransferState> IncompleteTransfers { get; } = [];
 
     public MainViewModel()
     {
@@ -96,10 +105,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             StatusMessage = $"Found {games.Count} installed games";
 
+            // Scan for incomplete transfers
+            await ScanIncompleteTransfersAsync();
+
             // Update network peers with our game list
             if (IsNetworkActive)
             {
                 await _networkService.UpdateLocalGamesAsync(games);
+            }
+
+            // Update available syncs if we have peers
+            if (NetworkPeers.Count > 0)
+            {
+                UpdateAvailableSyncs();
+                UpdateAvailableFromPeers();
             }
         }
         catch (Exception ex)
@@ -110,6 +129,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsScanning = false;
         }
+    }
+
+    private async Task ScanIncompleteTransfersAsync()
+    {
+        await Task.Run(() =>
+        {
+            var libraryPaths = _steamScanner.GetLibraryFolders()
+                .Select(f => Path.Combine(f, "common"))
+                .Where(Directory.Exists)
+                .ToList();
+
+            var incomplete = _fileTransferService.FindIncompleteTransfers(libraryPaths);
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                IncompleteTransfers.Clear();
+                foreach (var transfer in incomplete)
+                {
+                    IncompleteTransfers.Add(transfer);
+                }
+
+                if (incomplete.Count > 0)
+                {
+                    StatusMessage = $"Found {incomplete.Count} incomplete transfer(s) that can be resumed";
+                }
+            });
+        });
     }
 
     [RelayCommand]
@@ -146,6 +192,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         
         NetworkPeers.Clear();
         AvailableSyncs.Clear();
+        AvailableFromPeers.Clear();
         
         IsNetworkActive = false;
         StatusMessage = "Network discovery stopped";
@@ -241,14 +288,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsTransferring = true;
             SelectedSyncItem.Status = SyncStatus.Syncing;
-            StatusMessage = $"Syncing {SelectedSyncItem.LocalGame.Name}...";
 
-            var success = await _fileTransferService.RequestGameTransferAsync(
-                SelectedSyncItem.RemotePeer,
-                SelectedSyncItem.RemoteGame,
-                SelectedSyncItem.LocalGame);
+            if (SelectedSyncItem.IsNewDownload)
+            {
+                StatusMessage = $"Downloading {SelectedSyncItem.RemoteGame.Name}...";
+                
+                // Get a valid Steam library path for new downloads
+                var targetPath = GetTargetPathForNewGame(SelectedSyncItem.RemoteGame);
+                
+                var success = await _fileTransferService.RequestNewGameDownloadAsync(
+                    SelectedSyncItem.RemotePeer,
+                    SelectedSyncItem.RemoteGame,
+                    targetPath);
 
-            SelectedSyncItem.Status = success ? SyncStatus.Completed : SyncStatus.Failed;
+                SelectedSyncItem.Status = success ? SyncStatus.Completed : SyncStatus.Failed;
+            }
+            else
+            {
+                StatusMessage = $"Updating {SelectedSyncItem.LocalGame!.Name}...";
+
+                var success = await _fileTransferService.RequestGameTransferAsync(
+                    SelectedSyncItem.RemotePeer,
+                    SelectedSyncItem.RemoteGame,
+                    SelectedSyncItem.LocalGame!);
+
+                SelectedSyncItem.Status = success ? SyncStatus.Completed : SyncStatus.Failed;
+            }
         }
         catch (Exception ex)
         {
@@ -262,11 +327,123 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private async Task DownloadNewGameAsync()
+    {
+        if (SelectedPeerGame == null || SelectedPeer == null || IsTransferring)
+            return;
+
+        // Check if we already have this game
+        if (LocalGames.Any(g => g.AppId == SelectedPeerGame.AppId))
+        {
+            StatusMessage = "You already have this game installed. Check the Updates panel.";
+            return;
+        }
+
+        try
+        {
+            IsTransferring = true;
+            StatusMessage = $"Downloading {SelectedPeerGame.Name} from {SelectedPeer.DisplayName}...";
+
+            var targetPath = GetTargetPathForNewGame(SelectedPeerGame);
+
+            var success = await _fileTransferService.RequestNewGameDownloadAsync(
+                SelectedPeer,
+                SelectedPeerGame,
+                targetPath);
+
+            if (success)
+            {
+                StatusMessage = $"Download complete: {SelectedPeerGame.Name}";
+                // Refresh local games to include the new one
+                await ScanLocalGamesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Download error: {ex.Message}";
+        }
+        finally
+        {
+            IsTransferring = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ResumeTransferAsync()
+    {
+        if (SelectedIncompleteTransfer == null || IsTransferring)
+            return;
+
+        // Find a peer that has this game
+        var peer = NetworkPeers.FirstOrDefault(p => 
+            p.Games.Any(g => g.AppId == SelectedIncompleteTransfer.GameAppId));
+
+        if (peer == null)
+        {
+            // Try to connect to the original peer
+            var connected = await _networkService.ConnectToPeerByIpAsync(SelectedIncompleteTransfer.SourcePeerIp);
+            if (connected)
+            {
+                peer = NetworkPeers.FirstOrDefault(p => p.IpAddress == SelectedIncompleteTransfer.SourcePeerIp);
+            }
+        }
+
+        if (peer == null)
+        {
+            StatusMessage = $"Cannot find a peer with {SelectedIncompleteTransfer.GameName}. " +
+                           $"Try connecting to {SelectedIncompleteTransfer.SourcePeerIp}";
+            return;
+        }
+
+        try
+        {
+            IsTransferring = true;
+            StatusMessage = $"Resuming download of {SelectedIncompleteTransfer.GameName}...";
+
+            var success = await _fileTransferService.ResumeTransferAsync(SelectedIncompleteTransfer, peer);
+
+            if (success)
+            {
+                IncompleteTransfers.Remove(SelectedIncompleteTransfer);
+                await ScanLocalGamesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Resume error: {ex.Message}";
+        }
+        finally
+        {
+            IsTransferring = false;
+        }
+    }
+
+    [RelayCommand]
     private void CancelTransfer()
     {
         // TODO: Implement cancellation
-        StatusMessage = "Transfer cancelled";
+        StatusMessage = "Transfer cancelled (will be saved for resume)";
         IsTransferring = false;
+    }
+
+    private string GetTargetPathForNewGame(GameInfo game)
+    {
+        // Get the first Steam library path
+        var libraryFolders = _steamScanner.GetLibraryFolders();
+        if (libraryFolders.Count == 0)
+        {
+            throw new InvalidOperationException("No Steam library folders found");
+        }
+
+        var commonPath = Path.Combine(libraryFolders[0], "common");
+        if (!Directory.Exists(commonPath))
+        {
+            Directory.CreateDirectory(commonPath);
+        }
+
+        // Create a safe folder name from the game name
+        var safeName = string.Join("_", game.Name.Split(Path.GetInvalidFileNameChars()));
+        return Path.Combine(commonPath, safeName);
     }
 
     private void OnPeerDiscovered(object? sender, NetworkPeer peer)
@@ -290,6 +467,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 NetworkPeers.Remove(existing);
                 StatusMessage = $"Peer offline: {peer.DisplayName}";
+                
+                UpdateAvailableSyncs();
+                UpdateAvailableFromPeers();
             }
         });
     }
@@ -305,8 +485,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 existing.Games = peer.Games;
             }
 
-            // Recalculate available syncs
+            // Recalculate available syncs and new games
             UpdateAvailableSyncs();
+            UpdateAvailableFromPeers();
             
             StatusMessage = $"Received {peer.Games.Count} games from {peer.DisplayName}";
         });
@@ -354,6 +535,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void UpdateAvailableFromPeers()
+    {
+        AvailableFromPeers.Clear();
+
+        // Find games that peers have but we don't
+        var localAppIds = LocalGames.Select(g => g.AppId).ToHashSet();
+
+        foreach (var peer in NetworkPeers)
+        {
+            foreach (var remoteGame in peer.Games)
+            {
+                // Skip if we already have this game or already added it
+                if (localAppIds.Contains(remoteGame.AppId))
+                    continue;
+
+                if (AvailableFromPeers.Any(g => g.AppId == remoteGame.AppId))
+                    continue;
+
+                var gameWithPeerInfo = new GameInfo
+                {
+                    AppId = remoteGame.AppId,
+                    Name = remoteGame.Name,
+                    InstallPath = remoteGame.InstallPath,
+                    SizeOnDisk = remoteGame.SizeOnDisk,
+                    BuildId = remoteGame.BuildId,
+                    Platform = remoteGame.Platform,
+                    IsInstalled = false,
+                    IsAvailableFromPeer = true
+                };
+
+                AvailableFromPeers.Add(gameWithPeerInfo);
+            }
+        }
+
+        if (AvailableFromPeers.Count > 0)
+        {
+            StatusMessage = $"Found {AvailableFromPeers.Count} games available from peers";
+        }
+    }
+
     private void OnTransferProgress(object? sender, TransferProgressEventArgs e)
     {
         Application.Current.Dispatcher.Invoke(() =>
@@ -380,11 +601,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (e.Success)
             {
-                StatusMessage = $"Transfer completed! {FormatBytes(e.TotalBytesTransferred)} transferred";
+                var action = e.IsNewDownload ? "Download" : "Update";
+                StatusMessage = $"{action} complete! {FormatBytes(e.TotalBytesTransferred)} transferred";
             }
             else
             {
-                StatusMessage = $"Transfer failed: {e.ErrorMessage}";
+                StatusMessage = $"Transfer failed: {e.ErrorMessage}. Progress saved for resume.";
+                // Refresh incomplete transfers
+                _ = ScanIncompleteTransfersAsync();
             }
         });
     }

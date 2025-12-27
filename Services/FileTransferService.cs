@@ -18,6 +18,7 @@ public class FileTransferService : IDisposable
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
+    private TransferState? _currentTransferState;
 
     /// <summary>
     /// Event raised when transfer progress updates
@@ -52,9 +53,96 @@ public class FileTransferService : IDisposable
     }
 
     /// <summary>
+    /// Scans for incomplete transfers and returns them
+    /// </summary>
+    public List<TransferState> FindIncompleteTransfers(IEnumerable<string> libraryPaths)
+    {
+        var incomplete = new List<TransferState>();
+
+        foreach (var libraryPath in libraryPaths)
+        {
+            try
+            {
+                if (!Directory.Exists(libraryPath))
+                    continue;
+
+                // Look for transfer state files in game directories
+                foreach (var gameDir in Directory.GetDirectories(libraryPath))
+                {
+                    var state = TransferState.Load(gameDir);
+                    if (state != null && state.TransferredBytes < state.TotalBytes)
+                    {
+                        incomplete.Add(state);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error scanning for incomplete transfers: {ex.Message}");
+            }
+        }
+
+        return incomplete;
+    }
+
+    /// <summary>
+    /// Requests a new game download from a remote peer (game not installed locally)
+    /// </summary>
+    public async Task<bool> RequestNewGameDownloadAsync(
+        NetworkPeer peer, 
+        GameInfo remoteGame, 
+        string targetPath,
+        CancellationToken ct = default)
+    {
+        // Create a temporary local game info for the download
+        var localGame = new GameInfo
+        {
+            AppId = remoteGame.AppId,
+            Name = remoteGame.Name,
+            InstallPath = targetPath,
+            BuildId = "0", // No local version
+            IsInstalled = false,
+            IsAvailableFromPeer = true
+        };
+
+        return await RequestGameTransferAsync(peer, remoteGame, localGame, isNewDownload: true, ct: ct);
+    }
+
+    /// <summary>
+    /// Resumes an incomplete transfer
+    /// </summary>
+    public async Task<bool> ResumeTransferAsync(TransferState state, NetworkPeer peer, CancellationToken ct = default)
+    {
+        var remoteGame = new GameInfo
+        {
+            AppId = state.GameAppId,
+            Name = state.GameName,
+            InstallPath = state.TargetPath, // Will use source path from peer
+            BuildId = state.BuildId
+        };
+
+        var localGame = new GameInfo
+        {
+            AppId = state.GameAppId,
+            Name = state.GameName,
+            InstallPath = state.TargetPath,
+            BuildId = "0",
+            IsInstalled = false
+        };
+
+        return await RequestGameTransferAsync(peer, remoteGame, localGame, isNewDownload: state.IsNewDownload, resumeState: state, ct: ct);
+    }
+
+    /// <summary>
     /// Requests a game transfer from a remote peer
     /// </summary>
-    public async Task<bool> RequestGameTransferAsync(NetworkPeer peer, GameInfo remoteGame, GameInfo localGame, CancellationToken ct = default)
+    public async Task<bool> RequestGameTransferAsync(
+        NetworkPeer peer, 
+        GameInfo remoteGame, 
+        GameInfo localGame, 
+        bool isNewDownload = false,
+        TransferState? resumeState = null,
+        CancellationToken ct = default)
     {
         try
         {
@@ -69,7 +157,8 @@ public class FileTransferService : IDisposable
             var request = new FileTransferRequest
             {
                 GameAppId = remoteGame.AppId,
-                GamePath = remoteGame.InstallPath
+                GamePath = remoteGame.InstallPath,
+                IsNewDownload = isNewDownload
             };
             var requestJson = JsonSerializer.Serialize(request);
             writer.Write(requestJson);
@@ -84,18 +173,56 @@ public class FileTransferService : IDisposable
                 return false;
             }
 
-            // Calculate what we need to download (differential sync)
-            var filesToDownload = await GetFilesToDownloadAsync(localGame.InstallPath, manifest.Files);
+            // Calculate what we need to download
+            List<FileTransferInfo> filesToDownload;
             
+            if (resumeState != null)
+            {
+                // Resume: only download files not already completed
+                filesToDownload = manifest.Files
+                    .Where(f => !resumeState.CompletedFiles.Contains(f.RelativePath))
+                    .ToList();
+            }
+            else
+            {
+                // Normal: calculate differential
+                filesToDownload = await GetFilesToDownloadAsync(localGame.InstallPath, manifest.Files);
+            }
+
             long totalBytes = filesToDownload.Sum(f => f.Size);
-            long transferredBytes = 0;
+            long alreadyTransferred = resumeState?.TransferredBytes ?? 0;
+            long transferredBytes = alreadyTransferred;
             var startTime = DateTime.Now;
+
+            // Create/update transfer state
+            _currentTransferState = resumeState ?? new TransferState
+            {
+                GameAppId = remoteGame.AppId,
+                GameName = remoteGame.Name,
+                TargetPath = localGame.InstallPath,
+                SourcePeerIp = peer.IpAddress,
+                SourcePeerName = peer.DisplayName,
+                BuildId = remoteGame.BuildId,
+                TotalBytes = totalBytes + alreadyTransferred,
+                IsNewDownload = isNewDownload
+            };
+
+            // Create target directory if needed
+            if (!Directory.Exists(localGame.InstallPath))
+            {
+                Directory.CreateDirectory(localGame.InstallPath);
+            }
+
+            _currentTransferState.Save();
 
             // Request each file
             foreach (var fileInfo in filesToDownload)
             {
                 if (ct.IsCancellationRequested)
+                {
+                    _currentTransferState.Save();
                     break;
+                }
 
                 // Send file request
                 writer.Write(fileInfo.RelativePath);
@@ -114,10 +241,33 @@ public class FileTransferService : IDisposable
                     Directory.CreateDirectory(localDir);
                 }
 
+                // Check if we can resume this specific file
+                long startOffset = 0;
+                FileMode fileMode = FileMode.Create;
+                
+                if (File.Exists(localFilePath))
+                {
+                    var existingInfo = new FileInfo(localFilePath);
+                    if (existingInfo.Length < fileSize)
+                    {
+                        // Partial file - we could resume, but for simplicity, restart the file
+                        // (resuming mid-file requires protocol changes)
+                        fileMode = FileMode.Create;
+                    }
+                    else if (existingInfo.Length == fileSize)
+                    {
+                        // File already complete, skip
+                        transferredBytes += fileSize;
+                        _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
+                        _currentTransferState.TransferredBytes = transferredBytes;
+                        continue;
+                    }
+                }
+
                 // Download file
-                using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize);
+                await using var fileStream = new FileStream(localFilePath, fileMode, FileAccess.Write, FileShare.None, BufferSize);
                 var buffer = new byte[BufferSize];
-                long remaining = fileSize;
+                long remaining = fileSize - startOffset;
 
                 while (remaining > 0)
                 {
@@ -133,40 +283,70 @@ public class FileTransferService : IDisposable
 
                     // Calculate speed and report progress
                     var elapsed = (DateTime.Now - startTime).TotalSeconds;
-                    var speed = elapsed > 0 ? (long)(transferredBytes / elapsed) : 0;
-                    var progress = totalBytes > 0 ? (double)transferredBytes / totalBytes * 100 : 0;
+                    var speed = elapsed > 0 ? (long)((transferredBytes - alreadyTransferred) / elapsed) : 0;
+                    var progress = _currentTransferState.TotalBytes > 0 
+                        ? (double)transferredBytes / _currentTransferState.TotalBytes * 100 
+                        : 0;
 
                     ProgressChanged?.Invoke(this, new TransferProgressEventArgs
                     {
                         GameAppId = remoteGame.AppId,
                         Progress = progress,
                         TransferredBytes = transferredBytes,
-                        TotalBytes = totalBytes,
+                        TotalBytes = _currentTransferState.TotalBytes,
                         SpeedBytesPerSecond = speed,
                         CurrentFile = fileInfo.RelativePath
                     });
+
+                    // Update state periodically (every 10MB)
+                    if (transferredBytes % (10 * 1024 * 1024) < BufferSize)
+                    {
+                        _currentTransferState.TransferredBytes = transferredBytes;
+                        _currentTransferState.Save();
+                    }
                 }
+
+                // Mark file as complete
+                _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
+                _currentTransferState.TransferredBytes = transferredBytes;
+                _currentTransferState.Save();
             }
 
             // Signal end of transfer
             writer.Write(string.Empty);
 
+            // Check if transfer completed
+            bool success = transferredBytes >= _currentTransferState.TotalBytes;
+            
+            if (success)
+            {
+                // Clean up transfer state file
+                _currentTransferState.Delete();
+            }
+
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
                 GameAppId = remoteGame.AppId,
-                Success = true,
-                TotalBytesTransferred = transferredBytes
+                Success = success,
+                TotalBytesTransferred = transferredBytes,
+                IsNewDownload = isNewDownload
             });
 
-            return true;
+            _currentTransferState = null;
+            return success;
         }
         catch (Exception ex)
         {
+            // Save state for resume
+            _currentTransferState?.Save();
+            _currentTransferState = null;
+
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
                 GameAppId = remoteGame.AppId,
                 Success = false,
-                ErrorMessage = ex.Message
+                ErrorMessage = ex.Message,
+                IsNewDownload = isNewDownload
             });
             return false;
         }
@@ -239,7 +419,7 @@ public class FileTransferService : IDisposable
                     writer.Flush();
 
                     // Stream file content
-                    using var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize);
+                    await using var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize);
                     var buffer = new byte[BufferSize];
                     int bytesRead;
 
@@ -269,6 +449,10 @@ public class FileTransferService : IDisposable
             {
                 try
                 {
+                    // Skip transfer state files
+                    if (file.Name == ".gamesync_transfer")
+                        continue;
+
                     var relativePath = Path.GetRelativePath(gamePath, file.FullName);
                     manifest.Files.Add(new FileTransferInfo
                     {
@@ -374,6 +558,7 @@ public class FileTransferRequest
 {
     public string GameAppId { get; set; } = string.Empty;
     public string GamePath { get; set; } = string.Empty;
+    public bool IsNewDownload { get; set; }
 }
 
 public class FileManifest
@@ -406,4 +591,5 @@ public class TransferCompletedEventArgs : EventArgs
     public bool Success { get; set; }
     public long TotalBytesTransferred { get; set; }
     public string? ErrorMessage { get; set; }
+    public bool IsNewDownload { get; set; }
 }

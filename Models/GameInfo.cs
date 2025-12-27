@@ -41,6 +41,16 @@ public class GameInfo
     public GamePlatform Platform { get; set; } = GamePlatform.Steam;
 
     /// <summary>
+    /// Whether this game is fully installed or just available on peer
+    /// </summary>
+    public bool IsInstalled { get; set; } = true;
+
+    /// <summary>
+    /// Whether this is a new game available from a peer (not in local library)
+    /// </summary>
+    public bool IsAvailableFromPeer { get; set; } = false;
+
+    /// <summary>
     /// Formatted size for display
     /// </summary>
     public string FormattedSize => FormatBytes(SizeOnDisk);

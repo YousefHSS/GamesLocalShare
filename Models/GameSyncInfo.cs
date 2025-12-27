@@ -6,9 +6,9 @@ namespace GamesLocalShare.Models;
 public class GameSyncInfo
 {
     /// <summary>
-    /// The game being synced
+    /// The game being synced (can be null for new downloads)
     /// </summary>
-    public GameInfo LocalGame { get; set; } = null!;
+    public GameInfo? LocalGame { get; set; }
 
     /// <summary>
     /// The remote version of the game
@@ -21,15 +21,21 @@ public class GameSyncInfo
     public NetworkPeer RemotePeer { get; set; } = null!;
 
     /// <summary>
+    /// Whether this is a new game download (not installed locally)
+    /// </summary>
+    public bool IsNewDownload => LocalGame == null || !LocalGame.IsInstalled;
+
+    /// <summary>
     /// Whether the local version is older than remote
     /// </summary>
-    public bool LocalIsOlder => string.Compare(LocalGame.BuildId, RemoteGame.BuildId, StringComparison.Ordinal) < 0
+    public bool LocalIsOlder => LocalGame == null || 
+                                 string.Compare(LocalGame.BuildId, RemoteGame.BuildId, StringComparison.Ordinal) < 0
                                  || LocalGame.LastUpdated < RemoteGame.LastUpdated;
 
     /// <summary>
     /// Whether the remote version is older than local
     /// </summary>
-    public bool RemoteIsOlder => !LocalIsOlder && LocalGame.BuildId != RemoteGame.BuildId;
+    public bool RemoteIsOlder => LocalGame != null && !LocalIsOlder && LocalGame.BuildId != RemoteGame.BuildId;
 
     /// <summary>
     /// Current sync status
@@ -51,6 +57,18 @@ public class GameSyncInfo
     /// </summary>
     public string FormattedSpeed => $"{FormatBytes(TransferSpeed)}/s";
 
+    /// <summary>
+    /// Display name for the sync operation
+    /// </summary>
+    public string DisplayName => RemoteGame.Name;
+
+    /// <summary>
+    /// Description of what this sync will do
+    /// </summary>
+    public string SyncDescription => IsNewDownload 
+        ? "New Download" 
+        : $"Update: {LocalGame?.BuildId} -> {RemoteGame.BuildId}";
+
     private static string FormatBytes(long bytes)
     {
         string[] sizes = ["B", "KB", "MB", "GB"];
@@ -71,5 +89,6 @@ public enum SyncStatus
     Syncing,
     Completed,
     Failed,
-    Cancelled
+    Cancelled,
+    Incomplete  // For resumed downloads
 }
