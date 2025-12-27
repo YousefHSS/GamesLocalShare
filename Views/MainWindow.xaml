@@ -523,6 +523,18 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource MahApps.Brushes.Gray3}" VerticalAlignment="Center"/>
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <!-- High Speed Mode Toggle -->
+                    <ToggleButton Command="{Binding ToggleHighSpeedModeCommand}"
+                                  IsChecked="{Binding HighSpeedMode, Mode=OneWay}"
+                                  Style="{DynamicResource MahApps.Styles.ToggleButton.Square}"
+                                  Width="85" Height="24"
+                                  Margin="0,0,10,0"
+                                  ToolTip="Toggle between WiFi mode (smaller buffers) and High-Speed mode (larger buffers for wired connections)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding HighSpeedMode, Converter={StaticResource BoolToSpeedModeConverter}}" FontSize="10"/>
+                        </StackPanel>
+                    </ToggleButton>
+                    
                     <TextBlock Text="Games Local Share" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     
                     <!-- Log Toggle Button -->

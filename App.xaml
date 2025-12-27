@@ -18,6 +18,7 @@
             <converters:BoolToOnlineConverter x:Key="BoolToOnlineConverter"/>
             <converters:ZeroToVisConverter x:Key="ZeroToVisConverter"/>
             <converters:NullToBoolConverter x:Key="NullToBoolConverter"/>
+            <converters:BoolToSpeedModeConverter x:Key="BoolToSpeedModeConverter"/>
             <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         </ResourceDictionary>
     </Application.Resources>

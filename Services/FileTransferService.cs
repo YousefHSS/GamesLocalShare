@@ -14,10 +14,19 @@ namespace GamesLocalShare.Services;
 public class FileTransferService : IDisposable
 {
     private const int TransferPort = 45679;
-    private const int BufferSize = 4 * 1024 * 1024; // 4MB buffer for maximum throughput
-    private const int SocketBufferSize = 8 * 1024 * 1024; // 8MB socket buffer
-    private const int ConnectionTimeoutMs = 10000; // 10 second connection timeout
-    private const int MaxParallelFiles = 4; // Number of files to transfer in parallel
+    private const int ConnectionTimeoutMs = 10000;
+    private const int MaxParallelFiles = 4;
+    
+    // Adaptive buffer sizes - smaller for WiFi, larger for wired
+    // WiFi typically benefits from smaller buffers due to latency/jitter
+    private const int DefaultBufferSize = 256 * 1024; // 256KB - good balance for WiFi
+    private const int DefaultSocketBufferSize = 512 * 1024; // 512KB socket buffer
+    private const int LargeBufferSize = 4 * 1024 * 1024; // 4MB for high-speed wired
+    private const int LargeSocketBufferSize = 8 * 1024 * 1024; // 8MB for high-speed wired
+
+    // Current buffer sizes (can be adjusted)
+    private int _bufferSize = DefaultBufferSize;
+    private int _socketBufferSize = DefaultSocketBufferSize;
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -41,6 +50,31 @@ public class FileTransferService : IDisposable
     /// Whether a transfer is currently paused
     /// </summary>
     public bool IsPaused => _isPaused;
+
+    /// <summary>
+    /// Whether high-speed mode is enabled (for wired connections)
+    /// </summary>
+    public bool IsHighSpeedMode => _bufferSize == LargeBufferSize;
+
+    /// <summary>
+    /// Sets transfer mode for optimal performance based on connection type.
+    /// Enable for wired/high-speed connections, disable for WiFi.
+    /// </summary>
+    public void SetHighSpeedMode(bool enabled)
+    {
+        if (enabled)
+        {
+            _bufferSize = LargeBufferSize;
+            _socketBufferSize = LargeSocketBufferSize;
+            System.Diagnostics.Debug.WriteLine($"High-speed mode ENABLED: Buffer={_bufferSize / 1024}KB, Socket={_socketBufferSize / 1024}KB");
+        }
+        else
+        {
+            _bufferSize = DefaultBufferSize;
+            _socketBufferSize = DefaultSocketBufferSize;
+            System.Diagnostics.Debug.WriteLine($"WiFi-optimized mode: Buffer={_bufferSize / 1024}KB, Socket={_socketBufferSize / 1024}KB");
+        }
+    }
 
     /// <summary>
     /// Updates the list of local games that can be served to peers
@@ -152,7 +186,6 @@ public class FileTransferService : IDisposable
                 if (!Directory.Exists(libraryPath))
                     continue;
 
-                // Look for transfer state files in game directories
                 foreach (var gameDir in Directory.GetDirectories(libraryPath))
                 {
                     var state = TransferState.Load(gameDir);
@@ -180,13 +213,12 @@ public class FileTransferService : IDisposable
         string targetPath,
         CancellationToken ct = default)
     {
-        // Create a temporary local game info for the download
         var localGame = new GameInfo
         {
             AppId = remoteGame.AppId,
             Name = remoteGame.Name,
             InstallPath = targetPath,
-            BuildId = "0" // No local version
+            BuildId = "0"
         };
 
         return await RequestGameTransferAsync(peer, remoteGame, localGame, isNewDownload: true, ct: ct);
@@ -201,7 +233,7 @@ public class FileTransferService : IDisposable
         {
             AppId = state.GameAppId,
             Name = state.GameName,
-            InstallPath = state.TargetPath, // Will use source path from peer
+            InstallPath = state.TargetPath,
             BuildId = state.BuildId
         };
 
@@ -228,7 +260,6 @@ public class FileTransferService : IDisposable
         TransferState? resumeState = null,
         CancellationToken ct = default)
     {
-        // Create a new cancellation token source for this transfer
         _transferCts?.Dispose();
         _transferCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _isPaused = false;
@@ -240,11 +271,11 @@ public class FileTransferService : IDisposable
             System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
             System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{TransferPort})");
             System.Diagnostics.Debug.WriteLine($"Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
+            System.Diagnostics.Debug.WriteLine($"Buffer: {_bufferSize / 1024}KB, Socket: {_socketBufferSize / 1024}KB");
             System.Diagnostics.Debug.WriteLine($"Resume: {resumeState != null}, CompletedFiles: {resumeState?.CompletedFiles.Count ?? 0}");
             
             using var client = new TcpClient();
             
-            // Configure socket for maximum throughput
             ConfigureSocketForHighPerformance(client);
             
             using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
@@ -272,7 +303,7 @@ public class FileTransferService : IDisposable
             System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} for file transfer");
 
             using var stream = client.GetStream();
-            stream.ReadTimeout = 60000; // Increase timeout for large files
+            stream.ReadTimeout = 60000;
             stream.WriteTimeout = 60000;
             
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
@@ -338,11 +369,10 @@ public class FileTransferService : IDisposable
 
             _currentTransferState.Save();
 
-            System.Diagnostics.Debug.WriteLine($"Starting HIGH-SPEED download of {filesToDownload.Count} files ({totalBytes / 1024 / 1024}MB)");
-            System.Diagnostics.Debug.WriteLine($"Buffer size: {BufferSize / 1024 / 1024}MB, Socket buffer: {SocketBufferSize / 1024 / 1024}MB");
+            System.Diagnostics.Debug.WriteLine($"Starting download of {filesToDownload.Count} files ({totalBytes / 1024 / 1024}MB)");
 
             // Pre-allocate buffer for reuse
-            var buffer = new byte[BufferSize];
+            var buffer = new byte[_bufferSize];
 
             foreach (var fileInfo in filesToDownload)
             {
@@ -376,7 +406,6 @@ public class FileTransferService : IDisposable
                         _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
                         _currentTransferState.TransferredBytes = transferredBytes;
                         
-                        // Discard data from server
                         long discardRemaining = fileSize;
                         while (discardRemaining > 0)
                         {
@@ -389,7 +418,6 @@ public class FileTransferService : IDisposable
                     }
                 }
 
-                // Use optimized file stream for writing
                 await using var fileStream = CreateOptimizedWriteStream(localFilePath);
                 long remaining = fileSize;
                 long lastProgressUpdate = 0;
@@ -414,8 +442,9 @@ public class FileTransferService : IDisposable
                     remaining -= bytesRead;
                     transferredBytes += bytesRead;
 
-                    // Throttle progress updates to every 5MB or 100ms to reduce overhead
-                    if (transferredBytes - lastProgressUpdate > 5 * 1024 * 1024)
+                    // Update progress every 1MB for WiFi (more responsive) or 5MB for wired
+                    var progressInterval = IsHighSpeedMode ? 5 * 1024 * 1024 : 1 * 1024 * 1024;
+                    if (transferredBytes - lastProgressUpdate > progressInterval)
                     {
                         lastProgressUpdate = transferredBytes;
                         
@@ -436,15 +465,14 @@ public class FileTransferService : IDisposable
                         });
                     }
 
-                    // Save state less frequently - every 50MB
-                    if (transferredBytes % (50 * 1024 * 1024) < BufferSize)
+                    // Save state every 50MB
+                    if (transferredBytes % (50 * 1024 * 1024) < _bufferSize)
                     {
                         _currentTransferState.TransferredBytes = transferredBytes;
                         _currentTransferState.Save();
                     }
                 }
 
-                // Ensure file is flushed to disk
                 await fileStream.FlushAsync(_transferCts.Token);
 
                 _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
@@ -469,7 +497,8 @@ public class FileTransferService : IDisposable
 
             var totalElapsed = (DateTime.Now - startTime).TotalSeconds;
             var avgSpeed = totalElapsed > 0 ? (totalTransferred - alreadyTransferred) / totalElapsed : 0;
-            System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred / 1024 / 1024}MB, avgSpeed={avgSpeed / 1024 / 1024:F1}MB/s");
+            var avgSpeedMbps = avgSpeed * 8 / 1_000_000;
+            System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred / 1024 / 1024}MB, avgSpeed={avgSpeed / 1024 / 1024:F1}MB/s ({avgSpeedMbps:F1} Mbps)");
 
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
@@ -534,15 +563,10 @@ public class FileTransferService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Writes the Steam app manifest file to the steamapps folder so Steam recognizes the game
-    /// </summary>
     private async Task WriteAppManifestAsync(string gameInstallPath, string appId, string manifestContent)
     {
         try
         {
-            // Game install path is like: steamapps/common/GameName
-            // We need to write to: steamapps/appmanifest_<appid>.acf
             var commonFolder = Directory.GetParent(gameInstallPath);
             if (commonFolder?.Name != "common")
             {
@@ -558,8 +582,6 @@ public class FileTransferService : IDisposable
             }
             
             var manifestPath = Path.Combine(steamAppsFolder, $"appmanifest_{appId}.acf");
-            
-            // Update the installdir in the manifest to match the actual folder name
             var gameFolderName = Path.GetFileName(gameInstallPath);
             var updatedContent = UpdateInstallDirInManifest(manifestContent, gameFolderName);
             
@@ -572,20 +594,14 @@ public class FileTransferService : IDisposable
         }
     }
     
-    /// <summary>
-    /// Updates the installdir field in the manifest to match the local folder name
-    /// </summary>
     private string UpdateInstallDirInManifest(string manifestContent, string newInstallDir)
     {
-        // The manifest is in VDF format, we need to update the "installdir" field
-        // Simple regex replacement for the installdir line
         var lines = manifestContent.Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
             var trimmed = lines[i].Trim();
             if (trimmed.StartsWith("\"installdir\""))
             {
-                // Replace with the new install dir
                 var indent = lines[i].Substring(0, lines[i].Length - trimmed.Length);
                 lines[i] = $"{indent}\"installdir\"\t\t\"{newInstallDir}\"";
                 break;
@@ -628,7 +644,6 @@ public class FileTransferService : IDisposable
     {
         try
         {
-            // Configure socket for high performance
             ConfigureSocketForHighPerformance(client);
             
             using (client)
@@ -723,8 +738,8 @@ public class FileTransferService : IDisposable
 
                 System.Diagnostics.Debug.WriteLine($"Sent manifest with {manifest.Files.Count} files");
 
-                // Pre-allocate buffer for high-speed transfer
-                var buffer = new byte[BufferSize];
+                // Pre-allocate buffer for transfer
+                var buffer = new byte[_bufferSize];
 
                 while (!ct.IsCancellationRequested)
                 {
@@ -767,7 +782,6 @@ public class FileTransferService : IDisposable
 
                     try
                     {
-                        // Use optimized file stream for reading
                         await using var fileStream = CreateOptimizedReadStream(fullPath);
                         int bytesRead;
 
@@ -775,8 +789,6 @@ public class FileTransferService : IDisposable
                         {
                             await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
                         }
-
-                        // Don't flush after every file - let TCP handle it for better throughput
                     }
                     catch (IOException ex)
                     {
@@ -891,51 +903,48 @@ public class FileTransferService : IDisposable
     }
     
     /// <summary>
-    /// Configures a TcpClient for maximum throughput on LAN
+    /// Configures a TcpClient for optimal throughput
     /// </summary>
-    private static void ConfigureSocketForHighPerformance(TcpClient client)
+    private void ConfigureSocketForHighPerformance(TcpClient client)
     {
-        // Increase socket buffer sizes for high throughput
-        client.SendBufferSize = SocketBufferSize;
-        client.ReceiveBufferSize = SocketBufferSize;
+        client.SendBufferSize = _socketBufferSize;
+        client.ReceiveBufferSize = _socketBufferSize;
         
-        // Disable Nagle's algorithm for lower latency (we're sending large chunks anyway)
-        client.NoDelay = true;
+        // For WiFi: enable Nagle to reduce packet overhead
+        // For wired: disable Nagle for lower latency
+        client.NoDelay = IsHighSpeedMode;
         
-        // Set linger to ensure all data is sent before closing
         client.LingerState = new LingerOption(true, 10);
-        
-        // Keep connection alive
         client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
         
-        System.Diagnostics.Debug.WriteLine($"Socket configured: SendBuffer={client.SendBufferSize/1024/1024}MB, ReceiveBuffer={client.ReceiveBufferSize/1024/1024}MB, NoDelay={client.NoDelay}");
+        System.Diagnostics.Debug.WriteLine($"Socket configured: SendBuffer={client.SendBufferSize / 1024}KB, ReceiveBuffer={client.ReceiveBufferSize / 1024}KB, NoDelay={client.NoDelay}");
     }
 
     /// <summary>
     /// Creates a FileStream optimized for high-performance sequential reading
     /// </summary>
-    private static FileStream CreateOptimizedReadStream(string path)
+    private FileStream CreateOptimizedReadStream(string path)
     {
         return new FileStream(
             path,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
-            BufferSize,
+            _bufferSize,
             FileOptions.SequentialScan | FileOptions.Asynchronous);
     }
 
     /// <summary>
     /// Creates a FileStream optimized for high-performance sequential writing
     /// </summary>
-    private static FileStream CreateOptimizedWriteStream(string path)
+    private FileStream CreateOptimizedWriteStream(string path)
     {
         return new FileStream(
             path,
             FileMode.Create,
             FileAccess.Write,
             FileShare.None,
-            BufferSize,
+            _bufferSize,
             FileOptions.SequentialScan | FileOptions.Asynchronous);
     }
 
@@ -957,7 +966,6 @@ public class FileTransferService : IDisposable
             
             System.Diagnostics.Debug.WriteLine($"Transfer paused by user: {gameName}");
             
-            // Fire event AFTER cancellation
             TransferStopped?.Invoke(this, new TransferStoppedEventArgs
             {
                 GameName = gameName,
@@ -989,7 +997,6 @@ public class FileTransferService : IDisposable
             
             System.Diagnostics.Debug.WriteLine($"Transfer stopped by user: {gameName}");
             
-            // Fire event AFTER cancellation
             TransferStopped?.Invoke(this, new TransferStoppedEventArgs
             {
                 GameName = gameName,
@@ -1016,14 +1023,14 @@ public class FileTransferRequest
     public string GameAppId { get; set; } = string.Empty;
     public string GamePath { get; set; } = string.Empty;
     public bool IsNewDownload { get; set; }
-    public bool IncludeManifest { get; set; } = true; // Request the appmanifest file too
+    public bool IncludeManifest { get; set; } = true;
 }
 
 public class FileManifest
 {
     public string GamePath { get; set; } = string.Empty;
     public List<FileTransferInfo> Files { get; set; } = [];
-    public string? AppManifestContent { get; set; } // The appmanifest_<appid>.acf content
+    public string? AppManifestContent { get; set; }
 }
 
 public class FileTransferInfo

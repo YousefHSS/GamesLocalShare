@@ -80,6 +80,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _showSpeedInMbps = false; // Toggle between MB/s and Mbps
 
+    [ObservableProperty]
+    private bool _highSpeedMode = false; // For wired connections
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
@@ -1029,6 +1032,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         ShowSpeedInMbps = !ShowSpeedInMbps;
         AddLog($"Speed display changed to {(ShowSpeedInMbps ? "Mbps" : "MB/s")}", LogMessageType.Info);
+    }
+
+    [RelayCommand]
+    private void ToggleHighSpeedMode()
+    {
+        HighSpeedMode = !HighSpeedMode;
+        _fileTransferService.SetHighSpeedMode(HighSpeedMode);
+        
+        if (HighSpeedMode)
+        {
+            StatusMessage = "High-speed mode enabled (optimized for wired/Gigabit connections)";
+            AddLog("High-speed mode enabled - larger buffers for wired connections", LogMessageType.Info);
+        }
+        else
+        {
+            StatusMessage = "WiFi mode enabled (optimized for wireless connections)";
+            AddLog("WiFi mode enabled - smaller buffers for better wireless performance", LogMessageType.Info);
+        }
     }
 
     public void Dispose()
