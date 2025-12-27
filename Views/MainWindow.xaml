@@ -83,6 +83,16 @@
                             IsEnabled="{Binding IsScanningPeers, Converter={StaticResource InvertBoolConverter}}">
                         <TextBlock Text="Scan for Peers" VerticalAlignment="Center" Foreground="White"/>
                     </Button>
+
+                    <!-- Configure Firewall Button -->
+                    <Button Command="{Binding ConfigureFirewallCommand}" 
+                            Visibility="{Binding FirewallConfigured, Converter={StaticResource InvertedBoolToVisConverter}}"
+                            Style="{DynamicResource MahApps.Styles.Button.Square}"
+                            Background="#FFEF4444"
+                            Padding="15,8" Margin="10,0,0,0"
+                            ToolTip="Configure Windows Firewall to allow network communication">
+                        <TextBlock Text="? Configure Firewall" VerticalAlignment="Center" Foreground="White" FontWeight="SemiBold"/>
+                    </Button>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -173,8 +183,15 @@
 
                     <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Visibility="{Binding LocalGames.Count, Converter={StaticResource ZeroToVisConverter}}">
-                        <TextBlock Text="Click 'Scan My Games'" FontSize="12" Foreground="{DynamicResource MahApps.Brushes.Gray5}" 
+                        <TextBlock Text="No games found" FontSize="12" Foreground="{DynamicResource MahApps.Brushes.Gray3}" 
                                    HorizontalAlignment="Center"/>
+                        <TextBlock Text="Click 'Scan My Games' above" FontSize="11" Foreground="{DynamicResource MahApps.Brushes.Gray5}" 
+                                   HorizontalAlignment="Center" Margin="0,5,0,10"/>
+                        <Button Command="{Binding ShowTroubleshootInfoCommand}"
+                                Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                Padding="10,5" HorizontalAlignment="Center">
+                            <TextBlock Text="Troubleshoot" FontSize="11"/>
+                        </Button>
                     </StackPanel>
 
                     <mah:ProgressRing Grid.Row="1" IsActive="{Binding IsScanning}" Width="40" Height="40"/>

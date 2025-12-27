@@ -62,6 +62,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _lastError = string.Empty;
 
+    [ObservableProperty]
+    private bool _isAdmin;
+
+    [ObservableProperty]
+    private bool _firewallConfigured;
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
@@ -73,6 +79,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _steamScanner = new SteamLibraryScanner();
         _networkService = new NetworkDiscoveryService();
         _fileTransferService = new FileTransferService();
+
+        // Check admin and firewall status
+        IsAdmin = FirewallHelper.IsRunningAsAdmin();
+        FirewallConfigured = FirewallHelper.CheckFirewallRulesExist();
 
         // Subscribe to network events
         _networkService.PeerDiscovered += OnPeerDiscovered;
@@ -86,6 +96,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _fileTransferService.TransferCompleted += OnTransferCompleted;
 
         LocalIpAddress = _networkService.LocalPeer.IpAddress;
+
+        // Show firewall warning if not configured
+        if (!FirewallConfigured)
+        {
+            StatusMessage = "?? Firewall not configured - click 'Configure Firewall' to fix connection issues";
+        }
     }
 
     private void OnConnectionError(object? sender, string error)
@@ -116,7 +132,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
             });
 
-            StatusMessage = $"Found {games.Count} installed games";
+            if (games.Count == 0)
+            {
+                // Show detailed error info
+                var errors = _steamScanner.ScanErrors;
+                if (errors.Count > 0)
+                {
+                    StatusMessage = $"No games found. Steam path: {_steamScanner.LastSteamPath ?? "NOT FOUND"}. Click Troubleshoot.";
+                    LastError = string.Join("\n", errors);
+                }
+                else
+                {
+                    StatusMessage = "No games found. Make sure Steam is installed and has games.";
+                }
+            }
+            else
+            {
+                StatusMessage = $"Found {games.Count} installed games";
+            }
 
             // Scan for incomplete transfers
             await ScanIncompleteTransfersAsync();
@@ -137,10 +170,64 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusMessage = $"Error scanning: {ex.Message}";
+            LastError = ex.ToString();
         }
         finally
         {
             IsScanning = false;
+        }
+    }
+
+    [RelayCommand]
+    private void ShowTroubleshootInfo()
+    {
+        var steamReport = _steamScanner.GetScanReport();
+        var networkReport = FirewallHelper.GetNetworkDiagnostics();
+        var fullReport = $"{steamReport}\n\n{networkReport}";
+        
+        MessageBox.Show(fullReport, "Troubleshooting Report", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    [RelayCommand]
+    private void ConfigureFirewall()
+    {
+        if (!FirewallHelper.IsRunningAsAdmin())
+        {
+            var result = MessageBox.Show(
+                "Configuring firewall requires Administrator privileges.\n\n" +
+                "Would you like to restart the application as Administrator?",
+                "Administrator Required",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                FirewallHelper.RestartAsAdmin();
+            }
+            return;
+        }
+
+        var (success, message) = FirewallHelper.AddFirewallRules();
+        
+        if (success)
+        {
+            FirewallConfigured = true;
+            StatusMessage = "? Firewall configured successfully!";
+            MessageBox.Show(
+                "Firewall rules have been added successfully!\n\n" +
+                "You should now be able to discover peers and share games.",
+                "Firewall Configured",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        else
+        {
+            StatusMessage = $"Firewall configuration failed: {message}";
+            MessageBox.Show(
+                $"Failed to configure firewall:\n\n{message}",
+                "Firewall Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
@@ -176,13 +263,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
+            // Check firewall first
+            if (!FirewallConfigured)
+            {
+                StatusMessage = "?? Firewall not configured - peers may not be able to connect to you";
+            }
+
             StatusMessage = "Starting network discovery...";
             
             await _networkService.StartAsync();
             await _fileTransferService.StartListeningAsync();
             
             IsNetworkActive = true;
-            StatusMessage = "Network discovery active - Looking for peers...";
+            StatusMessage = FirewallConfigured 
+                ? "Network discovery active - Looking for peers..." 
+                : "Network active (?? firewall not configured - click Configure Firewall)";
 
             // Share our games with the network
             if (LocalGames.Count > 0)
@@ -232,7 +327,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             
             StatusMessage = foundCount > 0 
                 ? $"Scan complete. Found {foundCount} peer(s)." 
-                : "Scan complete. No peers found. Make sure the app is running on other computers and firewall allows connections.";
+                : "No peers found. Make sure the app is running on other computers and firewall is configured on BOTH computers.";
         }
         catch (Exception ex)
         {
@@ -272,7 +367,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                StatusMessage = $"Could not connect to {ManualPeerIp}. Check: 1) App is running on that PC 2) Firewall allows port 45678 3) Both PCs are on same network";
+                StatusMessage = $"Could not connect to {ManualPeerIp}. Make sure firewall is configured on BOTH computers!";
             }
         }
         catch (Exception ex)

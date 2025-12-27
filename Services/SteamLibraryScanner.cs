@@ -12,34 +12,97 @@ namespace GamesLocalShare.Services;
 public class SteamLibraryScanner
 {
     private string? _steamPath;
+    private readonly List<string> _scanErrors = [];
 
     /// <summary>
-    /// Gets the Steam installation path from registry
+    /// Gets any errors that occurred during the last scan
+    /// </summary>
+    public IReadOnlyList<string> ScanErrors => _scanErrors;
+
+    /// <summary>
+    /// Gets the last detected Steam path
+    /// </summary>
+    public string? LastSteamPath => _steamPath;
+
+    /// <summary>
+    /// Gets the Steam installation path from registry or common locations
     /// </summary>
     public string? GetSteamPath()
     {
         if (_steamPath != null)
             return _steamPath;
 
+        _scanErrors.Clear();
+
+        // Method 1: Try registry (64-bit)
         try
         {
-            // Try 64-bit registry first
             using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam");
             _steamPath = key?.GetValue("InstallPath") as string;
-
-            if (string.IsNullOrEmpty(_steamPath))
+            if (!string.IsNullOrEmpty(_steamPath) && Directory.Exists(_steamPath))
             {
-                // Try 32-bit registry
-                using var key32 = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam");
-                _steamPath = key32?.GetValue("InstallPath") as string;
+                return _steamPath;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Registry access failed
+            _scanErrors.Add($"Registry (64-bit) access failed: {ex.Message}");
         }
 
-        return _steamPath;
+        // Method 2: Try registry (32-bit)
+        try
+        {
+            using var key32 = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam");
+            _steamPath = key32?.GetValue("InstallPath") as string;
+            if (!string.IsNullOrEmpty(_steamPath) && Directory.Exists(_steamPath))
+            {
+                return _steamPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            _scanErrors.Add($"Registry (32-bit) access failed: {ex.Message}");
+        }
+
+        // Method 3: Try current user registry
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Valve\Steam");
+            _steamPath = key?.GetValue("SteamPath") as string;
+            if (!string.IsNullOrEmpty(_steamPath) && Directory.Exists(_steamPath))
+            {
+                return _steamPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            _scanErrors.Add($"Registry (CurrentUser) access failed: {ex.Message}");
+        }
+
+        // Method 4: Try common installation paths
+        var commonPaths = new[]
+        {
+            @"C:\Program Files (x86)\Steam",
+            @"C:\Program Files\Steam",
+            @"D:\Steam",
+            @"D:\Program Files (x86)\Steam",
+            @"E:\Steam",
+            @"E:\Program Files (x86)\Steam",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam"),
+        };
+
+        foreach (var path in commonPaths)
+        {
+            if (Directory.Exists(path) && File.Exists(Path.Combine(path, "steam.exe")))
+            {
+                _steamPath = path;
+                return _steamPath;
+            }
+        }
+
+        _scanErrors.Add("Could not find Steam installation in registry or common locations");
+        return null;
     }
 
     /// <summary>
@@ -51,12 +114,21 @@ public class SteamLibraryScanner
         var steamPath = GetSteamPath();
 
         if (string.IsNullOrEmpty(steamPath))
+        {
+            _scanErrors.Add("Steam path not found - cannot get library folders");
             return folders;
+        }
 
         // The main steamapps folder
         var mainSteamApps = Path.Combine(steamPath, "steamapps");
         if (Directory.Exists(mainSteamApps))
+        {
             folders.Add(mainSteamApps);
+        }
+        else
+        {
+            _scanErrors.Add($"Main steamapps folder not found: {mainSteamApps}");
+        }
 
         // Parse libraryfolders.vdf for additional library locations
         var libraryFoldersPath = Path.Combine(mainSteamApps, "libraryfolders.vdf");
@@ -86,8 +158,12 @@ public class SteamLibraryScanner
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error parsing libraryfolders.vdf: {ex.Message}");
+                _scanErrors.Add($"Error parsing libraryfolders.vdf: {ex.Message}");
             }
+        }
+        else
+        {
+            _scanErrors.Add($"libraryfolders.vdf not found: {libraryFoldersPath}");
         }
 
         return folders;
@@ -100,31 +176,84 @@ public class SteamLibraryScanner
     {
         return await Task.Run(() =>
         {
+            _scanErrors.Clear();
             var games = new List<GameInfo>();
             var libraryFolders = GetLibraryFolders();
 
+            if (libraryFolders.Count == 0)
+            {
+                _scanErrors.Add("No Steam library folders found");
+                return games;
+            }
+
             foreach (var folder in libraryFolders)
             {
-                var manifestFiles = Directory.GetFiles(folder, "appmanifest_*.acf");
-                foreach (var manifestPath in manifestFiles)
+                try
                 {
-                    try
+                    var manifestFiles = Directory.GetFiles(folder, "appmanifest_*.acf");
+                    
+                    if (manifestFiles.Length == 0)
                     {
-                        var game = ParseAppManifest(manifestPath, folder);
-                        if (game != null && !string.IsNullOrEmpty(game.Name))
+                        _scanErrors.Add($"No app manifests found in: {folder}");
+                        continue;
+                    }
+
+                    foreach (var manifestPath in manifestFiles)
+                    {
+                        try
                         {
-                            games.Add(game);
+                            var game = ParseAppManifest(manifestPath, folder);
+                            if (game != null && !string.IsNullOrEmpty(game.Name))
+                            {
+                                games.Add(game);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _scanErrors.Add($"Error parsing {Path.GetFileName(manifestPath)}: {ex.Message}");
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Error parsing manifest {manifestPath}: {ex.Message}");
-                    }
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _scanErrors.Add($"Access denied to folder {folder}: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    _scanErrors.Add($"Error scanning folder {folder}: {ex.Message}");
                 }
             }
 
             return games.OrderBy(g => g.Name).ToList();
         });
+    }
+
+    /// <summary>
+    /// Gets a detailed scan report for troubleshooting
+    /// </summary>
+    public string GetScanReport()
+    {
+        var report = new System.Text.StringBuilder();
+        report.AppendLine("=== Steam Library Scan Report ===");
+        report.AppendLine($"Steam Path: {_steamPath ?? "NOT FOUND"}");
+        report.AppendLine($"Library Folders Found: {GetLibraryFolders().Count}");
+        
+        foreach (var folder in GetLibraryFolders())
+        {
+            report.AppendLine($"  - {folder}");
+        }
+
+        if (_scanErrors.Count > 0)
+        {
+            report.AppendLine();
+            report.AppendLine("Errors/Warnings:");
+            foreach (var error in _scanErrors)
+            {
+                report.AppendLine($"  ! {error}");
+            }
+        }
+
+        return report.ToString();
     }
 
     /// <summary>
@@ -174,7 +303,8 @@ public class SteamLibraryScanner
             BuildId = buildId ?? "unknown",
             SizeOnDisk = sizeOnDisk,
             LastUpdated = lastUpdated,
-            Platform = GamePlatform.Steam
+            Platform = GamePlatform.Steam,
+            IsInstalled = Directory.Exists(installPath)
         };
     }
 
