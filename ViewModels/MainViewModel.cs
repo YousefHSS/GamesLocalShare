@@ -239,27 +239,50 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var (success, message) = FirewallHelper.AddFirewallRules();
-        
-        if (success)
+        // Show options
+        var choice = MessageBox.Show(
+            "Firewall Configuration Options:\n\n" +
+            "YES = Add firewall rules (recommended)\n" +
+            "NO = Show detailed firewall diagnostics\n" +
+            "CANCEL = Cancel",
+            "Configure Firewall",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Question);
+
+        if (choice == MessageBoxResult.Yes)
         {
-            FirewallConfigured = true;
-            StatusMessage = "? Firewall configured successfully!";
-            MessageBox.Show(
-                "Firewall rules have been added successfully!\n\n" +
-                "You should now be able to discover peers and share games.",
-                "Firewall Configured",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            var (success, message) = FirewallHelper.AddFirewallRules();
+            
+            if (success)
+            {
+                FirewallConfigured = true;
+                StatusMessage = "? Firewall configured successfully!";
+                MessageBox.Show(
+                    "Firewall rules have been added successfully!\n\n" +
+                    "Added rules:\n" +
+                    "• Program-based rule (allows all GamesLocalShare traffic)\n" +
+                    "• UDP 45677 (Discovery)\n" +
+                    "• TCP 45678 (Game List)\n" +
+                    "• TCP 45679 (File Transfer)\n\n" +
+                    "If connections STILL fail, you may have third-party security software\n" +
+                    "(antivirus/firewall) that needs separate configuration.",
+                    "Firewall Configured",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            else
+            {
+                StatusMessage = $"Firewall configuration failed: {message}";
+                MessageBox.Show(
+                    $"Failed to configure firewall:\n\n{message}",
+                    "Firewall Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
-        else
+        else if (choice == MessageBoxResult.No)
         {
-            StatusMessage = $"Firewall configuration failed: {message}";
-            MessageBox.Show(
-                $"Failed to configure firewall:\n\n{message}",
-                "Firewall Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ShowTroubleshootInfo();
         }
     }
 
