@@ -34,20 +34,21 @@ public class LogMessage
         LogMessageType.Error => "#EF4444",    // Red
         LogMessageType.Warning => "#F59E0B",  // Orange
         LogMessageType.Transfer => "#8B5CF6", // Purple
+        LogMessageType.Network => "#3B82F6",  // Blue
         _ => "#9CA3AF"                        // Gray
     };
 
     /// <summary>
-    /// Icon based on message type
+    /// Icon based on message type (using ASCII-safe characters)
     /// </summary>
     public string TypeIcon => Type switch
     {
-        LogMessageType.Success => "?",
-        LogMessageType.Error => "?",
-        LogMessageType.Warning => "?",
-        LogMessageType.Transfer => "?",
-        LogMessageType.Network => "??",
-        _ => "•"
+        LogMessageType.Success => "[OK]",
+        LogMessageType.Error => "[X]",
+        LogMessageType.Warning => "[!]",
+        LogMessageType.Transfer => "[>]",
+        LogMessageType.Network => "[~]",
+        _ => "[*]"
     };
 
     public LogMessage() { }
