@@ -15,6 +15,7 @@ public partial class App : Application
         // Check for command line arguments - if we were restarted to configure firewall
         if (e.Args.Contains("--configure-firewall"))
         {
+            // We're running as admin to configure firewall
             ConfigureFirewallAndContinue();
             return;
         }
@@ -29,15 +30,15 @@ public partial class App : Application
     private void PromptForFirewallConfiguration()
     {
         var result = MessageBox.Show(
-            "?? Firewall Configuration Required\n\n" +
-            "GamesLocalShare needs to open firewall ports to:\n" +
-            "• Discover other computers on your network\n" +
-            "• Share your game list with peers\n" +
-            "• Transfer game files\n\n" +
-            "Without this, other computers won't be able to connect to you.\n\n" +
-            "Configure firewall now? (Recommended)\n" +
-            "(Requires Administrator privileges - you'll be prompted)",
-            "GamesLocalShare - First Time Setup",
+            "?? FIREWALL CONFIGURATION REQUIRED\n\n" +
+            "GamesLocalShare needs to open firewall ports so other computers can:\n\n" +
+            "• Discover this computer on the network\n" +
+            "• See your game list\n" +
+            "• Download games FROM you\n\n" +
+            "WITHOUT THIS: You can download from others, but they CANNOT download from you.\n\n" +
+            "Configure firewall now?\n" +
+            "(You will be prompted for Administrator permission)",
+            "GamesLocalShare - Firewall Setup Required",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.Yes);
@@ -52,45 +53,67 @@ public partial class App : Application
             else
             {
                 // Need to restart as admin
-                var adminResult = MessageBox.Show(
-                    "The application needs to restart with Administrator privileges to configure the firewall.\n\n" +
-                    "Click OK to restart as Administrator.",
-                    "Administrator Required",
-                    MessageBoxButton.OKCancel,
-                    MessageBoxImage.Information);
-
-                if (adminResult == MessageBoxResult.OK)
+                try
                 {
                     FirewallHelper.RestartAsAdmin();
-                    // App will exit and restart
+                    // App will exit and restart as admin
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        $"Failed to restart as Administrator:\n\n{ex.Message}\n\n" +
+                        "Please right-click the application and select 'Run as administrator', " +
+                        "then click 'Configure Firewall' button.",
+                        "Administrator Access Failed",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
                 }
             }
         }
         else
         {
             MessageBox.Show(
-                "Firewall was not configured.\n\n" +
-                "You can configure it later by clicking the '? Configure Firewall' button.\n\n" +
-                "Note: Without firewall configuration, other computers cannot download games from you.",
+                "Firewall was NOT configured.\n\n" +
+                "?? Other computers will NOT be able to download games from you!\n\n" +
+                "You can configure it later:\n" +
+                "• Click the red '? Configure Firewall' button in the app\n" +
+                "• Or run the app as Administrator",
                 "Firewall Not Configured",
                 MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                MessageBoxImage.Warning);
         }
     }
 
     private void ConfigureFirewallAndContinue()
     {
+        var isAdmin = FirewallHelper.IsRunningAsAdmin();
+        
+        if (!isAdmin)
+        {
+            MessageBox.Show(
+                "Not running as Administrator!\n\n" +
+                "Please right-click the application and select 'Run as administrator'.",
+                "Administrator Required",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
         var (success, message) = FirewallHelper.AddFirewallRules();
         
         if (success)
         {
+            // Verify the rules are actually working
+            var verified = FirewallHelper.CheckFirewallRulesExist();
+            
             MessageBox.Show(
-                "? Firewall configured successfully!\n\n" +
-                "Ports opened:\n" +
+                "? FIREWALL CONFIGURED SUCCESSFULLY!\n\n" +
+                "Ports opened for incoming connections:\n" +
                 "• UDP 45677 - Peer discovery\n" +
                 "• TCP 45678 - Game list sharing\n" +
                 "• TCP 45679 - File transfers\n\n" +
-                "You can now share games with other computers on your network.",
+                $"Verification: {(verified ? "PASSED ?" : "Please restart the app")}\n\n" +
+                "Other computers can now download games from you!",
                 "Firewall Configured",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -98,14 +121,16 @@ public partial class App : Application
         else
         {
             MessageBox.Show(
-                $"? Failed to configure firewall:\n\n{message}\n\n" +
-                "You may need to manually add firewall rules.\n\n" +
-                "Run this in Administrator PowerShell:\n" +
-                "netsh advfirewall firewall add rule name=\"GamesLocalShare\" dir=in action=allow protocol=TCP localport=45678,45679\n" +
-                "netsh advfirewall firewall add rule name=\"GamesLocalShare UDP\" dir=in action=allow protocol=UDP localport=45677",
+                $"? FIREWALL CONFIGURATION FAILED\n\n" +
+                $"Error: {message}\n\n" +
+                "MANUAL FIX - Run this in Administrator PowerShell:\n\n" +
+                "netsh advfirewall firewall add rule name=\"GamesLocalShare UDP\" dir=in action=allow protocol=UDP localport=45677 profile=any\n\n" +
+                "netsh advfirewall firewall add rule name=\"GamesLocalShare TCP1\" dir=in action=allow protocol=TCP localport=45678 profile=any\n\n" +
+                "netsh advfirewall firewall add rule name=\"GamesLocalShare TCP2\" dir=in action=allow protocol=TCP localport=45679 profile=any\n\n" +
+                "If you have antivirus software (Norton, McAfee, Kaspersky, etc.), you may also need to allow these ports in that software.",
                 "Firewall Configuration Failed",
                 MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                MessageBoxImage.Error);
         }
     }
 }
