@@ -7,8 +7,10 @@
         xmlns:vm="clr-namespace:GamesLocalShare.ViewModels"
         mc:Ignorable="d"
         Title="Games Local Share - LAN Game Sync" 
-        Height="800" Width="1400"
+        Height="700" Width="1200"
+        MinHeight="500" MinWidth="900"
         WindowStartupLocation="CenterScreen"
+        WindowState="Normal"
         GlowBrush="{DynamicResource MahApps.Brushes.Accent}"
         BorderThickness="1">
 
@@ -97,7 +99,17 @@
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Your IP: " Foreground="White" Opacity="0.8"/>
-                    <TextBlock Text="{Binding LocalIpAddress}" FontWeight="Bold" Foreground="White"/>
+                    <!-- Clickable IP address to copy -->
+                    <Button Command="{Binding CopyLocalIpToClipboardCommand}"
+                            Style="{DynamicResource MahApps.Styles.Button.Square}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Padding="2,0"
+                            Cursor="Hand"
+                            ToolTip="Click to copy IP address">
+                        <TextBlock Text="{Binding LocalIpAddress}" FontWeight="Bold" Foreground="White" 
+                                   TextDecorations="Underline"/>
+                    </Button>
                     <Ellipse Width="12" Height="12" Margin="15,0,5,0">
                         <Ellipse.Style>
                             <Style TargetType="Ellipse">
@@ -135,13 +147,13 @@
         <!-- Main Content - 4 Panels -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="250"/>
+                <ColumnDefinition Width="*" MinWidth="200"/>
                 <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*" MinWidth="280"/>
+                <ColumnDefinition Width="*" MinWidth="220"/>
                 <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*" MinWidth="280"/>
+                <ColumnDefinition Width="*" MinWidth="220"/>
                 <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*" MinWidth="250"/>
+                <ColumnDefinition Width="*" MinWidth="200"/>
             </Grid.ColumnDefinitions>
 
             <!-- Panel 1: My Games -->
@@ -154,7 +166,7 @@
 
                     <Border Background="{DynamicResource MahApps.Brushes.Accent}" Padding="8" CornerRadius="5,5,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="My Games" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock Text="?? My Games" FontSize="13" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding LocalGames.Count, StringFormat=' ({0})'}" 
                                        FontSize="13" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
@@ -165,6 +177,17 @@
                              SelectedItem="{Binding SelectedLocalGame}"
                              Background="Transparent"
                              BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="Open Game Folder" Command="{Binding DataContext.OpenGameFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Padding="6" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
@@ -214,7 +237,7 @@
                     <Border Background="{DynamicResource MahApps.Brushes.Accent2}" Padding="8" CornerRadius="5,5,0,0">
                         <Grid>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Network Peers" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                                <TextBlock Text="??? Network Peers" FontSize="13" FontWeight="Bold" Foreground="White"/>
                                 <TextBlock Text="{Binding NetworkPeers.Count, StringFormat=' ({0})'}" 
                                            FontSize="13" Foreground="White" Opacity="0.8"/>
                             </StackPanel>
@@ -225,14 +248,14 @@
                                         Padding="8,2"
                                         Margin="0,0,5,0"
                                         ToolTip="Test connection to selected peer (both ports)">
-                                    <TextBlock Text="?? Test" FontSize="11" Foreground="White"/>
+                                    <TextBlock Text="Test" FontSize="11" Foreground="White"/>
                                 </Button>
                                 <Button Command="{Binding RefreshAllPeersCommand}"
                                         Style="{DynamicResource MahApps.Styles.Button.Square}"
                                         Background="Transparent"
                                         Padding="8,2"
                                         ToolTip="Refresh game lists from all peers">
-                                    <TextBlock Text="? Refresh" FontSize="11" Foreground="White"/>
+                                    <TextBlock Text="Refresh" FontSize="11" Foreground="White"/>
                                 </Button>
                             </StackPanel>
                         </Grid>
@@ -266,6 +289,19 @@
                              SelectedItem="{Binding SelectedPeer}"
                              Background="Transparent"
                              BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="Copy IP Address" Command="{Binding DataContext.CopyPeerIpCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Test Connection" Command="{Binding DataContext.TestConnectionToPeerCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Refresh Games" Command="{Binding DataContext.RefreshPeerGamesCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Padding="6" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
@@ -294,7 +330,7 @@
                     <!-- New Games Available Header -->
                     <Border Grid.Row="3" Background="#FF8B5CF6" Padding="8">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="New Games from Peers" FontSize="12" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock Text="?? New Games from Peers" FontSize="12" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding AvailableFromPeers.Count, StringFormat=' ({0})'}" 
                                        FontSize="12" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
@@ -306,6 +342,17 @@
                              SelectedItem="{Binding SelectedPeerGame}"
                              Background="Transparent"
                              BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="Download Game" Command="{Binding DataContext.DownloadNewGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Padding="6" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
@@ -344,7 +391,7 @@
 
                     <Border Background="{DynamicResource MahApps.Brushes.Accent3}" Padding="8" CornerRadius="5,5,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Updates Available" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock Text="?? Updates Available" FontSize="13" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding AvailableSyncs.Count, StringFormat=' ({0})'}" 
                                        FontSize="13" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
@@ -355,6 +402,17 @@
                              SelectedItem="{Binding SelectedSyncItem}"
                              Background="Transparent"
                              BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="Download Update" Command="{Binding DataContext.StartSyncCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Padding="8" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
@@ -363,7 +421,7 @@
                                         <Border Background="{DynamicResource MahApps.Brushes.Gray7}" CornerRadius="3" Padding="6,3" Margin="0,4,0,0">
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding LocalGame.BuildId}" Foreground="OrangeRed" FontSize="10" FontWeight="Bold"/>
-                                                <TextBlock Text=" >>> " FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
+                                                <TextBlock Text=" ? " FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
                                                 <TextBlock Text="{Binding RemoteGame.BuildId}" Foreground="LimeGreen" FontSize="10" FontWeight="Bold"/>
                                             </StackPanel>
                                         </Border>
@@ -409,22 +467,25 @@
                                     <TextBlock Text="{Binding CurrentTransferGameName}" FontWeight="SemiBold" FontSize="11" 
                                                Foreground="{DynamicResource MahApps.Brushes.Accent}" Margin="0,0,0,4"/>
                                     <ProgressBar Value="{Binding CurrentTransferProgress}" Height="8" Minimum="0" Maximum="100"/>
-                                    <Grid Margin="0,4,0,0">
-                                        <TextBlock Text="{Binding CurrentTransferFile}" FontSize="10" TextTrimming="CharacterEllipsis" 
-                                                   Foreground="{DynamicResource MahApps.Brushes.Gray3}"/>
-                                        <!-- Speed display - clickable to toggle units -->
-                                        <Button Command="{Binding ToggleSpeedUnitCommand}"
-                                                HorizontalAlignment="Right"
-                                                Style="{DynamicResource MahApps.Styles.Button.Square}"
-                                                Background="Transparent"
-                                                BorderThickness="0"
-                                                Padding="4,0"
-                                                Cursor="Hand"
-                                                ToolTip="Click to toggle between MB/s and Mbps">
-                                            <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="10"
-                                                       Foreground="{DynamicResource MahApps.Brushes.Accent}" FontWeight="SemiBold"/>
-                                        </Button>
-                                    </Grid>
+                                    
+                                    <!-- File name on its own line -->
+                                    <TextBlock Text="{Binding CurrentTransferFile}" FontSize="9" TextTrimming="CharacterEllipsis" 
+                                               Foreground="{DynamicResource MahApps.Brushes.Gray5}" Margin="0,4,0,0"/>
+                                    
+                                    <!-- Speed on its own line - clickable to toggle units -->
+                                    <Button Command="{Binding ToggleSpeedUnitCommand}"
+                                            HorizontalAlignment="Left"
+                                            Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Padding="0"
+                                            Margin="0,2,0,0"
+                                            Cursor="Hand"
+                                            ToolTip="Click to toggle between MB/s and Mbps">
+                                        <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="12"
+                                                   Foreground="{DynamicResource MahApps.Brushes.Accent}" FontWeight="Bold"/>
+                                    </Button>
+                                    
                                     <!-- Pause/Stop buttons -->
                                     <Grid Margin="0,6,0,0">
                                         <Grid.ColumnDefinitions>
@@ -464,7 +525,7 @@
 
                     <Border Background="#FFEF4444" Padding="8" CornerRadius="5,5,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Incomplete" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock Text="?? Incomplete" FontSize="13" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding IncompleteTransfers.Count, StringFormat=' ({0})'}" 
                                        FontSize="13" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
@@ -475,6 +536,19 @@
                              SelectedItem="{Binding SelectedIncompleteTransfer}"
                              Background="Transparent"
                              BorderThickness="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="Resume Download" Command="{Binding DataContext.ResumeTransferCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <Separator/>
+                                            <MenuItem Header="Delete Incomplete Transfer" Command="{Binding DataContext.DeleteIncompleteTransferCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Padding="8" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
@@ -523,26 +597,27 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource MahApps.Brushes.Gray3}" VerticalAlignment="Center"/>
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <!-- High Speed Mode Toggle -->
+                    <!-- High Speed Mode Toggle - improved styling -->
                     <ToggleButton Command="{Binding ToggleHighSpeedModeCommand}"
                                   IsChecked="{Binding HighSpeedMode, Mode=OneWay}"
                                   Style="{DynamicResource MahApps.Styles.ToggleButton.Square}"
+                                  Background="{DynamicResource MahApps.Brushes.Gray8}"
                                   Width="85" Height="24"
                                   Margin="0,0,10,0"
                                   ToolTip="Toggle between WiFi mode (smaller buffers) and High-Speed mode (larger buffers for wired connections)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding HighSpeedMode, Converter={StaticResource BoolToSpeedModeConverter}}" FontSize="10"/>
-                        </StackPanel>
+                        <TextBlock Text="{Binding HighSpeedMode, Converter={StaticResource BoolToSpeedModeConverter}}" 
+                                   FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"/>
                     </ToggleButton>
                     
                     <TextBlock Text="Games Local Share" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     
-                    <!-- Log Toggle Button -->
+                    <!-- Log Toggle Button - improved styling -->
                     <ToggleButton x:Name="LogToggle" 
                                   Style="{DynamicResource MahApps.Styles.ToggleButton.Square}"
+                                  Background="{DynamicResource MahApps.Brushes.Gray8}"
                                   Width="70" Height="24"
                                   ToolTip="Show/Hide Activity Log">
-                        <TextBlock Text="?? Log" FontSize="10"/>
+                        <TextBlock Text="Log" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"/>
                     </ToggleButton>
                 </StackPanel>
             </Grid>

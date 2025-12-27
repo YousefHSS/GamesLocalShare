@@ -1052,6 +1052,96 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    [RelayCommand]
+    private void CopyLocalIpToClipboard()
+    {
+        try
+        {
+            Clipboard.SetText(LocalIpAddress);
+            StatusMessage = $"IP address '{LocalIpAddress}' copied to clipboard";
+            AddLog($"Copied IP to clipboard: {LocalIpAddress}", LogMessageType.Info);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to copy IP: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void OpenGameFolder()
+    {
+        if (SelectedLocalGame == null || string.IsNullOrEmpty(SelectedLocalGame.InstallPath))
+            return;
+
+        try
+        {
+            if (Directory.Exists(SelectedLocalGame.InstallPath))
+            {
+                System.Diagnostics.Process.Start("explorer.exe", SelectedLocalGame.InstallPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to open folder: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void CopyPeerIp()
+    {
+        if (SelectedPeer == null)
+            return;
+
+        try
+        {
+            Clipboard.SetText(SelectedPeer.IpAddress);
+            StatusMessage = $"Copied peer IP: {SelectedPeer.IpAddress}";
+            AddLog($"Copied peer IP to clipboard: {SelectedPeer.IpAddress}", LogMessageType.Info);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to copy IP: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void DeleteIncompleteTransfer()
+    {
+        if (SelectedIncompleteTransfer == null)
+            return;
+
+        var result = MessageBox.Show(
+            $"Delete incomplete transfer for '{SelectedIncompleteTransfer.GameName}'?\n\n" +
+            "This will delete the partially downloaded files and cannot be undone.",
+            "Delete Incomplete Transfer",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (result == MessageBoxResult.Yes)
+        {
+            try
+            {
+                // Delete the transfer state file
+                SelectedIncompleteTransfer.Delete();
+                
+                // Try to delete the partial game folder if it exists
+                if (Directory.Exists(SelectedIncompleteTransfer.TargetPath))
+                {
+                    Directory.Delete(SelectedIncompleteTransfer.TargetPath, true);
+                }
+
+                IncompleteTransfers.Remove(SelectedIncompleteTransfer);
+                StatusMessage = $"Deleted incomplete transfer: {SelectedIncompleteTransfer.GameName}";
+                AddLog($"Deleted incomplete transfer: {SelectedIncompleteTransfer.GameName}", LogMessageType.Warning);
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Failed to delete: {ex.Message}";
+                AddLog($"Failed to delete incomplete transfer: {ex.Message}", LogMessageType.Error);
+            }
+        }
+    }
+
     public void Dispose()
     {
         _networkService.PeerDiscovered -= OnPeerDiscovered;
