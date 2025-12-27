@@ -77,6 +77,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _currentTransferGameName = string.Empty;
 
+    [ObservableProperty]
+    private bool _showSpeedInMbps = false; // Toggle between MB/s and Mbps
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
@@ -920,7 +923,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Application.Current.Dispatcher.BeginInvoke(() =>
         {
             CurrentTransferProgress = e.Progress;
-            CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond);
+            CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond, ShowSpeedInMbps);
             CurrentTransferFile = e.CurrentFile;
 
             if (SelectedSyncItem != null)
@@ -1007,9 +1010,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return $"{size:0.##} {sizes[order]}";
     }
 
-    private static string FormatSpeed(long bytesPerSecond)
+    private static string FormatSpeed(long bytesPerSecond, bool inMbps = false)
     {
-        return $"{FormatBytes(bytesPerSecond)}/s";
+        if (inMbps)
+        {
+            // Convert bytes/sec to megabits/sec (1 byte = 8 bits)
+            double mbps = (bytesPerSecond * 8.0) / (1000.0 * 1000.0); // Using 1000 for network units
+            return $"{mbps:0.#} Mbps";
+        }
+        else
+        {
+            return $"{FormatBytes(bytesPerSecond)}/s";
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleSpeedUnit()
+    {
+        ShowSpeedInMbps = !ShowSpeedInMbps;
+        AddLog($"Speed display changed to {(ShowSpeedInMbps ? "Mbps" : "MB/s")}", LogMessageType.Info);
     }
 
     public void Dispose()

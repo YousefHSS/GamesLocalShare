@@ -412,8 +412,18 @@
                                     <Grid Margin="0,4,0,0">
                                         <TextBlock Text="{Binding CurrentTransferFile}" FontSize="10" TextTrimming="CharacterEllipsis" 
                                                    Foreground="{DynamicResource MahApps.Brushes.Gray3}"/>
-                                        <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="10" HorizontalAlignment="Right"
-                                                   Foreground="{DynamicResource MahApps.Brushes.Accent}"/>
+                                        <!-- Speed display - clickable to toggle units -->
+                                        <Button Command="{Binding ToggleSpeedUnitCommand}"
+                                                HorizontalAlignment="Right"
+                                                Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Padding="4,0"
+                                                Cursor="Hand"
+                                                ToolTip="Click to toggle between MB/s and Mbps">
+                                            <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="10"
+                                                       Foreground="{DynamicResource MahApps.Brushes.Accent}" FontWeight="SemiBold"/>
+                                        </Button>
                                     </Grid>
                                     <!-- Pause/Stop buttons -->
                                     <Grid Margin="0,6,0,0">
