@@ -20,6 +20,17 @@ public class FileTransferService : IDisposable
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private TransferState? _currentTransferState;
+    private bool _isListening;
+
+    /// <summary>
+    /// Whether the file transfer service is actively listening
+    /// </summary>
+    public bool IsListening => _isListening;
+
+    /// <summary>
+    /// The port the service is listening on
+    /// </summary>
+    public int ListeningPort => TransferPort;
 
     /// <summary>
     /// Event raised when transfer progress updates
@@ -36,11 +47,35 @@ public class FileTransferService : IDisposable
     /// </summary>
     public async Task StartListeningAsync()
     {
-        _cts = new CancellationTokenSource();
-        _listener = new TcpListener(IPAddress.Any, TransferPort);
-        _listener.Start();
+        if (_isListening)
+        {
+            System.Diagnostics.Debug.WriteLine("FileTransferService already listening");
+            return;
+        }
 
-        System.Diagnostics.Debug.WriteLine($"FileTransferService listening on port {TransferPort}");
+        _cts = new CancellationTokenSource();
+        
+        try
+        {
+            _listener = new TcpListener(IPAddress.Any, TransferPort);
+            _listener.Start();
+            _isListening = true;
+            
+            System.Diagnostics.Debug.WriteLine($"FileTransferService SUCCESSFULLY listening on port {TransferPort}");
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        {
+            _isListening = false;
+            var errorMsg = $"Port {TransferPort} is already in use! Another instance of the app may be running, or another program is using this port.";
+            System.Diagnostics.Debug.WriteLine($"FileTransferService FAILED: {errorMsg}");
+            throw new InvalidOperationException(errorMsg, ex);
+        }
+        catch (Exception ex)
+        {
+            _isListening = false;
+            System.Diagnostics.Debug.WriteLine($"FileTransferService FAILED to start: {ex.Message}");
+            throw;
+        }
 
         _ = AcceptConnectionsAsync(_cts.Token);
         await Task.CompletedTask;
@@ -51,8 +86,32 @@ public class FileTransferService : IDisposable
     /// </summary>
     public void Stop()
     {
+        _isListening = false;
         _cts?.Cancel();
-        _listener?.Stop();
+        try
+        {
+            _listener?.Stop();
+        }
+        catch { }
+        _listener = null;
+    }
+
+    /// <summary>
+    /// Tests if the file transfer port is available
+    /// </summary>
+    public static bool IsPortAvailable()
+    {
+        try
+        {
+            var listener = new TcpListener(IPAddress.Any, TransferPort);
+            listener.Start();
+            listener.Stop();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -149,7 +208,10 @@ public class FileTransferService : IDisposable
     {
         try
         {
-            System.Diagnostics.Debug.WriteLine($"Connecting to {peer.DisplayName} ({peer.IpAddress}:{TransferPort}) for file transfer...");
+            System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
+            System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{TransferPort})");
+            System.Diagnostics.Debug.WriteLine($"Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
+            System.Diagnostics.Debug.WriteLine($"Remote Path: {remoteGame.InstallPath}");
             
             using var client = new TcpClient();
             
@@ -164,15 +226,21 @@ public class FileTransferService : IDisposable
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // Connection timed out (not user cancellation)
-                throw new Exception($"Connection timed out. Make sure {peer.DisplayName} has configured its firewall (port {TransferPort} must be open).");
+                throw new Exception(
+                    $"Connection to {peer.DisplayName} ({peer.IpAddress}) timed out on port {TransferPort}.\n\n" +
+                    "Possible causes:\n" +
+                    "1. The app on the remote computer hasn't clicked 'Start Network'\n" +
+                    "2. Firewall on remote computer is blocking port 45679\n" +
+                    "3. Antivirus/security software is blocking the connection\n" +
+                    "4. Another instance of the app is running on the remote computer");
             }
 
             if (!client.Connected)
             {
-                throw new Exception($"Could not connect to {peer.DisplayName}. The remote firewall may be blocking port {TransferPort}.");
+                throw new Exception($"Could not connect to {peer.DisplayName}. The remote computer may not be listening on port {TransferPort}.");
             }
 
-            System.Diagnostics.Debug.WriteLine($"Connected to {peer.DisplayName} for file transfer");
+            System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} for file transfer");
 
             using var stream = client.GetStream();
             stream.ReadTimeout = 30000; // 30 second read timeout
@@ -189,6 +257,7 @@ public class FileTransferService : IDisposable
                 IsNewDownload = isNewDownload
             };
             var requestJson = JsonSerializer.Serialize(request);
+            System.Diagnostics.Debug.WriteLine($"Sending request: {requestJson}");
             writer.Write(requestJson);
             writer.Flush();
 
@@ -198,7 +267,7 @@ public class FileTransferService : IDisposable
 
             if (manifest == null || manifest.Files.Count == 0)
             {
-                throw new Exception("Remote peer returned empty file manifest. The game may not exist on the remote machine.");
+                throw new Exception($"Remote peer returned empty file manifest. The game folder may not exist at: {remoteGame.InstallPath}");
             }
 
             System.Diagnostics.Debug.WriteLine($"Received manifest with {manifest.Files.Count} files");
@@ -282,8 +351,6 @@ public class FileTransferService : IDisposable
                     var existingInfo = new FileInfo(localFilePath);
                     if (existingInfo.Length < fileSize)
                     {
-                        // Partial file - we could resume, but for simplicity, restart the file
-                        // (resuming mid-file requires protocol changes)
                         fileMode = FileMode.Create;
                     }
                     else if (existingInfo.Length == fileSize)
@@ -352,7 +419,6 @@ public class FileTransferService : IDisposable
             
             if (success)
             {
-                // Clean up transfer state file
                 _currentTransferState.Delete();
             }
 
@@ -369,18 +435,19 @@ public class FileTransferService : IDisposable
         }
         catch (SocketException ex)
         {
-            // Save state for resume
             _currentTransferState?.Save();
             _currentTransferState = null;
 
             var errorMsg = ex.SocketErrorCode switch
             {
-                SocketError.ConnectionRefused => $"Connection refused by {peer.DisplayName}. Make sure the app is running and firewall port {TransferPort} is open.",
-                SocketError.TimedOut => $"Connection to {peer.DisplayName} timed out. Check if firewall on {peer.DisplayName} allows port {TransferPort}.",
+                SocketError.ConnectionRefused => $"Connection REFUSED by {peer.DisplayName}. The app may not be running or hasn't clicked 'Start Network'.",
+                SocketError.TimedOut => $"Connection TIMED OUT to {peer.DisplayName}. Port {TransferPort} may be blocked.",
                 SocketError.HostUnreachable => $"Cannot reach {peer.DisplayName}. Check network connection.",
                 SocketError.NetworkUnreachable => "Network unreachable. Check your network connection.",
-                _ => $"Network error connecting to {peer.DisplayName}: {ex.Message}"
+                _ => $"Network error: {ex.SocketErrorCode} - {ex.Message}"
             };
+
+            System.Diagnostics.Debug.WriteLine($"Transfer failed: {errorMsg}");
 
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
@@ -393,9 +460,10 @@ public class FileTransferService : IDisposable
         }
         catch (Exception ex)
         {
-            // Save state for resume
             _currentTransferState?.Save();
             _currentTransferState = null;
+
+            System.Diagnostics.Debug.WriteLine($"Transfer failed: {ex.Message}");
 
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
@@ -410,15 +478,22 @@ public class FileTransferService : IDisposable
 
     private async Task AcceptConnectionsAsync(CancellationToken ct)
     {
+        System.Diagnostics.Debug.WriteLine($"FileTransferService: Starting to accept connections on port {TransferPort}");
+        
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 var client = await _listener!.AcceptTcpClientAsync(ct);
-                System.Diagnostics.Debug.WriteLine($"Accepted file transfer connection from {((IPEndPoint)client.Client.RemoteEndPoint!).Address}");
+                var remoteIp = ((IPEndPoint)client.Client.RemoteEndPoint!).Address;
+                System.Diagnostics.Debug.WriteLine($"=== INCOMING FILE TRANSFER from {remoteIp} ===");
                 _ = HandleTransferRequestAsync(client, ct);
             }
             catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (ObjectDisposedException)
             {
                 break;
             }
@@ -427,6 +502,8 @@ public class FileTransferService : IDisposable
                 System.Diagnostics.Debug.WriteLine($"Accept connection error: {ex.Message}");
             }
         }
+        
+        System.Diagnostics.Debug.WriteLine("FileTransferService: Stopped accepting connections");
     }
 
     private async Task HandleTransferRequestAsync(TcpClient client, CancellationToken ct)
@@ -446,14 +523,23 @@ public class FileTransferService : IDisposable
                 var requestJson = reader.ReadString();
                 var request = JsonSerializer.Deserialize<FileTransferRequest>(requestJson);
 
-                if (request == null || !Directory.Exists(request.GamePath))
+                System.Diagnostics.Debug.WriteLine($"Received transfer request: {requestJson}");
+
+                if (request == null)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Transfer request failed: game path doesn't exist: {request?.GamePath}");
+                    System.Diagnostics.Debug.WriteLine("Invalid request (null)");
+                    writer.Write("{}");
+                    return;
+                }
+
+                if (!Directory.Exists(request.GamePath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Game path doesn't exist: {request.GamePath}");
                     writer.Write("{}"); // Empty manifest
                     return;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"Building manifest for {request.GamePath}");
+                System.Diagnostics.Debug.WriteLine($"Building manifest for: {request.GamePath}");
 
                 // Build and send file manifest
                 var manifest = await BuildFileManifestAsync(request.GamePath);
@@ -461,7 +547,7 @@ public class FileTransferService : IDisposable
                 writer.Write(manifestJson);
                 writer.Flush();
 
-                System.Diagnostics.Debug.WriteLine($"Sent manifest with {manifest.Files.Count} files, waiting for file requests...");
+                System.Diagnostics.Debug.WriteLine($"Sent manifest with {manifest.Files.Count} files");
 
                 // Handle file requests
                 while (!ct.IsCancellationRequested)
@@ -470,8 +556,8 @@ public class FileTransferService : IDisposable
                     
                     if (string.IsNullOrEmpty(relativePath))
                     {
-                        System.Diagnostics.Debug.WriteLine("Transfer complete (empty path received)");
-                        break; // End of transfer
+                        System.Diagnostics.Debug.WriteLine("Transfer complete (client signaled end)");
+                        break;
                     }
 
                     var fullPath = Path.Combine(request.GamePath, relativePath);
@@ -479,7 +565,7 @@ public class FileTransferService : IDisposable
                     if (!File.Exists(fullPath))
                     {
                         System.Diagnostics.Debug.WriteLine($"File not found: {relativePath}");
-                        writer.Write(-1L); // File not available
+                        writer.Write(-1L);
                         continue;
                     }
 
@@ -487,7 +573,7 @@ public class FileTransferService : IDisposable
                     writer.Write(fileInfo.Length);
                     writer.Flush();
 
-                    System.Diagnostics.Debug.WriteLine($"Sending file: {relativePath} ({fileInfo.Length / 1024}KB)");
+                    System.Diagnostics.Debug.WriteLine($"Sending: {relativePath} ({fileInfo.Length / 1024}KB)");
 
                     // Stream file content
                     await using var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize);
@@ -505,7 +591,7 @@ public class FileTransferService : IDisposable
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Transfer request error: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Transfer handler error: {ex.Message}");
         }
     }
 
@@ -520,7 +606,6 @@ public class FileTransferService : IDisposable
             {
                 try
                 {
-                    // Skip transfer state files
                     if (file.Name == ".gamesync_transfer")
                         continue;
 
@@ -558,14 +643,12 @@ public class FileTransferService : IDisposable
 
                 var localInfo = new FileInfo(localFilePath);
                 
-                // Check if file is different (by size or hash)
                 if (localInfo.Length != remoteFile.Size)
                 {
                     filesToDownload.Add(remoteFile);
                     continue;
                 }
 
-                // Quick hash comparison
                 var localHash = ComputeQuickHash(localFilePath, localInfo.Length);
                 if (localHash != remoteFile.Hash)
                 {
@@ -577,9 +660,6 @@ public class FileTransferService : IDisposable
         return filesToDownload;
     }
 
-    /// <summary>
-    /// Computes a quick hash for file comparison (first/last 1MB + size)
-    /// </summary>
     private static string ComputeQuickHash(string filePath, long fileSize)
     {
         try
@@ -587,26 +667,21 @@ public class FileTransferService : IDisposable
             using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var md5 = MD5.Create();
 
-            // For small files, hash entire content
             if (fileSize <= 2 * 1024 * 1024)
             {
                 var hash = md5.ComputeHash(stream);
                 return Convert.ToHexString(hash);
             }
 
-            // For large files, hash first 1MB + last 1MB + size
             var buffer = new byte[1024 * 1024];
             
-            // First MB
             stream.Read(buffer, 0, buffer.Length);
             md5.TransformBlock(buffer, 0, buffer.Length, buffer, 0);
 
-            // Last MB
             stream.Seek(-buffer.Length, SeekOrigin.End);
             stream.Read(buffer, 0, buffer.Length);
             md5.TransformBlock(buffer, 0, buffer.Length, buffer, 0);
 
-            // File size
             var sizeBytes = BitConverter.GetBytes(fileSize);
             md5.TransformFinalBlock(sizeBytes, 0, sizeBytes.Length);
 

@@ -192,7 +192,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var steamReport = _steamScanner.GetScanReport();
         var networkReport = FirewallHelper.GetNetworkDiagnostics();
-        var fullReport = $"{steamReport}\n\n{networkReport}";
+        
+        // Add file transfer status
+        var transferStatus = new System.Text.StringBuilder();
+        transferStatus.AppendLine("=== File Transfer Service ===");
+        transferStatus.AppendLine($"Listening: {_fileTransferService.IsListening}");
+        transferStatus.AppendLine($"Port: {_fileTransferService.ListeningPort}");
+        transferStatus.AppendLine($"Port Available: {FileTransferService.IsPortAvailable()}");
+        transferStatus.AppendLine();
+        
+        var fullReport = $"{steamReport}\n\n{transferStatus}\n{networkReport}";
         
         MessageBox.Show(fullReport, "Troubleshooting Report", MessageBoxButton.OK, MessageBoxImage.Information);
     }
@@ -281,12 +290,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StatusMessage = "Starting network discovery...";
             
             await _networkService.StartAsync();
-            await _fileTransferService.StartListeningAsync();
+            
+            // Start file transfer service with better error handling
+            try
+            {
+                await _fileTransferService.StartListeningAsync();
+                System.Diagnostics.Debug.WriteLine($"File transfer service listening: {_fileTransferService.IsListening}");
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Port already in use
+                StatusMessage = $"?? Network started but file transfer failed: {ex.Message}";
+                MessageBox.Show(
+                    $"Warning: File Transfer Service failed to start!\n\n{ex.Message}\n\n" +
+                    "Other computers will NOT be able to download games FROM this computer.\n\n" +
+                    "Please close any other instances of GamesLocalShare and try again.",
+                    "File Transfer Service Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
             
             IsNetworkActive = true;
-            StatusMessage = FirewallConfigured 
-                ? "Network discovery active - Looking for peers..." 
-                : "Network active (?? firewall not configured - click Configure Firewall)";
+            
+            // Build status message
+            var status = "Network discovery active";
+            if (_fileTransferService.IsListening)
+            {
+                status += $" - File transfer ready (port {_fileTransferService.ListeningPort})";
+            }
+            else
+            {
+                status += " - ?? File transfer NOT listening!";
+            }
+            
+            if (!FirewallConfigured)
+            {
+                status += " (?? firewall not configured)";
+            }
+            
+            StatusMessage = status;
 
             // Share our games with the network
             if (LocalGames.Count > 0)
@@ -296,7 +338,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Network error: {ex.Message}. Check if ports 45677-45679 are blocked by firewall.";
+            StatusMessage = $"Network error: {ex.Message}";
             IsNetworkActive = false;
         }
     }
