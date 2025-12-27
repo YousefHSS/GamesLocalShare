@@ -12,7 +12,8 @@
         WindowStartupLocation="CenterScreen"
         WindowState="Normal"
         GlowBrush="{DynamicResource MahApps.Brushes.Accent}"
-        BorderThickness="1">
+        BorderThickness="1"
+        FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol">
 
     <Window.DataContext>
         <vm:MainViewModel/>
@@ -20,6 +21,17 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <!-- Icons loaded from the Icons folder placed next to the app executable -->
+        <BitmapImage x:Key="IconGames" UriSource="pack://siteoforigin:,,,/Icons/controller.png" />
+        <BitmapImage x:Key="IconPeers" UriSource="pack://siteoforigin:,,,/Icons/desktop.png" />
+        <BitmapImage x:Key="IconUpdates" UriSource="pack://siteoforigin:,,,/Icons/sync.png" />
+        <BitmapImage x:Key="IconDownload" UriSource="pack://siteoforigin:,,,/Icons/download.png" />
+        <BitmapImage x:Key="IconPause" UriSource="pack://siteoforigin:,,,/Icons/pause.png" />
+        <BitmapImage x:Key="IconWarning" UriSource="pack://siteoforigin:,,,/Icons/warning.png" />
+        <BitmapImage x:Key="IconCheck" UriSource="pack://siteoforigin:,,,/Icons/check.png" />
+        <BitmapImage x:Key="IconWired" UriSource="pack://siteoforigin:,,,/Icons/wired.png" />
+        <BitmapImage x:Key="IconWifi" UriSource="pack://siteoforigin:,,,/Icons/wifi.png" />
+        <BitmapImage x:Key="IconLog" UriSource="pack://siteoforigin:,,,/Icons/log.png" />
     </Window.Resources>
 
     <Grid>
@@ -93,7 +105,10 @@
                             Background="#FFEF4444"
                             Padding="15,8" Margin="10,0,0,0"
                             ToolTip="Configure Windows Firewall to allow network communication">
-                        <TextBlock Text="? Configure Firewall" VerticalAlignment="Center" Foreground="White" FontWeight="SemiBold"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Image x:Name="ImageWarning" Width="16" Height="16" Margin="0,0,6,0"/>
+                            <TextBlock Text="Configure Firewall" VerticalAlignment="Center" Foreground="White" FontWeight="SemiBold"/>
+                        </StackPanel>
                     </Button>
                 </StackPanel>
 
@@ -166,9 +181,10 @@
 
                     <Border Background="{DynamicResource MahApps.Brushes.Accent}" Padding="8" CornerRadius="5,5,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="?? My Games" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                            <Image x:Name="ImageGames" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="My Games" FontSize="13" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding LocalGames.Count, StringFormat=' ({0})'}" 
-                                       FontSize="13" Foreground="White" Opacity="0.8"/>
+                                        FontSize="13" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
                     </Border>
 
@@ -176,13 +192,17 @@
                              ItemsSource="{Binding LocalGames}" 
                              SelectedItem="{Binding SelectedLocalGame}"
                              Background="Transparent"
-                             BorderThickness="0">
+                             BorderThickness="0"
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
                                 <Setter Property="ContextMenu">
                                     <Setter.Value>
                                         <ContextMenu>
-                                            <MenuItem Header="Open Game Folder" Command="{Binding DataContext.OpenGameFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <!-- Fix MenuItem for Open Game Folder -->
+                                            <MenuItem Header="Open Game Folder"
+                                                      Command="{Binding DataContext.OpenGameFolderCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -237,7 +257,8 @@
                     <Border Background="{DynamicResource MahApps.Brushes.Accent2}" Padding="8" CornerRadius="5,5,0,0">
                         <Grid>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="??? Network Peers" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                                <Image x:Name="ImagePeers" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Network Peers" FontSize="13" FontWeight="Bold" Foreground="White"/>
                                 <TextBlock Text="{Binding NetworkPeers.Count, StringFormat=' ({0})'}" 
                                            FontSize="13" Foreground="White" Opacity="0.8"/>
                             </StackPanel>
@@ -288,15 +309,22 @@
                              ItemsSource="{Binding NetworkPeers}" 
                              SelectedItem="{Binding SelectedPeer}"
                              Background="Transparent"
-                             BorderThickness="0">
+                             BorderThickness="0"
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
                                 <Setter Property="ContextMenu">
                                     <Setter.Value>
                                         <ContextMenu>
-                                            <MenuItem Header="Copy IP Address" Command="{Binding DataContext.CopyPeerIpCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                            <MenuItem Header="Test Connection" Command="{Binding DataContext.TestConnectionToPeerCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                                            <MenuItem Header="Refresh Games" Command="{Binding DataContext.RefreshPeerGamesCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Copy IP Address"
+                                                      Command="{Binding DataContext.CopyPeerIpCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <MenuItem Header="Test Connection"
+                                                      Command="{Binding DataContext.TestConnectionToPeerCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <MenuItem Header="Refresh Games"
+                                                      Command="{Binding DataContext.RefreshPeerGamesCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -330,7 +358,8 @@
                     <!-- New Games Available Header -->
                     <Border Grid.Row="3" Background="#FF8B5CF6" Padding="8">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="?? New Games from Peers" FontSize="12" FontWeight="Bold" Foreground="White"/>
+                            <Image x:Name="ImageDownload" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="New Games from Peers" FontSize="12" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding AvailableFromPeers.Count, StringFormat=' ({0})'}" 
                                        FontSize="12" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
@@ -341,13 +370,16 @@
                              ItemsSource="{Binding AvailableFromPeers}" 
                              SelectedItem="{Binding SelectedPeerGame}"
                              Background="Transparent"
-                             BorderThickness="0">
+                             BorderThickness="0"
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
                                 <Setter Property="ContextMenu">
                                     <Setter.Value>
                                         <ContextMenu>
-                                            <MenuItem Header="Download Game" Command="{Binding DataContext.DownloadNewGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Download Game"
+                                                      Command="{Binding DataContext.DownloadNewGameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -391,7 +423,8 @@
 
                     <Border Background="{DynamicResource MahApps.Brushes.Accent3}" Padding="8" CornerRadius="5,5,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="?? Updates Available" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                            <Image x:Name="ImageUpdates" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Updates Available" FontSize="13" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding AvailableSyncs.Count, StringFormat=' ({0})'}" 
                                        FontSize="13" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
@@ -401,13 +434,16 @@
                              ItemsSource="{Binding AvailableSyncs}" 
                              SelectedItem="{Binding SelectedSyncItem}"
                              Background="Transparent"
-                             BorderThickness="0">
+                             BorderThickness="0"
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
                                 <Setter Property="ContextMenu">
                                     <Setter.Value>
                                         <ContextMenu>
-                                            <MenuItem Header="Download Update" Command="{Binding DataContext.StartSyncCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Download Update"
+                                                      Command="{Binding DataContext.StartSyncCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -525,9 +561,10 @@
 
                     <Border Background="#FFEF4444" Padding="8" CornerRadius="5,5,0,0">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="?? Incomplete" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                            <Image x:Name="ImagePause" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Incomplete" FontSize="13" FontWeight="Bold" Foreground="White"/>
                             <TextBlock Text="{Binding IncompleteTransfers.Count, StringFormat=' ({0})'}" 
-                                       FontSize="13" Foreground="White" Opacity="0.8"/>
+                                        FontSize="13" Foreground="White" Opacity="0.8"/>
                         </StackPanel>
                     </Border>
 
@@ -541,9 +578,13 @@
                                 <Setter Property="ContextMenu">
                                     <Setter.Value>
                                         <ContextMenu>
-                                            <MenuItem Header="Resume Download" Command="{Binding DataContext.ResumeTransferCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Resume Download"
+                                                      Command="{Binding DataContext.ResumeTransferCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                             <Separator/>
-                                            <MenuItem Header="Delete Incomplete Transfer" Command="{Binding DataContext.DeleteIncompleteTransferCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                            <MenuItem Header="Delete Incomplete Transfer"
+                                                      Command="{Binding DataContext.DeleteIncompleteTransferCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -617,7 +658,10 @@
                                   Background="{DynamicResource MahApps.Brushes.Gray8}"
                                   Width="70" Height="24"
                                   ToolTip="Show/Hide Activity Log">
-                        <TextBlock Text="Log" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Image x:Name="ImageLog" Width="14" Height="14" Margin="0,0,6,0"/>
+                            <TextBlock Text="Log" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"/>
+                        </StackPanel>
                     </ToggleButton>
                 </StackPanel>
             </Grid>

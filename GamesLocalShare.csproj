@@ -19,4 +19,11 @@
     <PackageReference Include="MahApps.Metro" Version="2.4.10" />
   </ItemGroup>
 
+  <!-- Ensure any icons placed in the Icons folder are copied to the output directory -->
+  <ItemGroup>
+    <Content Include="Icons\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

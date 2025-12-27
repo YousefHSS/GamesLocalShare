@@ -1068,16 +1068,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void OpenGameFolder()
+    private void OpenGameFolder(GameInfo? game = null)
     {
-        if (SelectedLocalGame == null || string.IsNullOrEmpty(SelectedLocalGame.InstallPath))
+        var target = game ?? SelectedLocalGame;
+        if (target == null || string.IsNullOrEmpty(target.InstallPath))
             return;
 
         try
         {
-            if (Directory.Exists(SelectedLocalGame.InstallPath))
+            if (Directory.Exists(target.InstallPath))
             {
-                System.Diagnostics.Process.Start("explorer.exe", SelectedLocalGame.InstallPath);
+                // Open the folder using the system shell. UseShellExecute = true lets the OS handle the path and spaces.
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = target.InstallPath,
+                    UseShellExecute = true
+                };
+
+                System.Diagnostics.Process.Start(psi);
+            }
+            else
+            {
+                StatusMessage = $"Folder does not exist: {target.InstallPath}";
             }
         }
         catch (Exception ex)
