@@ -15,6 +15,7 @@ public class FileTransferService : IDisposable
 {
     private const int TransferPort = 45679;
     private const int BufferSize = 1024 * 1024; // 1MB buffer for fast transfers
+    private const int ConnectionTimeoutMs = 10000; // 10 second connection timeout
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -38,6 +39,8 @@ public class FileTransferService : IDisposable
         _cts = new CancellationTokenSource();
         _listener = new TcpListener(IPAddress.Any, TransferPort);
         _listener.Start();
+
+        System.Diagnostics.Debug.WriteLine($"FileTransferService listening on port {TransferPort}");
 
         _ = AcceptConnectionsAsync(_cts.Token);
         await Task.CompletedTask;
@@ -146,10 +149,35 @@ public class FileTransferService : IDisposable
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"Connecting to {peer.DisplayName} ({peer.IpAddress}:{TransferPort}) for file transfer...");
+            
             using var client = new TcpClient();
-            await client.ConnectAsync(peer.IpAddress, TransferPort, ct);
+            
+            // Use a timeout for connection
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            connectCts.CancelAfter(ConnectionTimeoutMs);
+            
+            try
+            {
+                await client.ConnectAsync(peer.IpAddress, TransferPort, connectCts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Connection timed out (not user cancellation)
+                throw new Exception($"Connection timed out. Make sure {peer.DisplayName} has configured its firewall (port {TransferPort} must be open).");
+            }
+
+            if (!client.Connected)
+            {
+                throw new Exception($"Could not connect to {peer.DisplayName}. The remote firewall may be blocking port {TransferPort}.");
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Connected to {peer.DisplayName} for file transfer");
 
             using var stream = client.GetStream();
+            stream.ReadTimeout = 30000; // 30 second read timeout
+            stream.WriteTimeout = 30000; // 30 second write timeout
+            
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
 
@@ -170,8 +198,10 @@ public class FileTransferService : IDisposable
 
             if (manifest == null || manifest.Files.Count == 0)
             {
-                return false;
+                throw new Exception("Remote peer returned empty file manifest. The game may not exist on the remote machine.");
             }
+
+            System.Diagnostics.Debug.WriteLine($"Received manifest with {manifest.Files.Count} files");
 
             // Calculate what we need to download
             List<FileTransferInfo> filesToDownload;
@@ -214,6 +244,8 @@ public class FileTransferService : IDisposable
             }
 
             _currentTransferState.Save();
+
+            System.Diagnostics.Debug.WriteLine($"Starting download of {filesToDownload.Count} files ({totalBytes / 1024 / 1024}MB)");
 
             // Request each file
             foreach (var fileInfo in filesToDownload)
@@ -335,6 +367,30 @@ public class FileTransferService : IDisposable
             _currentTransferState = null;
             return success;
         }
+        catch (SocketException ex)
+        {
+            // Save state for resume
+            _currentTransferState?.Save();
+            _currentTransferState = null;
+
+            var errorMsg = ex.SocketErrorCode switch
+            {
+                SocketError.ConnectionRefused => $"Connection refused by {peer.DisplayName}. Make sure the app is running and firewall port {TransferPort} is open.",
+                SocketError.TimedOut => $"Connection to {peer.DisplayName} timed out. Check if firewall on {peer.DisplayName} allows port {TransferPort}.",
+                SocketError.HostUnreachable => $"Cannot reach {peer.DisplayName}. Check network connection.",
+                SocketError.NetworkUnreachable => "Network unreachable. Check your network connection.",
+                _ => $"Network error connecting to {peer.DisplayName}: {ex.Message}"
+            };
+
+            TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+            {
+                GameAppId = remoteGame.AppId,
+                Success = false,
+                ErrorMessage = errorMsg,
+                IsNewDownload = isNewDownload
+            });
+            return false;
+        }
         catch (Exception ex)
         {
             // Save state for resume
@@ -359,6 +415,7 @@ public class FileTransferService : IDisposable
             try
             {
                 var client = await _listener!.AcceptTcpClientAsync(ct);
+                System.Diagnostics.Debug.WriteLine($"Accepted file transfer connection from {((IPEndPoint)client.Client.RemoteEndPoint!).Address}");
                 _ = HandleTransferRequestAsync(client, ct);
             }
             catch (OperationCanceledException)
@@ -379,6 +436,9 @@ public class FileTransferService : IDisposable
             using (client)
             {
                 var stream = client.GetStream();
+                stream.ReadTimeout = 30000;
+                stream.WriteTimeout = 30000;
+                
                 using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
                 using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
@@ -388,9 +448,12 @@ public class FileTransferService : IDisposable
 
                 if (request == null || !Directory.Exists(request.GamePath))
                 {
+                    System.Diagnostics.Debug.WriteLine($"Transfer request failed: game path doesn't exist: {request?.GamePath}");
                     writer.Write("{}"); // Empty manifest
                     return;
                 }
+
+                System.Diagnostics.Debug.WriteLine($"Building manifest for {request.GamePath}");
 
                 // Build and send file manifest
                 var manifest = await BuildFileManifestAsync(request.GamePath);
@@ -398,18 +461,24 @@ public class FileTransferService : IDisposable
                 writer.Write(manifestJson);
                 writer.Flush();
 
+                System.Diagnostics.Debug.WriteLine($"Sent manifest with {manifest.Files.Count} files, waiting for file requests...");
+
                 // Handle file requests
                 while (!ct.IsCancellationRequested)
                 {
                     var relativePath = reader.ReadString();
                     
                     if (string.IsNullOrEmpty(relativePath))
+                    {
+                        System.Diagnostics.Debug.WriteLine("Transfer complete (empty path received)");
                         break; // End of transfer
+                    }
 
                     var fullPath = Path.Combine(request.GamePath, relativePath);
                     
                     if (!File.Exists(fullPath))
                     {
+                        System.Diagnostics.Debug.WriteLine($"File not found: {relativePath}");
                         writer.Write(-1L); // File not available
                         continue;
                     }
@@ -417,6 +486,8 @@ public class FileTransferService : IDisposable
                     var fileInfo = new FileInfo(fullPath);
                     writer.Write(fileInfo.Length);
                     writer.Flush();
+
+                    System.Diagnostics.Debug.WriteLine($"Sending file: {relativePath} ({fileInfo.Length / 1024}KB)");
 
                     // Stream file content
                     await using var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize);
