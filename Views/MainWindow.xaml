@@ -449,7 +449,7 @@
                                 <Border Padding="8" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
                                     <StackPanel>
                                         <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                                        <ProgressBar Value="{Binding ProgressPercent}" Height="6" Minimum="0" Maximum="100" Margin="0,4,0,0"/>
+                                        <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Height="6" Minimum="0" Maximum="100" Margin="0,4,0,0"/>
                                         <Grid Margin="0,3,0,0">
                                             <TextBlock Text="{Binding FormattedProgress}" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray3}"/>
                                             <TextBlock Text="{Binding SourcePeerName, StringFormat='From: {0}'}" 
