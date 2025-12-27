@@ -1,0 +1,71 @@
+namespace GamesLocalShare.Models;
+
+/// <summary>
+/// Represents a log message entry
+/// </summary>
+public class LogMessage
+{
+    /// <summary>
+    /// When the message was created
+    /// </summary>
+    public DateTime Timestamp { get; set; } = DateTime.Now;
+
+    /// <summary>
+    /// The log message text
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Type of log message
+    /// </summary>
+    public LogMessageType Type { get; set; } = LogMessageType.Info;
+
+    /// <summary>
+    /// Formatted timestamp for display
+    /// </summary>
+    public string FormattedTime => Timestamp.ToString("HH:mm:ss");
+
+    /// <summary>
+    /// Color based on message type
+    /// </summary>
+    public string TypeColor => Type switch
+    {
+        LogMessageType.Success => "#22C55E",  // Green
+        LogMessageType.Error => "#EF4444",    // Red
+        LogMessageType.Warning => "#F59E0B",  // Orange
+        LogMessageType.Transfer => "#8B5CF6", // Purple
+        _ => "#9CA3AF"                        // Gray
+    };
+
+    /// <summary>
+    /// Icon based on message type
+    /// </summary>
+    public string TypeIcon => Type switch
+    {
+        LogMessageType.Success => "?",
+        LogMessageType.Error => "?",
+        LogMessageType.Warning => "?",
+        LogMessageType.Transfer => "?",
+        LogMessageType.Network => "??",
+        _ => "•"
+    };
+
+    public LogMessage() { }
+
+    public LogMessage(string message, LogMessageType type = LogMessageType.Info)
+    {
+        Message = message;
+        Type = type;
+        Timestamp = DateTime.Now;
+    }
+}
+
+public enum LogMessageType
+{
+    Info,
+    Success,
+    Error,
+    Warning,
+    Transfer,
+    Network
+}

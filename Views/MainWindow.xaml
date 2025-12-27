@@ -485,10 +485,78 @@
         <!-- Status Bar -->
         <Border Grid.Row="3" Background="{DynamicResource MahApps.Brushes.Gray10}" Padding="15,8">
             <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
                 <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource MahApps.Brushes.Gray3}" VerticalAlignment="Center"/>
-                <TextBlock HorizontalAlignment="Right" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10" VerticalAlignment="Center">
-                    <Run Text="Games Local Share - Sync game updates and transfer games over LAN"/>
-                </TextBlock>
+                
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <TextBlock Text="Games Local Share" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    
+                    <!-- Log Toggle Button -->
+                    <ToggleButton x:Name="LogToggle" 
+                                  Style="{DynamicResource MahApps.Styles.ToggleButton.Square}"
+                                  Width="70" Height="24"
+                                  ToolTip="Show/Hide Activity Log">
+                        <TextBlock Text="?? Log" FontSize="10"/>
+                    </ToggleButton>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Log Panel (Popup) -->
+        <Border Grid.Row="2" 
+                Background="{DynamicResource MahApps.Brushes.Gray9}" 
+                CornerRadius="5"
+                Margin="10,0,10,10"
+                Padding="10"
+                VerticalAlignment="Bottom"
+                MaxHeight="200"
+                Visibility="{Binding IsChecked, ElementName=LogToggle, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                
+                <Grid Grid.Row="0" Margin="0,0,0,5">
+                    <TextBlock Text="Activity Log" FontWeight="Bold" Foreground="{DynamicResource MahApps.Brushes.Gray3}"/>
+                    <Button Command="{Binding ClearLogCommand}"
+                            HorizontalAlignment="Right"
+                            Style="{DynamicResource MahApps.Styles.Button.Square}"
+                            Background="Transparent"
+                            Padding="5,2"
+                            ToolTip="Clear log">
+                        <TextBlock Text="Clear" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
+                    </Button>
+                </Grid>
+                
+                <ListBox Grid.Row="1" 
+                         ItemsSource="{Binding LogMessages}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Margin="0,1">
+                                <TextBlock Text="{Binding FormattedTime}" 
+                                           Foreground="{DynamicResource MahApps.Brushes.Gray5}" 
+                                           FontSize="10" 
+                                           Width="55"/>
+                                <TextBlock Text="{Binding TypeIcon}" 
+                                           Foreground="{Binding TypeColor}" 
+                                           FontSize="10" 
+                                           Width="20"/>
+                                <TextBlock Text="{Binding Message}" 
+                                           Foreground="{DynamicResource MahApps.Brushes.Gray3}" 
+                                           FontSize="10"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
             </Grid>
         </Border>
     </Grid>

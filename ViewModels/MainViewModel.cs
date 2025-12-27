@@ -14,6 +14,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
     private DateTime _lastProgressUpdate = DateTime.MinValue;
+    private const int MaxLogMessages = 100;
 
     [ObservableProperty]
     private string _statusMessage = "Ready";
@@ -69,11 +70,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _firewallConfigured;
 
+    [ObservableProperty]
+    private string _currentTransferGameName = string.Empty;
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
     public ObservableCollection<GameInfo> AvailableFromPeers { get; } = [];
     public ObservableCollection<TransferState> IncompleteTransfers { get; } = [];
+    public ObservableCollection<LogMessage> LogMessages { get; } = [];
 
     public MainViewModel()
     {
@@ -99,11 +104,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         LocalIpAddress = _networkService.LocalPeer.IpAddress;
 
+        // Initial log message
+        AddLog("Application started", LogMessageType.Info);
+
         // Show firewall warning if not configured
         if (!FirewallConfigured)
         {
             StatusMessage = "?? Firewall not configured - click 'Configure Firewall' to fix connection issues";
+            AddLog("Firewall not configured - other computers may not be able to connect", LogMessageType.Warning);
         }
+    }
+
+    private void AddLog(string message, LogMessageType type = LogMessageType.Info)
+    {
+        Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            LogMessages.Insert(0, new LogMessage(message, type));
+            
+            // Keep log size manageable
+            while (LogMessages.Count > MaxLogMessages)
+            {
+                LogMessages.RemoveAt(LogMessages.Count - 1);
+            }
+        });
+    }
+
+    [RelayCommand]
+    private void ClearLog()
+    {
+        LogMessages.Clear();
+        AddLog("Log cleared", LogMessageType.Info);
     }
 
     private void OnGamesRequestedButEmpty(object? sender, EventArgs e)
@@ -111,6 +141,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Application.Current.Dispatcher.BeginInvoke(() =>
         {
             StatusMessage = "?? A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
+            AddLog("A peer requested games but none scanned yet", LogMessageType.Warning);
         });
     }
 
@@ -119,6 +150,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Application.Current.Dispatcher.BeginInvoke(() =>
         {
             LastError = error;
+            AddLog($"Connection error: {error}", LogMessageType.Error);
             System.Diagnostics.Debug.WriteLine($"Connection Error: {error}");
         });
     }
@@ -130,6 +162,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsScanning = true;
             StatusMessage = "Scanning Steam library...";
+            AddLog("Scanning Steam library...", LogMessageType.Info);
 
             var games = await _steamScanner.ScanGamesAsync();
 
@@ -144,33 +177,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (games.Count == 0)
             {
-                // Show detailed error info
                 var errors = _steamScanner.ScanErrors;
                 if (errors.Count > 0)
                 {
                     StatusMessage = $"No games found. Steam path: {_steamScanner.LastSteamPath ?? "NOT FOUND"}. Click Troubleshoot.";
                     LastError = string.Join("\n", errors);
+                    AddLog("No games found - check Steam installation", LogMessageType.Warning);
                 }
                 else
                 {
                     StatusMessage = "No games found. Make sure Steam is installed and has games.";
+                    AddLog("No games found", LogMessageType.Warning);
                 }
             }
             else
             {
                 StatusMessage = $"Found {games.Count} installed games";
+                AddLog($"Found {games.Count} installed games", LogMessageType.Success);
             }
 
-            // Scan for incomplete transfers
             await ScanIncompleteTransfersAsync();
 
-            // Update network peers with our game list
             if (IsNetworkActive)
             {
                 await _networkService.UpdateLocalGamesAsync(games);
             }
 
-            // Update available syncs if we have peers
             if (NetworkPeers.Count > 0)
             {
                 UpdateAvailableSyncs();
@@ -181,6 +213,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Error scanning: {ex.Message}";
             LastError = ex.ToString();
+            AddLog($"Scan error: {ex.Message}", LogMessageType.Error);
         }
         finally
         {
@@ -373,11 +406,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 await _networkService.UpdateLocalGamesAsync(LocalGames.ToList());
             }
+
+            AddLog("Network discovery started", LogMessageType.Info);
         }
         catch (Exception ex)
         {
             StatusMessage = $"Network error: {ex.Message}";
             IsNetworkActive = false;
+            AddLog($"Network start error: {ex.Message}", LogMessageType.Error);
         }
     }
 
@@ -393,6 +429,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         
         IsNetworkActive = false;
         StatusMessage = "Network discovery stopped";
+
+        AddLog("Network discovery stopped", LogMessageType.Info);
     }
 
     [RelayCommand]
@@ -417,10 +455,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StatusMessage = foundCount > 0 
                 ? $"Scan complete. Found {foundCount} peer(s)." 
                 : "No peers found. Make sure the app is running on other computers and firewall is configured on BOTH computers.";
+            
+            AddLog($"Scan for peers completed: {foundCount} found", LogMessageType.Info);
         }
         catch (Exception ex)
         {
             StatusMessage = $"Scan error: {ex.Message}";
+            AddLog($"Scan error: {ex.Message}", LogMessageType.Error);
         }
         finally
         {
@@ -453,15 +494,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 StatusMessage = $"Connected to peer at {ManualPeerIp}";
                 ManualPeerIp = string.Empty;
+                AddLog($"Connected to peer {ManualPeerIp}", LogMessageType.Info);
             }
             else
             {
                 StatusMessage = $"Could not connect to {ManualPeerIp}. Make sure firewall is configured on BOTH computers!";
+                AddLog($"Failed to connect to {ManualPeerIp}", LogMessageType.Warning);
             }
         }
         catch (Exception ex)
         {
             StatusMessage = $"Connection error: {ex.Message}";
+            AddLog($"Connection error: {ex.Message}", LogMessageType.Error);
         }
     }
 
@@ -496,6 +540,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         StatusMessage = $"Refreshed game lists from {NetworkPeers.Count} peer(s)";
+        AddLog("Refreshed game lists from all peers", LogMessageType.Info);
     }
 
     [RelayCommand]
@@ -539,6 +584,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Sync error: {ex.Message}";
             SelectedSyncItem.Status = SyncStatus.Failed;
+            AddLog($"Sync error: {ex.Message}", LogMessageType.Error);
         }
         finally
         {
@@ -589,6 +635,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusMessage = $"Download error: {ex.Message}";
+            AddLog($"Download error: {ex.Message}", LogMessageType.Error);
         }
         finally
         {
@@ -634,11 +681,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 IncompleteTransfers.Remove(SelectedIncompleteTransfer);
                 await ScanLocalGamesAsync();
+                AddLog($"Resumed download of {SelectedIncompleteTransfer.GameName}", LogMessageType.Info);
             }
         }
         catch (Exception ex)
         {
             StatusMessage = $"Resume error: {ex.Message}";
+            AddLog($"Resume error: {ex.Message}", LogMessageType.Error);
         }
         finally
         {
@@ -682,6 +731,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 NetworkPeers.Add(peer);
                 StatusMessage = $"Discovered peer: {peer.DisplayName} ({peer.IpAddress}) - requesting games...";
+                AddLog($"Discovered new peer: {peer.DisplayName}", LogMessageType.Info);
             }
         });
     }
@@ -698,6 +748,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 
                 UpdateAvailableSyncs();
                 UpdateAvailableFromPeers();
+
+                AddLog($"Peer lost: {peer.DisplayName}", LogMessageType.Warning);
             }
         });
     }
@@ -723,6 +775,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             UpdateAvailableFromPeers();
             
             StatusMessage = $"Received {peer.Games.Count} games from {peer.DisplayName}";
+            AddLog($"Updated game list from {peer.DisplayName}", LogMessageType.Info);
         });
     }
 
@@ -765,6 +818,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (AvailableSyncs.Count > 0)
         {
             StatusMessage = $"Found {AvailableSyncs.Count} games with available updates";
+            AddLog($"Found {AvailableSyncs.Count} games with available updates", LogMessageType.Info);
         }
     }
 
@@ -805,6 +859,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (AvailableFromPeers.Count > 0)
         {
             StatusMessage = $"Found {AvailableFromPeers.Count} games available from peers";
+            AddLog($"Found {AvailableFromPeers.Count} games available from peers", LogMessageType.Info);
         }
     }
 
@@ -843,11 +898,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (e.Success)
             {
                 var action = e.IsNewDownload ? "Download" : "Update";
-                StatusMessage = $"{action} complete! {FormatBytes(e.TotalBytesTransferred)} transferred";
+                var message = $"? {action} complete! {FormatBytes(e.TotalBytesTransferred)} transferred";
+                StatusMessage = message;
+                AddLog(message, LogMessageType.Success);
+                
+                // Show a notification message box for completed downloads
+                MessageBox.Show(
+                    $"{action} completed successfully!\n\n" +
+                    $"Total transferred: {FormatBytes(e.TotalBytesTransferred)}",
+                    "Transfer Complete",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
             }
             else
             {
-                StatusMessage = $"Transfer failed: {e.ErrorMessage}. Progress saved for resume.";
+                var message = $"? Transfer failed: {e.ErrorMessage}";
+                StatusMessage = message + " Progress saved for resume.";
+                AddLog(message, LogMessageType.Error);
                 // Refresh incomplete transfers
                 _ = ScanIncompleteTransfersAsync();
             }
