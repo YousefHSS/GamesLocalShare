@@ -184,9 +184,7 @@ public class FileTransferService : IDisposable
             AppId = remoteGame.AppId,
             Name = remoteGame.Name,
             InstallPath = targetPath,
-            BuildId = "0", // No local version
-            IsInstalled = false,
-            IsAvailableFromPeer = true
+            BuildId = "0" // No local version
         };
 
         return await RequestGameTransferAsync(peer, remoteGame, localGame, isNewDownload: true, ct: ct);
@@ -233,6 +231,8 @@ public class FileTransferService : IDisposable
         _transferCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _isPaused = false;
         
+        string? appManifestContent = null; // Store manifest to write after successful transfer
+        
         try
         {
             System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
@@ -252,7 +252,6 @@ public class FileTransferService : IDisposable
             }
             catch (OperationCanceledException) when (!_transferCts.Token.IsCancellationRequested)
             {
-                // Connection timed out (not user cancellation)
                 throw new Exception(
                     $"Connection to {peer.DisplayName} ({peer.IpAddress}) timed out on port {TransferPort}.\n\n" +
                     "Possible causes:\n" +
@@ -280,7 +279,8 @@ public class FileTransferService : IDisposable
             {
                 GameAppId = remoteGame.AppId,
                 GamePath = remoteGame.InstallPath,
-                IsNewDownload = isNewDownload
+                IsNewDownload = isNewDownload,
+                IncludeManifest = true // Always request the manifest
             };
             var requestJson = JsonSerializer.Serialize(request);
             System.Diagnostics.Debug.WriteLine($"Sending request: {requestJson}");
@@ -296,7 +296,9 @@ public class FileTransferService : IDisposable
                 throw new Exception($"Remote peer returned empty file manifest. The game folder may not exist at: {remoteGame.InstallPath}");
             }
 
-            System.Diagnostics.Debug.WriteLine($"Received manifest with {manifest.Files.Count} files");
+            // Store the app manifest content for later
+            appManifestContent = manifest.AppManifestContent;
+            System.Diagnostics.Debug.WriteLine($"Received manifest with {manifest.Files.Count} files, hasAppManifest={!string.IsNullOrEmpty(appManifestContent)}");
 
             // Calculate what we need to download
             List<FileTransferInfo> filesToDownload;
@@ -467,6 +469,12 @@ public class FileTransferService : IDisposable
             if (success)
             {
                 _currentTransferState.Delete();
+                
+                // Write the Steam app manifest so Steam recognizes the game
+                if (!string.IsNullOrEmpty(appManifestContent))
+                {
+                    await WriteAppManifestAsync(localGame.InstallPath, remoteGame.AppId, appManifestContent);
+                }
             }
 
             System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred}, total={_currentTransferState.TotalBytes}");
@@ -485,7 +493,6 @@ public class FileTransferService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            // User cancelled - don't fire completed event, the stopped event handles this
             System.Diagnostics.Debug.WriteLine("Transfer cancelled (OperationCanceledException)");
             _currentTransferState?.Save();
             return false;
@@ -533,6 +540,66 @@ public class FileTransferService : IDisposable
             });
             return false;
         }
+    }
+
+    /// <summary>
+    /// Writes the Steam app manifest file to the steamapps folder so Steam recognizes the game
+    /// </summary>
+    private async Task WriteAppManifestAsync(string gameInstallPath, string appId, string manifestContent)
+    {
+        try
+        {
+            // Game install path is like: steamapps/common/GameName
+            // We need to write to: steamapps/appmanifest_<appid>.acf
+            var commonFolder = Directory.GetParent(gameInstallPath);
+            if (commonFolder?.Name != "common")
+            {
+                System.Diagnostics.Debug.WriteLine($"Cannot determine steamapps folder from path: {gameInstallPath}");
+                return;
+            }
+            
+            var steamAppsFolder = commonFolder.Parent?.FullName;
+            if (string.IsNullOrEmpty(steamAppsFolder) || !Directory.Exists(steamAppsFolder))
+            {
+                System.Diagnostics.Debug.WriteLine($"Steamapps folder not found: {steamAppsFolder}");
+                return;
+            }
+            
+            var manifestPath = Path.Combine(steamAppsFolder, $"appmanifest_{appId}.acf");
+            
+            // Update the installdir in the manifest to match the actual folder name
+            var gameFolderName = Path.GetFileName(gameInstallPath);
+            var updatedContent = UpdateInstallDirInManifest(manifestContent, gameFolderName);
+            
+            await File.WriteAllTextAsync(manifestPath, updatedContent);
+            System.Diagnostics.Debug.WriteLine($"Wrote app manifest: {manifestPath}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error writing app manifest: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Updates the installdir field in the manifest to match the local folder name
+    /// </summary>
+    private string UpdateInstallDirInManifest(string manifestContent, string newInstallDir)
+    {
+        // The manifest is in VDF format, we need to update the "installdir" field
+        // Simple regex replacement for the installdir line
+        var lines = manifestContent.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith("\"installdir\""))
+            {
+                // Replace with the new install dir
+                var indent = lines[i].Substring(0, lines[i].Length - trimmed.Length);
+                lines[i] = $"{indent}\"installdir\"\t\t\"{newInstallDir}\"";
+                break;
+            }
+        }
+        return string.Join('\n', lines);
     }
 
     private async Task AcceptConnectionsAsync(CancellationToken ct)
@@ -609,16 +676,28 @@ public class FileTransferService : IDisposable
                 // Look up the game by AppId in our local games list
                 var localGame = _localGames.FirstOrDefault(g => g.AppId == request.GameAppId);
                 string gamePath;
+                string? steamAppsFolder = null;
                 
                 if (localGame != null && !string.IsNullOrEmpty(localGame.InstallPath) && Directory.Exists(localGame.InstallPath))
                 {
                     gamePath = localGame.InstallPath;
+                    // Get the steamapps folder (parent of "common" folder)
+                    var commonFolder = Directory.GetParent(gamePath);
+                    if (commonFolder?.Name == "common")
+                    {
+                        steamAppsFolder = commonFolder.Parent?.FullName;
+                    }
                     System.Diagnostics.Debug.WriteLine($"Found game by AppId: {request.GameAppId} at {gamePath}");
                 }
                 else if (!string.IsNullOrEmpty(request.GamePath) && Directory.Exists(request.GamePath))
                 {
                     // Fallback to the path in the request (for backward compatibility)
                     gamePath = request.GamePath;
+                    var commonFolder = Directory.GetParent(gamePath);
+                    if (commonFolder?.Name == "common")
+                    {
+                        steamAppsFolder = commonFolder.Parent?.FullName;
+                    }
                     System.Diagnostics.Debug.WriteLine($"Using fallback path from request: {gamePath}");
                 }
                 else
@@ -637,11 +716,27 @@ public class FileTransferService : IDisposable
 
                 // Build and send file manifest
                 var manifest = await BuildFileManifestAsync(gamePath);
+                
+                // Include the appmanifest file content if requested
+                if (request.IncludeManifest && steamAppsFolder != null)
+                {
+                    var appManifestPath = Path.Combine(steamAppsFolder, $"appmanifest_{request.GameAppId}.acf");
+                    if (File.Exists(appManifestPath))
+                    {
+                        manifest.AppManifestContent = await File.ReadAllTextAsync(appManifestPath, ct);
+                        System.Diagnostics.Debug.WriteLine($"Including app manifest: {appManifestPath}");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"App manifest not found: {appManifestPath}");
+                    }
+                }
+                
                 var manifestJson = JsonSerializer.Serialize(manifest);
                 writer.Write(manifestJson);
                 writer.Flush();
 
-                System.Diagnostics.Debug.WriteLine($"Sent manifest with {manifest.Files.Count} files");
+                System.Diagnostics.Debug.WriteLine($"Sent manifest with {manifest.Files.Count} files, hasAppManifest={!string.IsNullOrEmpty(manifest.AppManifestContent)}");
 
                 // Handle file requests
                 while (!ct.IsCancellationRequested)
@@ -808,7 +903,7 @@ public class FileTransferService : IDisposable
             return string.Empty;
         }
     }
-
+    
     /// <summary>
     /// Pauses the current transfer (can be resumed later)
     /// </summary>
@@ -886,12 +981,14 @@ public class FileTransferRequest
     public string GameAppId { get; set; } = string.Empty;
     public string GamePath { get; set; } = string.Empty;
     public bool IsNewDownload { get; set; }
+    public bool IncludeManifest { get; set; } = true; // Request the appmanifest file too
 }
 
 public class FileManifest
 {
     public string GamePath { get; set; } = string.Empty;
     public List<FileTransferInfo> Files { get; set; } = [];
+    public string? AppManifestContent { get; set; } // The appmanifest_<appid>.acf content
 }
 
 public class FileTransferInfo
