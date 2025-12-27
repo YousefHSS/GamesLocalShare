@@ -366,6 +366,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     
                     StatusMessage = $"Found {incomplete.Count} incomplete transfer(s) that can be resumed";
                 }
+                else
+                {
+                    SelectedIncompleteTransfer = null;
+                }
+                
+                // Force command to re-evaluate CanExecute
+                ResumeTransferCommand.NotifyCanExecuteChanged();
             });
         });
     }
