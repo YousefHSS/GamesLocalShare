@@ -414,19 +414,25 @@ public class FileTransferService : IDisposable
             // Signal end of transfer
             writer.Write(string.Empty);
 
-            // Check if transfer completed
-            bool success = transferredBytes >= _currentTransferState.TotalBytes;
+            // Calculate total bytes (include already transferred for resume cases)
+            long totalTransferred = transferredBytes;
+            
+            // Check if transfer completed - either we transferred everything OR there was nothing to transfer (files already match)
+            bool success = filesToDownload.Count == 0 || transferredBytes >= _currentTransferState.TotalBytes;
             
             if (success)
             {
                 _currentTransferState.Delete();
             }
 
+            System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred}, total={_currentTransferState.TotalBytes}");
+
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
                 GameAppId = remoteGame.AppId,
+                GameName = remoteGame.Name,
                 Success = success,
-                TotalBytesTransferred = transferredBytes,
+                TotalBytesTransferred = totalTransferred,
                 IsNewDownload = isNewDownload
             });
 
@@ -452,6 +458,7 @@ public class FileTransferService : IDisposable
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
                 GameAppId = remoteGame.AppId,
+                GameName = remoteGame.Name,
                 Success = false,
                 ErrorMessage = errorMsg,
                 IsNewDownload = isNewDownload
@@ -468,6 +475,7 @@ public class FileTransferService : IDisposable
             TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
             {
                 GameAppId = remoteGame.AppId,
+                GameName = remoteGame.Name,
                 Success = false,
                 ErrorMessage = ex.Message,
                 IsNewDownload = isNewDownload
@@ -734,6 +742,7 @@ public class TransferProgressEventArgs : EventArgs
 public class TransferCompletedEventArgs : EventArgs
 {
     public string GameAppId { get; set; } = string.Empty;
+    public string GameName { get; set; } = string.Empty;
     public bool Success { get; set; }
     public long TotalBytesTransferred { get; set; }
     public string? ErrorMessage { get; set; }

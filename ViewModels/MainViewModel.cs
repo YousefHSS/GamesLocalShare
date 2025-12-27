@@ -556,7 +556,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (SelectedSyncItem.IsNewDownload)
             {
+                CurrentTransferGameName = SelectedSyncItem.RemoteGame.Name;
                 StatusMessage = $"Downloading {SelectedSyncItem.RemoteGame.Name}...";
+                AddLog($"Starting download: {SelectedSyncItem.RemoteGame.Name}", LogMessageType.Transfer);
                 
                 // Get a valid Steam library path for new downloads
                 var targetPath = GetTargetPathForNewGame(SelectedSyncItem.RemoteGame);
@@ -570,7 +572,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
+                CurrentTransferGameName = SelectedSyncItem.LocalGame!.Name;
                 StatusMessage = $"Updating {SelectedSyncItem.LocalGame!.Name}...";
+                AddLog($"Starting update: {SelectedSyncItem.LocalGame!.Name}", LogMessageType.Transfer);
 
                 var success = await _fileTransferService.RequestGameTransferAsync(
                     SelectedSyncItem.RemotePeer,
@@ -589,6 +593,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             IsTransferring = false;
+            CurrentTransferGameName = string.Empty;
         }
     }
 
@@ -603,6 +608,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (peer == null)
         {
             StatusMessage = "No peer found with this game";
+            AddLog("Download failed: No peer found with this game", LogMessageType.Error);
             return;
         }
 
@@ -610,13 +616,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (LocalGames.Any(g => g.AppId == SelectedPeerGame.AppId))
         {
             StatusMessage = "You already have this game installed. Check the Updates panel.";
+            AddLog("Download skipped: Game already installed", LogMessageType.Warning);
             return;
         }
 
         try
         {
             IsTransferring = true;
+            CurrentTransferGameName = SelectedPeerGame.Name;
             StatusMessage = $"Downloading {SelectedPeerGame.Name} from {peer.DisplayName}...";
+            AddLog($"Starting download: {SelectedPeerGame.Name} from {peer.DisplayName}", LogMessageType.Transfer);
 
             var targetPath = GetTargetPathForNewGame(SelectedPeerGame);
 
@@ -627,7 +636,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (success)
             {
-                StatusMessage = $"Download complete: {SelectedPeerGame.Name}";
                 // Refresh local games to include the new one
                 await ScanLocalGamesAsync();
             }
@@ -640,6 +648,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             IsTransferring = false;
+            CurrentTransferGameName = string.Empty;
         }
     }
 
@@ -898,21 +907,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (e.Success)
             {
                 var action = e.IsNewDownload ? "Download" : "Update";
-                var message = $"? {action} complete! {FormatBytes(e.TotalBytesTransferred)} transferred";
+                var gameName = !string.IsNullOrEmpty(e.GameName) ? e.GameName : "Game";
+                
+                string message;
+                if (e.TotalBytesTransferred > 0)
+                {
+                    message = $"{action} complete: {gameName} ({FormatBytes(e.TotalBytesTransferred)})";
+                }
+                else
+                {
+                    message = $"{action} complete: {gameName} (already up to date)";
+                }
+                
                 StatusMessage = message;
                 AddLog(message, LogMessageType.Success);
-                
-                // Show a notification message box for completed downloads
-                MessageBox.Show(
-                    $"{action} completed successfully!\n\n" +
-                    $"Total transferred: {FormatBytes(e.TotalBytesTransferred)}",
-                    "Transfer Complete",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
             }
             else
             {
-                var message = $"? Transfer failed: {e.ErrorMessage}";
+                var gameName = !string.IsNullOrEmpty(e.GameName) ? e.GameName : "Game";
+                var message = $"Transfer failed for {gameName}: {e.ErrorMessage}";
                 StatusMessage = message + " Progress saved for resume.";
                 AddLog(message, LogMessageType.Error);
                 // Refresh incomplete transfers
