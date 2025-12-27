@@ -47,6 +47,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private GameInfo? _selectedPeerGame;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ResumeTransferCommand))]
     private TransferState? _selectedIncompleteTransfer;
 
     [ObservableProperty]
@@ -59,6 +60,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _currentTransferFile = string.Empty;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ResumeTransferCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StartSyncCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DownloadNewGameCommand))]
     private bool _isTransferring;
 
     [ObservableProperty]
@@ -673,7 +677,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanResumeTransfer))]
     private async Task ResumeTransferAsync()
     {
         if (SelectedIncompleteTransfer == null || IsTransferring)
@@ -703,7 +707,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             IsTransferring = true;
+            CurrentTransferGameName = SelectedIncompleteTransfer.GameName;
             StatusMessage = $"Resuming download of {SelectedIncompleteTransfer.GameName}...";
+            AddLog($"Resuming download: {SelectedIncompleteTransfer.GameName}", LogMessageType.Transfer);
 
             var success = await _fileTransferService.ResumeTransferAsync(SelectedIncompleteTransfer, peer);
 
@@ -711,7 +717,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 IncompleteTransfers.Remove(SelectedIncompleteTransfer);
                 await ScanLocalGamesAsync();
-                AddLog($"Resumed download of {SelectedIncompleteTransfer.GameName}", LogMessageType.Info);
             }
         }
         catch (Exception ex)
@@ -722,8 +727,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             IsTransferring = false;
+            CurrentTransferGameName = string.Empty;
         }
     }
+
+    private bool CanResumeTransfer() => SelectedIncompleteTransfer != null && !IsTransferring;
 
     [RelayCommand]
     private void CancelTransfer()

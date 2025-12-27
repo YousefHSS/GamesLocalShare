@@ -492,7 +492,6 @@
 
                     <Border Grid.Row="2" Padding="8" Background="{DynamicResource MahApps.Brushes.Gray9}">
                         <Button Command="{Binding ResumeTransferCommand}" 
-                                IsEnabled="{Binding SelectedIncompleteTransfer, Converter={StaticResource NullToBoolConverter}}"
                                 Style="{DynamicResource MahApps.Styles.Button.Square}"
                                 Background="#FFEF4444"
                                 Padding="10,8">
