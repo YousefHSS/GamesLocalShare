@@ -195,11 +195,21 @@
                     </Grid.RowDefinitions>
 
                     <Border Background="{DynamicResource MahApps.Brushes.Accent2}" Padding="8" CornerRadius="5,5,0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Network Peers" FontSize="13" FontWeight="Bold" Foreground="White"/>
-                            <TextBlock Text="{Binding NetworkPeers.Count, StringFormat=' ({0})'}" 
-                                       FontSize="13" Foreground="White" Opacity="0.8"/>
-                        </StackPanel>
+                        <Grid>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Network Peers" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                                <TextBlock Text="{Binding NetworkPeers.Count, StringFormat=' ({0})'}" 
+                                           FontSize="13" Foreground="White" Opacity="0.8"/>
+                            </StackPanel>
+                            <Button Command="{Binding RefreshAllPeersCommand}"
+                                    HorizontalAlignment="Right"
+                                    Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                    Background="Transparent"
+                                    Padding="8,2"
+                                    ToolTip="Refresh game lists from all peers">
+                                <TextBlock Text="? Refresh" FontSize="11" Foreground="White"/>
+                            </Button>
+                        </Grid>
                     </Border>
 
                     <!-- Manual IP -->

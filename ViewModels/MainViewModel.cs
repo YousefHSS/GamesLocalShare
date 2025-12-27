@@ -59,6 +59,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isTransferring;
 
+    [ObservableProperty]
+    private string _lastError = string.Empty;
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
@@ -76,12 +79,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.PeerLost += OnPeerLost;
         _networkService.PeerGamesUpdated += OnPeerGamesUpdated;
         _networkService.ScanProgress += OnScanProgress;
+        _networkService.ConnectionError += OnConnectionError;
 
         // Subscribe to transfer events
         _fileTransferService.ProgressChanged += OnTransferProgress;
         _fileTransferService.TransferCompleted += OnTransferCompleted;
 
         LocalIpAddress = _networkService.LocalPeer.IpAddress;
+    }
+
+    private void OnConnectionError(object? sender, string error)
+    {
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            LastError = error;
+            System.Diagnostics.Debug.WriteLine($"Connection Error: {error}");
+        });
     }
 
     [RelayCommand]
@@ -179,7 +192,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Network error: {ex.Message}";
+            StatusMessage = $"Network error: {ex.Message}. Check if ports 45677-45679 are blocked by firewall.";
             IsNetworkActive = false;
         }
     }
@@ -219,7 +232,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             
             StatusMessage = foundCount > 0 
                 ? $"Scan complete. Found {foundCount} peer(s)." 
-                : "Scan complete. No peers found. Make sure the app is running on other computers.";
+                : "Scan complete. No peers found. Make sure the app is running on other computers and firewall allows connections.";
         }
         catch (Exception ex)
         {
@@ -259,7 +272,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                StatusMessage = $"Could not connect to {ManualPeerIp}. Make sure the app is running on that computer.";
+                StatusMessage = $"Could not connect to {ManualPeerIp}. Check: 1) App is running on that PC 2) Firewall allows port 45678 3) Both PCs are on same network";
             }
         }
         catch (Exception ex)
@@ -272,10 +285,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task RefreshPeerGamesAsync()
     {
         if (SelectedPeer == null)
+        {
+            StatusMessage = "Please select a peer first";
             return;
+        }
 
         StatusMessage = $"Requesting game list from {SelectedPeer.DisplayName}...";
         await _networkService.RequestGameListAsync(SelectedPeer);
+    }
+
+    [RelayCommand]
+    private async Task RefreshAllPeersAsync()
+    {
+        if (NetworkPeers.Count == 0)
+        {
+            StatusMessage = "No peers to refresh";
+            return;
+        }
+
+        StatusMessage = "Refreshing all peer game lists...";
+        
+        foreach (var peer in NetworkPeers.ToList())
+        {
+            await _networkService.RequestGameListAsync(peer);
+            await Task.Delay(100); // Small delay between requests
+        }
+
+        StatusMessage = $"Refreshed game lists from {NetworkPeers.Count} peer(s)";
     }
 
     [RelayCommand]
@@ -329,8 +365,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task DownloadNewGameAsync()
     {
-        if (SelectedPeerGame == null || SelectedPeer == null || IsTransferring)
+        if (SelectedPeerGame == null || IsTransferring)
             return;
+
+        // Find a peer that has this game
+        var peer = NetworkPeers.FirstOrDefault(p => p.Games.Any(g => g.AppId == SelectedPeerGame.AppId));
+        if (peer == null)
+        {
+            StatusMessage = "No peer found with this game";
+            return;
+        }
 
         // Check if we already have this game
         if (LocalGames.Any(g => g.AppId == SelectedPeerGame.AppId))
@@ -342,12 +386,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             IsTransferring = true;
-            StatusMessage = $"Downloading {SelectedPeerGame.Name} from {SelectedPeer.DisplayName}...";
+            StatusMessage = $"Downloading {SelectedPeerGame.Name} from {peer.DisplayName}...";
 
             var targetPath = GetTargetPathForNewGame(SelectedPeerGame);
 
             var success = await _fileTransferService.RequestNewGameDownloadAsync(
-                SelectedPeer,
+                peer,
                 SelectedPeerGame,
                 targetPath);
 
@@ -453,7 +497,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (!NetworkPeers.Any(p => p.PeerId == peer.PeerId))
             {
                 NetworkPeers.Add(peer);
-                StatusMessage = $"Discovered peer: {peer.DisplayName} ({peer.IpAddress})";
+                StatusMessage = $"Discovered peer: {peer.DisplayName} ({peer.IpAddress}) - requesting games...";
             }
         });
     }
@@ -483,6 +527,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (existing != null)
             {
                 existing.Games = peer.Games;
+                
+                // Force UI update by removing and re-adding
+                var index = NetworkPeers.IndexOf(existing);
+                NetworkPeers.RemoveAt(index);
+                NetworkPeers.Insert(index, existing);
             }
 
             // Recalculate available syncs and new games
@@ -637,6 +686,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.PeerLost -= OnPeerLost;
         _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;
         _networkService.ScanProgress -= OnScanProgress;
+        _networkService.ConnectionError -= OnConnectionError;
         _fileTransferService.ProgressChanged -= OnTransferProgress;
         _fileTransferService.TransferCompleted -= OnTransferCompleted;
 

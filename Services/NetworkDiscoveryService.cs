@@ -49,6 +49,11 @@ public class NetworkDiscoveryService : IDisposable
     /// </summary>
     public event EventHandler<string>? ScanProgress;
 
+    /// <summary>
+    /// Event raised for connection errors (for debugging)
+    /// </summary>
+    public event EventHandler<string>? ConnectionError;
+
     public NetworkDiscoveryService()
     {
         LocalPeer = new NetworkPeer
@@ -66,15 +71,31 @@ public class NetworkDiscoveryService : IDisposable
     {
         _cts = new CancellationTokenSource();
 
-        // Start UDP listener for discovery
-        _udpClient = new UdpClient();
-        _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, BroadcastPort));
-        _udpClient.EnableBroadcast = true;
+        try
+        {
+            // Start UDP listener for discovery
+            _udpClient = new UdpClient();
+            _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, BroadcastPort));
+            _udpClient.EnableBroadcast = true;
+        }
+        catch (Exception ex)
+        {
+            ConnectionError?.Invoke(this, $"Failed to start UDP listener on port {BroadcastPort}: {ex.Message}");
+            throw;
+        }
 
-        // Start TCP listener for game list exchange
-        _tcpListener = new TcpListener(IPAddress.Any, TcpPort);
-        _tcpListener.Start();
+        try
+        {
+            // Start TCP listener for game list exchange
+            _tcpListener = new TcpListener(IPAddress.Any, TcpPort);
+            _tcpListener.Start();
+        }
+        catch (Exception ex)
+        {
+            ConnectionError?.Invoke(this, $"Failed to start TCP listener on port {TcpPort}: {ex.Message}");
+            throw;
+        }
 
         // Start background tasks
         _ = ListenForDiscoveryAsync(_cts.Token);
@@ -176,22 +197,31 @@ public class NetworkDiscoveryService : IDisposable
         try
         {
             using var client = new TcpClient();
+            client.ReceiveTimeout = 5000;
+            client.SendTimeout = 5000;
             
-            // Set a short timeout for connection attempts
-            var connectTask = client.ConnectAsync(ipAddress, TcpPort, ct).AsTask();
-            var timeoutTask = Task.Delay(1000, ct);
+            // Set a timeout for connection attempts
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            connectCts.CancelAfter(3000);
             
-            var completedTask = await Task.WhenAny(connectTask, timeoutTask);
+            try
+            {
+                await client.ConnectAsync(ipAddress, TcpPort, connectCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return null; // Connection timed out
+            }
             
-            if (completedTask == timeoutTask || !client.Connected)
+            if (!client.Connected)
             {
                 return null;
             }
 
             // Connected! Now request peer info
             using var stream = client.GetStream();
-            stream.ReadTimeout = 2000;
-            stream.WriteTimeout = 2000;
+            stream.ReadTimeout = 5000;
+            stream.WriteTimeout = 5000;
             
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
             using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -207,10 +237,10 @@ public class NetworkDiscoveryService : IDisposable
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
 
             // Read response with timeout
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(2000);
+            using var responseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            responseCts.CancelAfter(5000);
             
-            var responseLine = await reader.ReadLineAsync(cts.Token);
+            var responseLine = await reader.ReadLineAsync(responseCts.Token);
             if (!string.IsNullOrEmpty(responseLine))
             {
                 var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine);
@@ -233,11 +263,22 @@ public class NetworkDiscoveryService : IDisposable
                         {
                             _peers[peer.PeerId] = peer;
                             PeerDiscovered?.Invoke(this, peer);
+                            
+                            // Also notify about games if we got them
+                            if (peer.Games.Count > 0)
+                            {
+                                PeerGamesUpdated?.Invoke(this, peer);
+                            }
                         }
                         else
                         {
                             _peers[peer.PeerId].LastSeen = DateTime.Now;
                             _peers[peer.PeerId].Games = peer.Games;
+                            
+                            if (peer.Games.Count > 0)
+                            {
+                                PeerGamesUpdated?.Invoke(this, _peers[peer.PeerId]);
+                            }
                         }
                     }
 
@@ -245,9 +286,17 @@ public class NetworkDiscoveryService : IDisposable
                 }
             }
         }
-        catch
+        catch (SocketException ex)
         {
-            // Connection failed - this IP is not running our app
+            ConnectionError?.Invoke(this, $"Socket error connecting to {ipAddress}: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            ConnectionError?.Invoke(this, $"IO error connecting to {ipAddress}: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            ConnectionError?.Invoke(this, $"Error connecting to {ipAddress}: {ex.Message}");
         }
 
         return null;
@@ -258,8 +307,24 @@ public class NetworkDiscoveryService : IDisposable
     /// </summary>
     public async Task<bool> ConnectToPeerByIpAsync(string ipAddress)
     {
+        ScanProgress?.Invoke(this, $"Attempting to connect to {ipAddress}...");
         var peer = await TryConnectToPeerAsync(ipAddress);
-        return peer != null;
+        
+        if (peer != null)
+        {
+            ScanProgress?.Invoke(this, $"Connected to {peer.DisplayName} with {peer.Games.Count} games");
+            return true;
+        }
+        
+        // Also try requesting game list separately in case the peer exists but returned empty games
+        var existingPeer = GetPeers().FirstOrDefault(p => p.IpAddress == ipAddress);
+        if (existingPeer != null)
+        {
+            await RequestGameListAsync(existingPeer);
+            return true;
+        }
+        
+        return false;
     }
 
     /// <summary>
@@ -348,8 +413,14 @@ public class NetworkDiscoveryService : IDisposable
     {
         try
         {
+            ScanProgress?.Invoke(this, $"Requesting game list from {peer.DisplayName}...");
+            
             using var client = new TcpClient();
-            await client.ConnectAsync(peer.IpAddress, peer.Port);
+            client.ReceiveTimeout = 10000;
+            client.SendTimeout = 5000;
+            
+            using var cts = new CancellationTokenSource(10000);
+            await client.ConnectAsync(peer.IpAddress, peer.Port, cts.Token);
             
             using var stream = client.GetStream();
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
@@ -366,21 +437,24 @@ public class NetworkDiscoveryService : IDisposable
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
 
             // Read response
-            var responseLine = await reader.ReadLineAsync();
+            var responseLine = await reader.ReadLineAsync(cts.Token);
             if (!string.IsNullOrEmpty(responseLine))
             {
                 var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine);
-                if (response?.Type == MessageType.GameList && response.Games != null)
+                if (response != null)
                 {
-                    peer.Games = response.Games;
+                    peer.Games = response.Games ?? [];
                     peer.LastSeen = DateTime.Now;
+                    
+                    ScanProgress?.Invoke(this, $"Received {peer.Games.Count} games from {peer.DisplayName}");
                     PeerGamesUpdated?.Invoke(this, peer);
                 }
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error requesting game list from {peer.DisplayName}: {ex.Message}");
+            ConnectionError?.Invoke(this, $"Error requesting game list from {peer.DisplayName}: {ex.Message}");
+            ScanProgress?.Invoke(this, $"Failed to get games from {peer.DisplayName}: {ex.Message}");
         }
     }
 
@@ -408,11 +482,14 @@ public class NetworkDiscoveryService : IDisposable
 
                         var peerIp = result.RemoteEndPoint.Address.ToString();
 
+                        bool isNew = false;
+                        NetworkPeer? newPeer = null;
+                        
                         lock (_peersLock)
                         {
                             if (!_peers.TryGetValue(peerId, out var existingPeer))
                             {
-                                var newPeer = new NetworkPeer
+                                newPeer = new NetworkPeer
                                 {
                                     PeerId = peerId,
                                     DisplayName = peerName,
@@ -421,16 +498,20 @@ public class NetworkDiscoveryService : IDisposable
                                     LastSeen = DateTime.Now
                                 };
                                 _peers[peerId] = newPeer;
-                                PeerDiscovered?.Invoke(this, newPeer);
-
-                                // Request their game list
-                                _ = RequestGameListAsync(newPeer);
+                                isNew = true;
                             }
                             else
                             {
                                 existingPeer.LastSeen = DateTime.Now;
                                 existingPeer.IpAddress = peerIp;
                             }
+                        }
+
+                        if (isNew && newPeer != null)
+                        {
+                            PeerDiscovered?.Invoke(this, newPeer);
+                            // Request their game list
+                            _ = RequestGameListAsync(newPeer);
                         }
 
                         // Send a response back so they know we exist
@@ -452,11 +533,14 @@ public class NetworkDiscoveryService : IDisposable
 
                         var peerIp = result.RemoteEndPoint.Address.ToString();
 
+                        bool isNew = false;
+                        NetworkPeer? newPeer = null;
+                        
                         lock (_peersLock)
                         {
                             if (!_peers.TryGetValue(peerId, out var existingPeer))
                             {
-                                var newPeer = new NetworkPeer
+                                newPeer = new NetworkPeer
                                 {
                                     PeerId = peerId,
                                     DisplayName = peerName,
@@ -465,14 +549,18 @@ public class NetworkDiscoveryService : IDisposable
                                     LastSeen = DateTime.Now
                                 };
                                 _peers[peerId] = newPeer;
-                                PeerDiscovered?.Invoke(this, newPeer);
-
-                                _ = RequestGameListAsync(newPeer);
+                                isNew = true;
                             }
                             else
                             {
                                 existingPeer.LastSeen = DateTime.Now;
                             }
+                        }
+
+                        if (isNew && newPeer != null)
+                        {
+                            PeerDiscovered?.Invoke(this, newPeer);
+                            _ = RequestGameListAsync(newPeer);
                         }
                     }
                 }
@@ -530,6 +618,9 @@ public class NetworkDiscoveryService : IDisposable
         {
             using (client)
             {
+                client.ReceiveTimeout = 10000;
+                client.SendTimeout = 10000;
+                
                 var remoteIp = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.ToString();
                 var stream = client.GetStream();
                 using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -546,11 +637,14 @@ public class NetworkDiscoveryService : IDisposable
                 // If we received a request, add the sender as a peer
                 if (!string.IsNullOrEmpty(request.SenderId) && request.SenderId != LocalPeer.PeerId)
                 {
+                    bool isNew = false;
+                    NetworkPeer? newPeer = null;
+                    
                     lock (_peersLock)
                     {
                         if (!_peers.ContainsKey(request.SenderId))
                         {
-                            var newPeer = new NetworkPeer
+                            newPeer = new NetworkPeer
                             {
                                 PeerId = request.SenderId,
                                 DisplayName = request.SenderName ?? remoteIp,
@@ -559,12 +653,17 @@ public class NetworkDiscoveryService : IDisposable
                                 LastSeen = DateTime.Now
                             };
                             _peers[request.SenderId] = newPeer;
-                            PeerDiscovered?.Invoke(this, newPeer);
+                            isNew = true;
                         }
                         else
                         {
                             _peers[request.SenderId].LastSeen = DateTime.Now;
                         }
+                    }
+                    
+                    if (isNew && newPeer != null)
+                    {
+                        PeerDiscovered?.Invoke(this, newPeer);
                     }
                 }
 
@@ -631,7 +730,7 @@ public class NetworkDiscoveryService : IDisposable
         {
             try
             {
-                await Task.Delay(10000, ct); // Check every 10 seconds
+                await Task.Delay(15000, ct); // Check every 15 seconds
 
                 List<NetworkPeer> stalePeers;
                 lock (_peersLock)
@@ -660,7 +759,11 @@ public class NetworkDiscoveryService : IDisposable
         try
         {
             using var client = new TcpClient();
-            await client.ConnectAsync(peer.IpAddress, peer.Port);
+            client.ReceiveTimeout = 5000;
+            client.SendTimeout = 5000;
+            
+            using var cts = new CancellationTokenSource(5000);
+            await client.ConnectAsync(peer.IpAddress, peer.Port, cts.Token);
             
             using var stream = client.GetStream();
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
