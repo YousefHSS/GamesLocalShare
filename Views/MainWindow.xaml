@@ -218,14 +218,23 @@
                                 <TextBlock Text="{Binding NetworkPeers.Count, StringFormat=' ({0})'}" 
                                            FontSize="13" Foreground="White" Opacity="0.8"/>
                             </StackPanel>
-                            <Button Command="{Binding RefreshAllPeersCommand}"
-                                    HorizontalAlignment="Right"
-                                    Style="{DynamicResource MahApps.Styles.Button.Square}"
-                                    Background="Transparent"
-                                    Padding="8,2"
-                                    ToolTip="Refresh game lists from all peers">
-                                <TextBlock Text="? Refresh" FontSize="11" Foreground="White"/>
-                            </Button>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Command="{Binding TestConnectionToPeerCommand}"
+                                        Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                        Background="Transparent"
+                                        Padding="8,2"
+                                        Margin="0,0,5,0"
+                                        ToolTip="Test connection to selected peer (both ports)">
+                                    <TextBlock Text="?? Test" FontSize="11" Foreground="White"/>
+                                </Button>
+                                <Button Command="{Binding RefreshAllPeersCommand}"
+                                        Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                        Background="Transparent"
+                                        Padding="8,2"
+                                        ToolTip="Refresh game lists from all peers">
+                                    <TextBlock Text="? Refresh" FontSize="11" Foreground="White"/>
+                                </Button>
+                            </StackPanel>
                         </Grid>
                     </Border>
 

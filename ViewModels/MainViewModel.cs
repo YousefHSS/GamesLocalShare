@@ -201,6 +201,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         transferStatus.AppendLine($"Port Available: {FileTransferService.IsPortAvailable()}");
         transferStatus.AppendLine();
         
+        // Add peer info with IPs
+        transferStatus.AppendLine("=== Connected Peers ===");
+        transferStatus.AppendLine($"My IP: {LocalIpAddress}");
+        transferStatus.AppendLine($"Peers found: {NetworkPeers.Count}");
+        foreach (var peer in NetworkPeers)
+        {
+            transferStatus.AppendLine($"  - {peer.DisplayName}");
+            transferStatus.AppendLine($"    IP: {peer.IpAddress}");
+            transferStatus.AppendLine($"    Port: {peer.Port}");
+            transferStatus.AppendLine($"    Games: {peer.Games.Count}");
+            transferStatus.AppendLine($"    Last Seen: {peer.LastSeen:HH:mm:ss}");
+        }
+        transferStatus.AppendLine();
+        
         var fullReport = $"{steamReport}\n\n{transferStatus}\n{networkReport}";
         
         MessageBox.Show(fullReport, "Troubleshooting Report", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -839,5 +853,63 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _networkService.Dispose();
         _fileTransferService.Dispose();
+    }
+
+    [RelayCommand]
+    private async Task TestConnectionToPeerAsync()
+    {
+        if (SelectedPeer == null)
+        {
+            StatusMessage = "Please select a peer first";
+            return;
+        }
+
+        StatusMessage = $"Testing connection to {SelectedPeer.DisplayName}...";
+        
+        var results = new System.Text.StringBuilder();
+        results.AppendLine($"=== Connection Test to {SelectedPeer.DisplayName} ===");
+        results.AppendLine($"Target IP: {SelectedPeer.IpAddress}");
+        results.AppendLine();
+
+        // Test TCP 45678 (game list)
+        results.AppendLine("Testing TCP 45678 (Game List)...");
+        try
+        {
+            using var client1 = new System.Net.Sockets.TcpClient();
+            var cts1 = new CancellationTokenSource(5000);
+            await client1.ConnectAsync(SelectedPeer.IpAddress, 45678, cts1.Token);
+            results.AppendLine("  ? SUCCESS - Connected!");
+            client1.Close();
+        }
+        catch (Exception ex)
+        {
+            results.AppendLine($"  ? FAILED - {ex.Message}");
+        }
+        
+        // Test TCP 45679 (file transfer)
+        results.AppendLine();
+        results.AppendLine("Testing TCP 45679 (File Transfer)...");
+        try
+        {
+            using var client2 = new System.Net.Sockets.TcpClient();
+            var cts2 = new CancellationTokenSource(5000);
+            await client2.ConnectAsync(SelectedPeer.IpAddress, 45679, cts2.Token);
+            results.AppendLine("  ? SUCCESS - Connected!");
+            client2.Close();
+        }
+        catch (Exception ex)
+        {
+            results.AppendLine($"  ? FAILED - {ex.Message}");
+        }
+
+        results.AppendLine();
+        results.AppendLine("If port 45678 works but 45679 fails:");
+        results.AppendLine("- The peer may not have clicked 'Start Network'");
+        results.AppendLine("- Another app may be using port 45679 on the peer");
+        results.AppendLine("- Firewall may be blocking port 45679 specifically");
+
+        MessageBox.Show(results.ToString(), "Connection Test Results", MessageBoxButton.OK, MessageBoxImage.Information);
+        
+        StatusMessage = "Connection test complete";
     }
 }
