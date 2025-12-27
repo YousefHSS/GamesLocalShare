@@ -23,7 +23,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _isNetworkActive;
 
     [ObservableProperty]
+    private bool _isScanningPeers;
+
+    [ObservableProperty]
     private string _localIpAddress = string.Empty;
+
+    [ObservableProperty]
+    private string _manualPeerIp = string.Empty;
 
     [ObservableProperty]
     private GameInfo? _selectedLocalGame;
@@ -60,6 +66,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.PeerDiscovered += OnPeerDiscovered;
         _networkService.PeerLost += OnPeerLost;
         _networkService.PeerGamesUpdated += OnPeerGamesUpdated;
+        _networkService.ScanProgress += OnScanProgress;
 
         // Subscribe to transfer events
         _fileTransferService.ProgressChanged += OnTransferProgress;
@@ -142,6 +149,76 @@ public partial class MainViewModel : ObservableObject, IDisposable
         
         IsNetworkActive = false;
         StatusMessage = "Network discovery stopped";
+    }
+
+    [RelayCommand]
+    private async Task ScanForPeersAsync()
+    {
+        if (!IsNetworkActive)
+        {
+            StatusMessage = "Please start the network first";
+            return;
+        }
+
+        if (IsScanningPeers)
+            return;
+
+        try
+        {
+            IsScanningPeers = true;
+            StatusMessage = "Scanning local network for peers...";
+
+            var foundCount = await _networkService.ScanNetworkAsync();
+            
+            StatusMessage = foundCount > 0 
+                ? $"Scan complete. Found {foundCount} peer(s)." 
+                : "Scan complete. No peers found. Make sure the app is running on other computers.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Scan error: {ex.Message}";
+        }
+        finally
+        {
+            IsScanningPeers = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ConnectToManualIpAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ManualPeerIp))
+        {
+            StatusMessage = "Please enter an IP address";
+            return;
+        }
+
+        if (!IsNetworkActive)
+        {
+            StatusMessage = "Please start the network first";
+            return;
+        }
+
+        try
+        {
+            StatusMessage = $"Connecting to {ManualPeerIp}...";
+            
+            var success = await _networkService.ConnectToPeerByIpAsync(ManualPeerIp.Trim());
+            
+            if (success)
+            {
+                StatusMessage = $"Connected to peer at {ManualPeerIp}";
+                ManualPeerIp = string.Empty;
+            }
+            else
+            {
+                StatusMessage = $"Could not connect to {ManualPeerIp}. Make sure the app is running on that computer.";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Connection error: {ex.Message}";
+        }
     }
 
     [RelayCommand]
@@ -232,6 +309,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             UpdateAvailableSyncs();
             
             StatusMessage = $"Received {peer.Games.Count} games from {peer.DisplayName}";
+        });
+    }
+
+    private void OnScanProgress(object? sender, string message)
+    {
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            StatusMessage = message;
         });
     }
 
@@ -327,6 +412,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.PeerDiscovered -= OnPeerDiscovered;
         _networkService.PeerLost -= OnPeerLost;
         _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;
+        _networkService.ScanProgress -= OnScanProgress;
         _fileTransferService.ProgressChanged -= OnTransferProgress;
         _fileTransferService.TransferCompleted -= OnTransferCompleted;
 

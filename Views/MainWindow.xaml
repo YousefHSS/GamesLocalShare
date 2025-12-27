@@ -7,7 +7,7 @@
         xmlns:vm="clr-namespace:GamesLocalShare.ViewModels"
         mc:Ignorable="d"
         Title="Games Local Share - LAN Game Sync" 
-        Height="700" Width="1100"
+        Height="700" Width="1200"
         WindowStartupLocation="CenterScreen"
         GlowBrush="{DynamicResource MahApps.Brushes.Accent}"
         BorderThickness="1">
@@ -41,27 +41,30 @@
                             Style="{DynamicResource MahApps.Styles.Button.Square.Accent}"
                             Padding="15,8" Margin="0,0,10,0"
                             IsEnabled="{Binding IsScanning, Converter={StaticResource InvertBoolConverter}}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Scan Games" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="Scan Games" VerticalAlignment="Center"/>
                     </Button>
 
                     <Button Command="{Binding StartNetworkCommand}" 
                             Visibility="{Binding IsNetworkActive, Converter={StaticResource InvertedBoolToVisConverter}}"
                             Style="{DynamicResource MahApps.Styles.Button.Square}"
                             Padding="15,8" Margin="0,0,10,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Start Network" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="Start Network" VerticalAlignment="Center"/>
                     </Button>
 
                     <Button Command="{Binding StopNetworkCommand}" 
                             Visibility="{Binding IsNetworkActive, Converter={StaticResource BoolToVis}}"
                             Style="{DynamicResource MahApps.Styles.Button.Square}"
                             Padding="15,8" Margin="0,0,10,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Stop Network" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="Stop Network" VerticalAlignment="Center"/>
+                    </Button>
+
+                    <!-- New Scan Peers Button -->
+                    <Button Command="{Binding ScanForPeersCommand}" 
+                            Visibility="{Binding IsNetworkActive, Converter={StaticResource BoolToVis}}"
+                            Style="{DynamicResource MahApps.Styles.Button.Square}"
+                            Padding="15,8" Margin="0,0,10,0"
+                            IsEnabled="{Binding IsScanningPeers, Converter={StaticResource InvertBoolConverter}}">
+                        <TextBlock Text="Scan for Peers" VerticalAlignment="Center"/>
                     </Button>
                 </StackPanel>
 
@@ -89,11 +92,11 @@
         <!-- Main Content -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="300"/>
+                <ColumnDefinition Width="*" MinWidth="280"/>
                 <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*" MinWidth="300"/>
+                <ColumnDefinition Width="*" MinWidth="320"/>
                 <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*" MinWidth="300"/>
+                <ColumnDefinition Width="*" MinWidth="280"/>
             </Grid.ColumnDefinitions>
 
             <!-- Local Games Panel -->
@@ -145,6 +148,7 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
@@ -156,7 +160,28 @@
                         </StackPanel>
                     </Border>
 
-                    <ListBox Grid.Row="1" 
+                    <!-- Manual IP Connection -->
+                    <Border Grid.Row="1" Padding="10" Background="{DynamicResource MahApps.Brushes.Gray9}"
+                            Visibility="{Binding IsNetworkActive, Converter={StaticResource BoolToVis}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding ManualPeerIp, UpdateSourceTrigger=PropertyChanged}" 
+                                     mah:TextBoxHelper.Watermark="Enter IP address (e.g., 192.168.1.100)"
+                                     Margin="0,0,10,0"
+                                     VerticalContentAlignment="Center"/>
+                            <Button Grid.Column="1" 
+                                    Command="{Binding ConnectToManualIpCommand}"
+                                    Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                    Padding="15,5">
+                                <TextBlock Text="Connect" VerticalAlignment="Center"/>
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <ListBox Grid.Row="2" 
                              ItemsSource="{Binding NetworkPeers}" 
                              SelectedItem="{Binding SelectedPeer}"
                              Background="Transparent"
@@ -184,15 +209,18 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <!-- Empty state -->
-                    <TextBlock Grid.Row="1" 
-                               Text="No peers found yet. Make sure other computers are running this app."
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               Margin="20"
-                               Foreground="{DynamicResource MahApps.Brushes.Gray3}"
-                               Visibility="{Binding NetworkPeers.Count, Converter={StaticResource ZeroToVisConverter}}"/>
+                    <!-- Empty state / Scanning indicator -->
+                    <Grid Grid.Row="2">
+                        <TextBlock Text="No peers found yet. Click 'Scan for Peers' or enter an IP address above."
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Margin="20"
+                                   Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                   Visibility="{Binding NetworkPeers.Count, Converter={StaticResource ZeroToVisConverter}}"/>
+                        
+                        <mah:ProgressRing IsActive="{Binding IsScanningPeers}" Width="50" Height="50"/>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -250,9 +278,7 @@
                                     IsEnabled="{Binding SelectedSyncItem, Converter={StaticResource NullToBoolConverter}}"
                                     Style="{DynamicResource MahApps.Styles.Button.Square.Accent}"
                                     Padding="15,10">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="Sync Selected Game" VerticalAlignment="Center"/>
-                                </StackPanel>
+                                <TextBlock Text="Sync Selected Game" VerticalAlignment="Center"/>
                             </Button>
 
                             <!-- Transfer Progress -->
