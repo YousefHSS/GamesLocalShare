@@ -32,18 +32,48 @@ public static class FirewallHelper
     }
 
     /// <summary>
-    /// Checks if firewall rules exist for the application
+    /// Checks if ALL firewall rules exist for the application
     /// </summary>
     public static bool CheckFirewallRulesExist()
     {
         try
         {
-            var result = RunNetshCommand($"advfirewall firewall show rule name=\"{RuleNameUdp}\"");
-            return result.Contains(RuleNameUdp);
+            // Check for UDP rule
+            var udpResult = RunNetshCommand($"advfirewall firewall show rule name=\"{RuleNameUdp}\"");
+            var hasUdp = udpResult.Contains(RuleNameUdp);
+
+            // Check for TCP rule
+            var tcpResult = RunNetshCommand($"advfirewall firewall show rule name=\"{RuleNameTcp}\"");
+            var hasTcp = tcpResult.Contains(RuleNameTcp);
+
+            // Both rules must exist
+            return hasUdp && hasTcp;
         }
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks if specific ports are allowed through the firewall
+    /// </summary>
+    public static (bool udpAllowed, bool tcp1Allowed, bool tcp2Allowed) CheckPortsAllowed()
+    {
+        try
+        {
+            var allRules = RunNetshCommand("advfirewall firewall show rule name=all dir=in");
+            
+            var udpAllowed = allRules.Contains($"LocalPort:.*{UdpPort}") || 
+                             allRules.Contains(RuleNameUdp);
+            var tcp1Allowed = allRules.Contains($"{TcpPort1}") && allRules.Contains("TCP");
+            var tcp2Allowed = allRules.Contains($"{TcpPort2}") && allRules.Contains("TCP");
+
+            return (udpAllowed, tcp1Allowed, tcp2Allowed);
+        }
+        catch
+        {
+            return (false, false, false);
         }
     }
 
@@ -61,20 +91,28 @@ public static class FirewallHelper
         {
             var errors = new List<string>();
             
+            // First, try to delete existing rules (in case they're corrupted)
+            try
+            {
+                RunNetshCommand($"advfirewall firewall delete rule name=\"{RuleNameUdp}\"");
+                RunNetshCommand($"advfirewall firewall delete rule name=\"{RuleNameTcp}\"");
+            }
+            catch { /* Ignore if rules don't exist */ }
+
             // Add UDP rule for discovery
             var udpResult = RunNetshCommand(
                 $"advfirewall firewall add rule name=\"{RuleNameUdp}\" dir=in action=allow protocol=UDP localport={UdpPort}");
             if (!udpResult.Contains("Ok"))
             {
-                errors.Add($"UDP rule: {udpResult}");
+                errors.Add($"UDP rule failed: {udpResult}");
             }
 
-            // Add TCP rule for communication
-            var tcpResult = RunNetshCommand(
+            // Add TCP rule for game list (port 45678)
+            var tcp1Result = RunNetshCommand(
                 $"advfirewall firewall add rule name=\"{RuleNameTcp}\" dir=in action=allow protocol=TCP localport={TcpPort1},{TcpPort2}");
-            if (!tcpResult.Contains("Ok"))
+            if (!tcp1Result.Contains("Ok"))
             {
-                errors.Add($"TCP rule: {tcpResult}");
+                errors.Add($"TCP rule failed: {tcp1Result}");
             }
 
             if (errors.Count == 0)
@@ -123,7 +161,14 @@ public static class FirewallHelper
         {
             var exePath = Environment.ProcessPath;
             if (string.IsNullOrEmpty(exePath))
-                return;
+            {
+                // Fallback to executable name
+                exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                if (exePath.EndsWith(".dll"))
+                {
+                    exePath = exePath.Replace(".dll", ".exe");
+                }
+            }
 
             var startInfo = new ProcessStartInfo
             {
@@ -152,7 +197,7 @@ public static class FirewallHelper
         report.AppendLine();
         
         report.AppendLine($"Running as Admin: {IsRunningAsAdmin()}");
-        report.AppendLine($"Firewall Rules Exist: {CheckFirewallRulesExist()}");
+        report.AppendLine($"Firewall Rules Configured: {CheckFirewallRulesExist()}");
         report.AppendLine();
         
         report.AppendLine("Required Ports:");
@@ -161,18 +206,37 @@ public static class FirewallHelper
         report.AppendLine($"  TCP {TcpPort2} - File transfers");
         report.AppendLine();
 
-        // Check if ports are in use
-        report.AppendLine("Port Status:");
+        // Check our specific rules
+        report.AppendLine("GamesLocalShare Firewall Rules:");
         try
         {
-            var netstatResult = RunCommand("netstat", $"-an | findstr \":{UdpPort} :{TcpPort1} :{TcpPort2}\"");
-            if (!string.IsNullOrEmpty(netstatResult))
+            var udpRule = RunNetshCommand($"advfirewall firewall show rule name=\"{RuleNameUdp}\"");
+            report.AppendLine(udpRule.Contains(RuleNameUdp) ? $"  ? {RuleNameUdp} - EXISTS" : $"  ? {RuleNameUdp} - MISSING");
+            
+            var tcpRule = RunNetshCommand($"advfirewall firewall show rule name=\"{RuleNameTcp}\"");
+            report.AppendLine(tcpRule.Contains(RuleNameTcp) ? $"  ? {RuleNameTcp} - EXISTS" : $"  ? {RuleNameTcp} - MISSING");
+        }
+        catch (Exception ex)
+        {
+            report.AppendLine($"  Error checking rules: {ex.Message}");
+        }
+        report.AppendLine();
+
+        // Check if ports are listening
+        report.AppendLine("Listening Ports (this app):");
+        try
+        {
+            var netstatResult = RunCommand("cmd", $"/c netstat -an | findstr \":{UdpPort} :{TcpPort1} :{TcpPort2}\"");
+            if (!string.IsNullOrWhiteSpace(netstatResult))
             {
-                report.AppendLine(netstatResult);
+                foreach (var line in netstatResult.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)))
+                {
+                    report.AppendLine($"  {line.Trim()}");
+                }
             }
             else
             {
-                report.AppendLine("  No active connections on required ports");
+                report.AppendLine("  No ports currently listening (start the network first)");
             }
         }
         catch
