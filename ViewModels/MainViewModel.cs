@@ -101,6 +101,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Subscribe to transfer events
         _fileTransferService.ProgressChanged += OnTransferProgress;
         _fileTransferService.TransferCompleted += OnTransferCompleted;
+        _fileTransferService.TransferStopped += OnTransferStopped;
 
         LocalIpAddress = _networkService.LocalPeer.IpAddress;
 
@@ -934,6 +935,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void OnTransferStopped(object? sender, TransferStoppedEventArgs e)
+    {
+        Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            IsTransferring = false;
+            CurrentTransferProgress = 0;
+            CurrentTransferFile = string.Empty;
+            CurrentTransferGameName = string.Empty;
+
+            var action = e.IsPaused ? "paused" : "stopped";
+            var message = $"Transfer {action}: {e.GameName}";
+            StatusMessage = message;
+            
+            // Refresh incomplete transfers to show the paused/stopped one
+            _ = ScanIncompleteTransfersAsync();
+        });
+    }
+
     private static string FormatBytes(long bytes)
     {
         string[] sizes = ["B", "KB", "MB", "GB", "TB"];
@@ -962,6 +981,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.GamesRequestedButEmpty -= OnGamesRequestedButEmpty;
         _fileTransferService.ProgressChanged -= OnTransferProgress;
         _fileTransferService.TransferCompleted -= OnTransferCompleted;
+        _fileTransferService.TransferStopped -= OnTransferStopped;
 
         _networkService.Dispose();
         _fileTransferService.Dispose();
@@ -1023,5 +1043,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         MessageBox.Show(results.ToString(), "Connection Test Results", MessageBoxButton.OK, MessageBoxImage.Information);
         
         StatusMessage = "Connection test complete";
+    }
+
+    [RelayCommand]
+    private void PauseTransfer()
+    {
+        _fileTransferService.PauseTransfer();
+        AddLog("Transfer paused - can be resumed from Incomplete panel", LogMessageType.Warning);
+    }
+
+    [RelayCommand]
+    private void StopTransfer()
+    {
+        _fileTransferService.StopTransfer();
+        AddLog("Transfer stopped - progress saved for resume", LogMessageType.Warning);
     }
 }

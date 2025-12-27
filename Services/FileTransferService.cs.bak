@@ -19,10 +19,8 @@ public class FileTransferService : IDisposable
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
-    private CancellationTokenSource? _transferCts;
     private TransferState? _currentTransferState;
     private bool _isListening;
-    private bool _isPaused;
 
     /// <summary>
     /// Whether the file transfer service is actively listening
@@ -35,11 +33,6 @@ public class FileTransferService : IDisposable
     public int ListeningPort => TransferPort;
 
     /// <summary>
-    /// Whether a transfer is currently paused
-    /// </summary>
-    public bool IsPaused => _isPaused;
-
-    /// <summary>
     /// Event raised when transfer progress updates
     /// </summary>
     public event EventHandler<TransferProgressEventArgs>? ProgressChanged;
@@ -48,11 +41,6 @@ public class FileTransferService : IDisposable
     /// Event raised when a transfer completes
     /// </summary>
     public event EventHandler<TransferCompletedEventArgs>? TransferCompleted;
-
-    /// <summary>
-    /// Event raised when a transfer is paused or stopped
-    /// </summary>
-    public event EventHandler<TransferStoppedEventArgs>? TransferStopped;
 
     /// <summary>
     /// Starts listening for incoming file transfer requests
@@ -218,11 +206,6 @@ public class FileTransferService : IDisposable
         TransferState? resumeState = null,
         CancellationToken ct = default)
     {
-        // Create a new cancellation token source for this transfer
-        _transferCts?.Dispose();
-        _transferCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _isPaused = false;
-        
         try
         {
             System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
@@ -277,10 +260,6 @@ public class FileTransferService : IDisposable
             System.Diagnostics.Debug.WriteLine($"Sending request: {requestJson}");
             writer.Write(requestJson);
             writer.Flush();
-
-            // I am still here
-            writer.Flush();
-            System.Diagnostics.Debug.WriteLine("Flushed request to remote peer");
 
             // Read file manifest
             var manifestJson = reader.ReadString();
@@ -722,53 +701,10 @@ public class FileTransferService : IDisposable
         }
     }
 
-    /// <summary>
-    /// Pauses the current transfer (can be resumed later)
-    /// </summary>
-    public void PauseTransfer()
-    {
-        if (_transferCts != null && !_transferCts.IsCancellationRequested)
-        {
-            _isPaused = true;
-            _transferCts.Cancel();
-            _currentTransferState?.Save();
-            System.Diagnostics.Debug.WriteLine("Transfer paused by user");
-            
-            TransferStopped?.Invoke(this, new TransferStoppedEventArgs
-            {
-                GameName = _currentTransferState?.GameName ?? "",
-                IsPaused = true,
-                TransferredBytes = _currentTransferState?.TransferredBytes ?? 0
-            });
-        }
-    }
-
-    /// <summary>
-    /// Stops the current transfer and saves progress
-    /// </summary>
-    public void StopTransfer()
-    {
-        if (_transferCts != null && !_transferCts.IsCancellationRequested)
-        {
-            _isPaused = false;
-            _transferCts.Cancel();
-            _currentTransferState?.Save();
-            System.Diagnostics.Debug.WriteLine("Transfer stopped by user");
-            
-            TransferStopped?.Invoke(this, new TransferStoppedEventArgs
-            {
-                GameName = _currentTransferState?.GameName ?? "",
-                IsPaused = false,
-                TransferredBytes = _currentTransferState?.TransferredBytes ?? 0
-            });
-        }
-    }
-
     public void Dispose()
     {
         Stop();
         _cts?.Dispose();
-        _transferCts?.Dispose();
     }
 }
 
@@ -811,11 +747,4 @@ public class TransferCompletedEventArgs : EventArgs
     public long TotalBytesTransferred { get; set; }
     public string? ErrorMessage { get; set; }
     public bool IsNewDownload { get; set; }
-}
-
-public class TransferStoppedEventArgs : EventArgs
-{
-    public string GameName { get; set; } = string.Empty;
-    public bool IsPaused { get; set; }
-    public long TransferredBytes { get; set; }
 }
