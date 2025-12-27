@@ -558,9 +558,36 @@ public class FileTransferService : IDisposable
                 using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
                 using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
+                // Reader.ReadString() may hang if the client doesn't send data
+                // So we use a timeout pattern: read with timeout, then check if data is available
+                bool ReadWithTimeout(BinaryReader reader, byte[] buffer, int timeoutMs)
+                {
+                    var sw = new System.Diagnostics.Stopwatch();
+                    sw.Start();
+
+                    while (sw.ElapsedMilliseconds < timeoutMs)
+                    {
+                        if (client.Available > 0)
+                        {
+                            reader.Read(buffer, 0, buffer.Length);
+                            return true;
+                        }
+
+                        Thread.Sleep(10); // Avoid CPU spin
+                    }
+
+                    return false;
+                }
+
                 // Read transfer request
-                var requestJson = reader.ReadString();
-                var request = JsonSerializer.Deserialize<FileTransferRequest>(requestJson);
+                var requestJson = new char[1024];
+                if (!ReadWithTimeout(reader, Encoding.UTF8.GetBytes(requestJson), 30000))
+                {
+                    System.Diagnostics.Debug.WriteLine("Client did not send request in time");
+                    return;
+                }
+
+                var request = JsonSerializer.Deserialize<FileTransferRequest>(new string(requestJson));
 
                 System.Diagnostics.Debug.WriteLine($"Received transfer request: {requestJson}");
 
@@ -757,19 +784,30 @@ public class FileTransferService : IDisposable
     /// </summary>
     public void PauseTransfer()
     {
+        System.Diagnostics.Debug.WriteLine($"PauseTransfer called. _transferCts null? {_transferCts == null}, IsCancellationRequested? {_transferCts?.IsCancellationRequested}");
+        
         if (_transferCts != null && !_transferCts.IsCancellationRequested)
         {
             _isPaused = true;
-            _transferCts.Cancel();
-            _currentTransferState?.Save();
-            System.Diagnostics.Debug.WriteLine("Transfer paused by user");
+            var gameName = _currentTransferState?.GameName ?? "";
+            var transferredBytes = _currentTransferState?.TransferredBytes ?? 0;
             
+            _currentTransferState?.Save();
+            _transferCts.Cancel();
+            
+            System.Diagnostics.Debug.WriteLine($"Transfer paused by user: {gameName}");
+            
+            // Fire event AFTER cancellation
             TransferStopped?.Invoke(this, new TransferStoppedEventArgs
             {
-                GameName = _currentTransferState?.GameName ?? "",
+                GameName = gameName,
                 IsPaused = true,
-                TransferredBytes = _currentTransferState?.TransferredBytes ?? 0
+                TransferredBytes = transferredBytes
             });
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine("PauseTransfer: No active transfer to pause");
         }
     }
 
@@ -778,19 +816,30 @@ public class FileTransferService : IDisposable
     /// </summary>
     public void StopTransfer()
     {
+        System.Diagnostics.Debug.WriteLine($"StopTransfer called. _transferCts null? {_transferCts == null}, IsCancellationRequested? {_transferCts?.IsCancellationRequested}");
+        
         if (_transferCts != null && !_transferCts.IsCancellationRequested)
         {
             _isPaused = false;
-            _transferCts.Cancel();
-            _currentTransferState?.Save();
-            System.Diagnostics.Debug.WriteLine("Transfer stopped by user");
+            var gameName = _currentTransferState?.GameName ?? "";
+            var transferredBytes = _currentTransferState?.TransferredBytes ?? 0;
             
+            _currentTransferState?.Save();
+            _transferCts.Cancel();
+            
+            System.Diagnostics.Debug.WriteLine($"Transfer stopped by user: {gameName}");
+            
+            // Fire event AFTER cancellation
             TransferStopped?.Invoke(this, new TransferStoppedEventArgs
             {
-                GameName = _currentTransferState?.GameName ?? "",
+                GameName = gameName,
                 IsPaused = false,
-                TransferredBytes = _currentTransferState?.TransferredBytes ?? 0
+                TransferredBytes = transferredBytes
             });
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine("StopTransfer: No active transfer to stop");
         }
     }
 

@@ -972,8 +972,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnTransferStopped(object? sender, TransferStoppedEventArgs e)
     {
+        System.Diagnostics.Debug.WriteLine($"OnTransferStopped event received. GameName={e.GameName}, IsPaused={e.IsPaused}");
+        
         Application.Current.Dispatcher.BeginInvoke(() =>
         {
+            System.Diagnostics.Debug.WriteLine($"OnTransferStopped dispatcher. IsTransferring before={IsTransferring}");
+            
             IsTransferring = false;
             CurrentTransferProgress = 0;
             CurrentTransferFile = string.Empty;
@@ -982,6 +986,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var action = e.IsPaused ? "paused" : "stopped";
             var message = $"Transfer {action}: {e.GameName}";
             StatusMessage = message;
+            
+            System.Diagnostics.Debug.WriteLine($"OnTransferStopped: IsTransferring after={IsTransferring}, calling ScanIncompleteTransfersAsync");
             
             // Refresh incomplete transfers to show the paused/stopped one
             _ = ScanIncompleteTransfersAsync();
@@ -1083,14 +1089,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void PauseTransfer()
     {
+        System.Diagnostics.Debug.WriteLine($"PauseTransfer command called. IsTransferring={IsTransferring}");
         _fileTransferService.PauseTransfer();
+        
+        // Force IsTransferring to false immediately in case event doesn't fire
+        IsTransferring = false;
         AddLog("Transfer paused - can be resumed from Incomplete panel", LogMessageType.Warning);
     }
 
     [RelayCommand]
     private void StopTransfer()
     {
+        System.Diagnostics.Debug.WriteLine($"StopTransfer command called. IsTransferring={IsTransferring}");
         _fileTransferService.StopTransfer();
+        
+        // Force IsTransferring to false immediately in case event doesn't fire
+        IsTransferring = false;
         AddLog("Transfer stopped - progress saved for resume", LogMessageType.Warning);
     }
 }
