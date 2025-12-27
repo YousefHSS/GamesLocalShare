@@ -337,14 +337,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             Application.Current.Dispatcher.Invoke(() =>
             {
+                // Remember the currently selected game's AppId
+                var previousSelectedAppId = SelectedIncompleteTransfer?.GameAppId;
+                
                 IncompleteTransfers.Clear();
                 foreach (var transfer in incomplete)
                 {
                     IncompleteTransfers.Add(transfer);
                 }
 
-                if (incomplete.Count > 0)
+                // Try to re-select the previously selected item, or select the first one
+                if (IncompleteTransfers.Count > 0)
                 {
+                    if (previousSelectedAppId != null)
+                    {
+                        SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == previousSelectedAppId);
+                    }
+                    
+                    // If previous selection not found, select the first item
+                    if (SelectedIncompleteTransfer == null)
+                    {
+                        SelectedIncompleteTransfer = IncompleteTransfers.First();
+                    }
+                    
                     StatusMessage = $"Found {incomplete.Count} incomplete transfer(s) that can be resumed";
                 }
             });
