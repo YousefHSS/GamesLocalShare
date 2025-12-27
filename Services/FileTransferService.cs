@@ -238,19 +238,19 @@ public class FileTransferService : IDisposable
             System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
             System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{TransferPort})");
             System.Diagnostics.Debug.WriteLine($"Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
-            System.Diagnostics.Debug.WriteLine($"Remote Path: {remoteGame.InstallPath}");
+            System.Diagnostics.Debug.WriteLine($"Resume: {resumeState != null}, CompletedFiles: {resumeState?.CompletedFiles.Count ?? 0}");
             
             using var client = new TcpClient();
             
             // Use a timeout for connection
-            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
             connectCts.CancelAfter(ConnectionTimeoutMs);
             
             try
             {
                 await client.ConnectAsync(peer.IpAddress, TransferPort, connectCts.Token);
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            catch (OperationCanceledException) when (!_transferCts.Token.IsCancellationRequested)
             {
                 // Connection timed out (not user cancellation)
                 throw new Exception(
@@ -258,8 +258,7 @@ public class FileTransferService : IDisposable
                     "Possible causes:\n" +
                     "1. The app on the remote computer hasn't clicked 'Start Network'\n" +
                     "2. Firewall on remote computer is blocking port 45679\n" +
-                    "3. Antivirus/security software is blocking the connection\n" +
-                    "4. Another instance of the app is running on the remote computer");
+                    "3. Antivirus/security software is blocking the connection");
             }
 
             if (!client.Connected)
@@ -270,8 +269,8 @@ public class FileTransferService : IDisposable
             System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} for file transfer");
 
             using var stream = client.GetStream();
-            stream.ReadTimeout = 30000; // 30 second read timeout
-            stream.WriteTimeout = 30000; // 30 second write timeout
+            stream.ReadTimeout = 30000;
+            stream.WriteTimeout = 30000;
             
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
@@ -287,10 +286,6 @@ public class FileTransferService : IDisposable
             System.Diagnostics.Debug.WriteLine($"Sending request: {requestJson}");
             writer.Write(requestJson);
             writer.Flush();
-
-            // I am still here
-            writer.Flush();
-            System.Diagnostics.Debug.WriteLine("Flushed request to remote peer");
 
             // Read file manifest
             var manifestJson = reader.ReadString();
@@ -312,6 +307,7 @@ public class FileTransferService : IDisposable
                 filesToDownload = manifest.Files
                     .Where(f => !resumeState.CompletedFiles.Contains(f.RelativePath))
                     .ToList();
+                System.Diagnostics.Debug.WriteLine($"Resume mode: {filesToDownload.Count} files remaining (skipping {resumeState.CompletedFiles.Count} completed)");
             }
             else
             {
@@ -350,10 +346,12 @@ public class FileTransferService : IDisposable
             // Request each file
             foreach (var fileInfo in filesToDownload)
             {
-                if (ct.IsCancellationRequested)
+                // Check cancellation at the start of each file
+                if (_transferCts.Token.IsCancellationRequested)
                 {
+                    System.Diagnostics.Debug.WriteLine("Transfer cancelled by user");
                     _currentTransferState.Save();
-                    break;
+                    return false;
                 }
 
                 // Send file request
@@ -373,41 +371,56 @@ public class FileTransferService : IDisposable
                     Directory.CreateDirectory(localDir);
                 }
 
-                // Check if we can resume this specific file
-                long startOffset = 0;
-                FileMode fileMode = FileMode.Create;
-                
+                // Check if file already exists and is complete
                 if (File.Exists(localFilePath))
                 {
                     var existingInfo = new FileInfo(localFilePath);
-                    if (existingInfo.Length < fileSize)
+                    if (existingInfo.Length == fileSize)
                     {
-                        fileMode = FileMode.Create;
-                    }
-                    else if (existingInfo.Length == fileSize)
-                    {
-                        // File already complete, skip
+                        // File already complete, skip but still need to receive the data from server
+                        // Actually, we already requested this file, so we need to receive and discard
+                        // OR mark as complete and continue
                         transferredBytes += fileSize;
                         _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
                         _currentTransferState.TransferredBytes = transferredBytes;
+                        
+                        // Read and discard the file data since server already started sending
+                        var discardBuffer = new byte[BufferSize];
+                        long discardRemaining = fileSize;
+                        while (discardRemaining > 0)
+                        {
+                            var toRead = (int)Math.Min(discardRemaining, discardBuffer.Length);
+                            var bytesRead = await stream.ReadAsync(discardBuffer.AsMemory(0, toRead), _transferCts.Token);
+                            if (bytesRead == 0) break;
+                            discardRemaining -= bytesRead;
+                        }
                         continue;
                     }
                 }
 
                 // Download file
-                await using var fileStream = new FileStream(localFilePath, fileMode, FileAccess.Write, FileShare.None, BufferSize);
+                await using var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize);
                 var buffer = new byte[BufferSize];
-                long remaining = fileSize - startOffset;
+                long remaining = fileSize;
 
                 while (remaining > 0)
                 {
+                    // Check cancellation during download
+                    if (_transferCts.Token.IsCancellationRequested)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Transfer cancelled during file: {fileInfo.RelativePath}");
+                        _currentTransferState.TransferredBytes = transferredBytes;
+                        _currentTransferState.Save();
+                        return false;
+                    }
+
                     var toRead = (int)Math.Min(remaining, buffer.Length);
-                    var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, toRead), ct);
+                    var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, toRead), _transferCts.Token);
                     
                     if (bytesRead == 0)
                         break;
 
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), _transferCts.Token);
                     remaining -= bytesRead;
                     transferredBytes += bytesRead;
 
@@ -448,7 +461,7 @@ public class FileTransferService : IDisposable
             // Calculate total bytes (include already transferred for resume cases)
             long totalTransferred = transferredBytes;
             
-            // Check if transfer completed - either we transferred everything OR there was nothing to transfer (files already match)
+            // Check if transfer completed
             bool success = filesToDownload.Count == 0 || transferredBytes >= _currentTransferState.TotalBytes;
             
             if (success)
@@ -470,6 +483,13 @@ public class FileTransferService : IDisposable
             _currentTransferState = null;
             return success;
         }
+        catch (OperationCanceledException)
+        {
+            // User cancelled - don't fire completed event, the stopped event handles this
+            System.Diagnostics.Debug.WriteLine("Transfer cancelled (OperationCanceledException)");
+            _currentTransferState?.Save();
+            return false;
+        }
         catch (SocketException ex)
         {
             _currentTransferState?.Save();
@@ -477,10 +497,10 @@ public class FileTransferService : IDisposable
 
             var errorMsg = ex.SocketErrorCode switch
             {
-                SocketError.ConnectionRefused => $"Connection REFUSED by {peer.DisplayName}. The app may not be running or hasn't clicked 'Start Network'.",
-                SocketError.TimedOut => $"Connection TIMED OUT to {peer.DisplayName}. Port {TransferPort} may be blocked.",
-                SocketError.HostUnreachable => $"Cannot reach {peer.DisplayName}. Check network connection.",
-                SocketError.NetworkUnreachable => "Network unreachable. Check your network connection.",
+                SocketError.ConnectionRefused => $"Connection REFUSED by {peer.DisplayName}.",
+                SocketError.TimedOut => $"Connection TIMED OUT to {peer.DisplayName}.",
+                SocketError.HostUnreachable => $"Cannot reach {peer.DisplayName}.",
+                SocketError.NetworkUnreachable => "Network unreachable.",
                 _ => $"Network error: {ex.SocketErrorCode} - {ex.Message}"
             };
 
@@ -558,36 +578,24 @@ public class FileTransferService : IDisposable
                 using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
                 using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
-                // Reader.ReadString() may hang if the client doesn't send data
-                // So we use a timeout pattern: read with timeout, then check if data is available
-                bool ReadWithTimeout(BinaryReader reader, byte[] buffer, int timeoutMs)
-                {
-                    var sw = new System.Diagnostics.Stopwatch();
-                    sw.Start();
-
-                    while (sw.ElapsedMilliseconds < timeoutMs)
-                    {
-                        if (client.Available > 0)
-                        {
-                            reader.Read(buffer, 0, buffer.Length);
-                            return true;
-                        }
-
-                        Thread.Sleep(10); // Avoid CPU spin
-                    }
-
-                    return false;
-                }
-
                 // Read transfer request
-                var requestJson = new char[1024];
-                if (!ReadWithTimeout(reader, Encoding.UTF8.GetBytes(requestJson), 30000))
+                string requestJson;
+                try
                 {
-                    System.Diagnostics.Debug.WriteLine("Client did not send request in time");
+                    requestJson = reader.ReadString();
+                }
+                catch (EndOfStreamException)
+                {
+                    System.Diagnostics.Debug.WriteLine("Client disconnected before sending request");
+                    return;
+                }
+                catch (IOException ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"IO error reading request: {ex.Message}");
                     return;
                 }
 
-                var request = JsonSerializer.Deserialize<FileTransferRequest>(new string(requestJson));
+                var request = JsonSerializer.Deserialize<FileTransferRequest>(requestJson);
 
                 System.Diagnostics.Debug.WriteLine($"Received transfer request: {requestJson}");
 
@@ -638,7 +646,21 @@ public class FileTransferService : IDisposable
                 // Handle file requests
                 while (!ct.IsCancellationRequested)
                 {
-                    var relativePath = reader.ReadString();
+                    string relativePath;
+                    try
+                    {
+                        relativePath = reader.ReadString();
+                    }
+                    catch (EndOfStreamException)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Client disconnected (end of stream)");
+                        break;
+                    }
+                    catch (IOException ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Client disconnected: {ex.Message}");
+                        break;
+                    }
                     
                     if (string.IsNullOrEmpty(relativePath))
                     {
@@ -662,16 +684,24 @@ public class FileTransferService : IDisposable
                     System.Diagnostics.Debug.WriteLine($"Sending: {relativePath} ({fileInfo.Length / 1024}KB)");
 
                     // Stream file content
-                    await using var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize);
-                    var buffer = new byte[BufferSize];
-                    int bytesRead;
-
-                    while ((bytesRead = await fileStream.ReadAsync(buffer, ct)) > 0)
+                    try
                     {
-                        await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-                    }
+                        await using var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, BufferSize);
+                        var buffer = new byte[BufferSize];
+                        int bytesRead;
 
-                    await stream.FlushAsync(ct);
+                        while ((bytesRead = await fileStream.ReadAsync(buffer, ct)) > 0)
+                        {
+                            await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                        }
+
+                        await stream.FlushAsync(ct);
+                    }
+                    catch (IOException ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Error sending file {relativePath}: {ex.Message}");
+                        break;
+                    }
                 }
             }
         }
