@@ -108,6 +108,7 @@ public class NetworkDiscoveryService : IDisposable
         _ = ListenForTcpConnectionsAsync(_cts.Token);
         _ = BroadcastPresenceAsync(_cts.Token);
         _ = CleanupStalePeersAsync(_cts.Token);
+        _ = KeepPeersAliveAsync(_cts.Token);  // NEW: Keep-alive task
 
         await Task.CompletedTask;
     }
@@ -765,7 +766,7 @@ public class NetworkDiscoveryService : IDisposable
         {
             try
             {
-                await Task.Delay(15000, ct); // Check every 15 seconds
+                await Task.Delay(30000, ct); // Check every 30 seconds (was 15)
 
                 List<NetworkPeer> stalePeers;
                 lock (_peersLock)
@@ -773,6 +774,7 @@ public class NetworkDiscoveryService : IDisposable
                     stalePeers = _peers.Values.Where(p => !p.IsOnline).ToList();
                     foreach (var peer in stalePeers)
                     {
+                        System.Diagnostics.Debug.WriteLine($"Removing stale peer: {peer.DisplayName} (last seen {(DateTime.Now - peer.LastSeen).TotalSeconds:F0}s ago)");
                         _peers.Remove(peer.PeerId);
                     }
                 }
@@ -787,6 +789,113 @@ public class NetworkDiscoveryService : IDisposable
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Periodically pings known peers to keep them alive and verify they're still reachable
+    /// </summary>
+    private async Task KeepPeersAliveAsync(CancellationToken ct)
+    {
+        // Wait a bit before starting keep-alive
+        await Task.Delay(10000, ct);
+        
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var peers = GetPeers();
+                
+                foreach (var peer in peers)
+                {
+                    // If we haven't heard from this peer in 30 seconds, try to ping them
+                    if ((DateTime.Now - peer.LastSeen).TotalSeconds > 30)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Keep-alive: Pinging {peer.DisplayName}...");
+                        
+                        // Try a quick TCP connection to verify they're still there
+                        var stillAlive = await PingPeerAsync(peer);
+                        
+                        if (stillAlive)
+                        {
+                            peer.MarkAsSeen();
+                            System.Diagnostics.Debug.WriteLine($"Keep-alive: {peer.DisplayName} is still alive");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Keep-alive: {peer.DisplayName} did not respond");
+                        }
+                    }
+                }
+                
+                await Task.Delay(20000, ct); // Check every 20 seconds
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Keep-alive error: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Quick ping to check if a peer is still reachable
+    /// </summary>
+    private async Task<bool> PingPeerAsync(NetworkPeer peer)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            using var cts = new CancellationTokenSource(3000);
+            
+            await client.ConnectAsync(peer.IpAddress, peer.Port, cts.Token);
+            
+            if (!client.Connected)
+                return false;
+
+            using var stream = client.GetStream();
+            stream.ReadTimeout = 3000;
+            stream.WriteTimeout = 3000;
+            
+            using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            // Send a game list request (this also updates our games on their side)
+            var request = new NetworkMessage
+            {
+                Type = MessageType.RequestGameList,
+                SenderId = LocalPeer.PeerId,
+                SenderName = LocalPeer.DisplayName,
+                SenderPort = LocalPeer.Port,
+                Games = LocalPeer.Games
+            };
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request));
+
+            // Wait for response
+            var responseLine = await reader.ReadLineAsync(cts.Token);
+            if (!string.IsNullOrEmpty(responseLine))
+            {
+                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine);
+                if (response != null)
+                {
+                    // Update their games if they changed
+                    if (response.Games != null)
+                    {
+                        peer.Games = response.Games;
+                        PeerGamesUpdated?.Invoke(this, peer);
+                    }
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Ping failed for {peer.DisplayName}: {ex.Message}");
+        }
+
+        return false;
     }
 
     private async Task SendGameListToPeerAsync(NetworkPeer peer)

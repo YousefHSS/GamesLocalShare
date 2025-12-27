@@ -36,7 +36,15 @@ public class NetworkPeer
     public DateTime LastSeen { get; set; } = DateTime.Now;
 
     /// <summary>
-    /// Whether this peer is currently online
+    /// Whether this peer is currently online (within last 2 minutes)
     /// </summary>
-    public bool IsOnline => (DateTime.Now - LastSeen).TotalSeconds < 30;
+    public bool IsOnline => (DateTime.Now - LastSeen).TotalSeconds < 120;
+
+    /// <summary>
+    /// Updates the LastSeen timestamp to now
+    /// </summary>
+    public void MarkAsSeen()
+    {
+        LastSeen = DateTime.Now;
+    }
 }
