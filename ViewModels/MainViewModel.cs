@@ -83,6 +83,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _highSpeedMode = false; // For wired connections
 
+    [ObservableProperty]
+    private string _networkIconKey = "IconWifi";
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
@@ -1039,6 +1042,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         HighSpeedMode = !HighSpeedMode;
         _fileTransferService.SetHighSpeedMode(HighSpeedMode);
+        NetworkIconKey = HighSpeedMode ? "IconWired" : "IconWifi";
         
         if (HighSpeedMode)
         {

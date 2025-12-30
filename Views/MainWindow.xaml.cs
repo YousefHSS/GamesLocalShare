@@ -3,8 +3,11 @@ using System;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using GamesLocalShare.Models;
+using SharpVectors.Converters;
+using SharpVectors.Renderers.Wpf;
 
 namespace GamesLocalShare.Views;
 
@@ -26,16 +29,20 @@ public partial class MainWindow : MetroWindow
         try
         {
             var basePath = AppDomain.CurrentDomain.BaseDirectory;
-            string iconsDir = Path.Combine(basePath, "Icons");
+            string svgDir = Path.Combine(basePath, "Icons", "SVGs");
 
-            SetImageSourceIfExists(ImageGames, Path.Combine(iconsDir, "controller.png"));
-            SetImageSourceIfExists(ImagePeers, Path.Combine(iconsDir, "desktop.png"));
-            SetImageSourceIfExists(ImageUpdates, Path.Combine(iconsDir, "sync.png"));
-            SetImageSourceIfExists(ImageDownload, Path.Combine(iconsDir, "download.png"));
-            SetImageSourceIfExists(ImagePause, Path.Combine(iconsDir, "pause.png"));
-            SetImageSourceIfExists(ImageWarning, Path.Combine(iconsDir, "warning.png"));
-            SetImageSourceIfExists(ImageLog, Path.Combine(iconsDir, "log.png"));
-            // Optional: wired/wifi/check
+            SetImageSourceIfExists(ImageGames, Path.Combine(svgDir, "controller.svg"));
+            SetImageSourceIfExists(ImagePeers, Path.Combine(svgDir, "desktop.svg"));
+            SetImageSourceIfExists(ImageUpdates, Path.Combine(svgDir, "sync.svg"));
+            SetImageSourceIfExists(ImageDownload, Path.Combine(svgDir, "download.svg"));
+            SetImageSourceIfExists(ImagePause, Path.Combine(svgDir, "pause.svg"));
+            SetImageSourceIfExists(ImageWarning, Path.Combine(svgDir, "warning.svg"));
+            SetImageSourceIfExists(ImageLog, Path.Combine(svgDir, "log.svg"));
+
+            // Load optional SVGs into resources
+            LoadSvgIntoResource("IconWired", Path.Combine(basePath, "Icons", "wired.svg"));
+            LoadSvgIntoResource("IconWifi", Path.Combine(basePath, "Icons", "wifi.svg"));
+            LoadSvgIntoResource("IconCheck", Path.Combine(svgDir, "check.svg"));
         }
         catch (Exception ex)
         {
@@ -50,17 +57,49 @@ public partial class MainWindow : MetroWindow
         {
             if (File.Exists(filePath))
             {
-                var bitmap = new BitmapImage();
-                bitmap.BeginInit();
-                bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
-                bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                bitmap.EndInit();
-                img.Source = bitmap;
+                if (Path.GetExtension(filePath).Equals(".svg", StringComparison.OrdinalIgnoreCase))
+                {
+                    var reader = new FileSvgReader(new WpfDrawingSettings());
+                    var drawing = reader.Read(filePath) as Drawing;
+                    if (drawing != null)
+                    {
+                        img.Source = new DrawingImage(drawing);
+                    }
+                }
+                else
+                {
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.EndInit();
+                    img.Source = bitmap;
+                }
             }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to load icon {filePath}: {ex.Message}");
+        }
+    }
+
+    private void LoadSvgIntoResource(string resourceKey, string filePath)
+    {
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                var reader = new FileSvgReader(new WpfDrawingSettings());
+                var drawing = reader.Read(filePath) as Drawing;
+                if (drawing != null)
+                {
+                    this.Resources[resourceKey] = new DrawingImage(drawing);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load SVG resource {resourceKey}: {ex.Message}");
         }
     }
 

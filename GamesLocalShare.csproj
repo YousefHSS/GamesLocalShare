@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -17,6 +17,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
     <!-- For modern UI controls -->
     <PackageReference Include="MahApps.Metro" Version="2.4.10" />
+    <PackageReference Include="SharpVectors.Wpf" Version="1.8.2" />
   </ItemGroup>
 
   <!-- Ensure any icons placed in the Icons folder are copied to the output directory -->
