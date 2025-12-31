@@ -6,6 +6,7 @@
         xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
         xmlns:vm="clr-namespace:GamesLocalShare.ViewModels"
         xmlns:conv="clr-namespace:GamesLocalShare.Converters"
+        xmlns:controls="clr-namespace:GamesLocalShare.Controls"
         mc:Ignorable="d"
         Title="Games Local Share - LAN Game Sync" 
         Height="700" Width="1200"
@@ -23,6 +24,7 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <conv:StringToResourceConverter x:Key="StringToResourceConverter"/>
+        <conv:GamePlatformToIconConverter x:Key="GamePlatformToIconConverter"/>
         <!-- Icons loaded from the Icons folder placed next to the app executable -->
         <DrawingImage x:Key="IconGames" Drawing="{x:Null}" />
         <DrawingImage x:Key="IconPeers" Drawing="{x:Null}" />
@@ -34,6 +36,9 @@
         <DrawingImage x:Key="IconWired" Drawing="{x:Null}" />
         <DrawingImage x:Key="IconWifi" Drawing="{x:Null}" />
         <DrawingImage x:Key="IconLog" Drawing="{x:Null}" />
+        <!--<DrawingImage x:Key="IconSteam" Drawing="{x:Null}" />
+        <DrawingImage x:Key="IconEpic" Drawing="{x:Null}" />
+        <DrawingImage x:Key="IconXbox" Drawing="{x:Null}" />-->
     </Window.Resources>
 
     <Grid>
@@ -207,15 +212,28 @@
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Padding="6" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                            <TextBlock Text="{Binding BuildId}" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Accent}"/>
-                                            <TextBlock Text=" - " FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
-                                            <TextBlock Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10"/>
+                                <Border Padding="6" Margin="1" CornerRadius="3">
+                                    <Border.Background>
+                                        <ImageBrush ImageSource="{Binding CoverImage}" Stretch="UniformToFill" Opacity="0.82"/>
+                                    </Border.Background>
+                                    <Grid>
+                                        <Border Background="{DynamicResource MahApps.Brushes.Gray8}" Opacity="0.0" CornerRadius="3"/>
+                                        <StackPanel Margin="6">
+                                            <controls:OutlinedText Text="{Binding Name}"
+                                                                   FontWeight="SemiBold"
+                                                                   FontSize="12"
+                                                                   Foreground="White"
+                                                                   Stroke="#AA000000"
+                                                                   StrokeThickness="3.2"
+                                                                   SnapsToDevicePixels="True"
+                                                                   UseLayoutRounding="True"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                <TextBlock Text="{Binding BuildId}" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Accent}"/>
+                                                <TextBlock Text=" - " FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
+                                                <TextBlock Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10"/>
+                                            </StackPanel>
                                         </StackPanel>
-                                    </StackPanel>
+                                    </Grid>
                                 </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -386,19 +404,16 @@
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Padding="6" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
+                                <Border Padding="6" Margin="1" CornerRadius="3">
+                                    <Border.Background>
+                                        <ImageBrush ImageSource="{Binding CoverImage}" Stretch="UniformToFill" Opacity="0.12"/>
+                                    </Border.Background>
                                     <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
+                                        <Border Background="{DynamicResource MahApps.Brushes.Gray8}" Opacity="0.92" CornerRadius="3"/>
+                                        <StackPanel Margin="6">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="11" TextTrimming="CharacterEllipsis"/>
                                             <TextBlock Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10"/>
                                         </StackPanel>
-                                        <Border Grid.Column="1" Background="#FF8B5CF6" CornerRadius="3" Padding="5,2" VerticalAlignment="Center">
-                                            <TextBlock Text="NEW" FontSize="9" Foreground="White" FontWeight="Bold"/>
-                                        </Border>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -489,10 +504,21 @@
                             
                             <Button Command="{Binding DownloadNewGameCommand}" 
                                     IsEnabled="{Binding SelectedPeerGame, Converter={StaticResource NullToBoolConverter}}"
-                                    Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                    Style="{StaticResource MahApps.Styles.Button.Square}"
                                     Background="#FF8B5CF6"
                                     Padding="10,8">
-                                <TextBlock Text="Download New Game" FontWeight="SemiBold" Foreground="White"/>
+                                <!-- add xmlns at top of the XAML root: xmlns:controls="clr-namespace:GamesLocalShare.Controls" -->
+<controls:OutlinedText Text="Download New Game"
+                       FontSize="12"
+                       FontFamily="Segoe UI"
+                       FontWeight="SemiBold"
+                       Foreground="White"
+                       Stroke="#1F000000"
+                       StrokeThickness="1.6"
+                       SnapsToDevicePixels="True"
+                       UseLayoutRounding="True"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"/>
                             </Button>
 
                             <!-- Progress -->

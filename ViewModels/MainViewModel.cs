@@ -311,10 +311,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 MessageBox.Show(
                     "Firewall rules have been added successfully!\n\n" +
                     "Added rules:\n" +
-                    "ï Program-based rule (allows all GamesLocalShare traffic)\n" +
-                    "ï UDP 45677 (Discovery)\n" +
-                    "ï TCP 45678 (Game List)\n" +
-                    "ï TCP 45679 (File Transfer)\n\n" +
+                    "ÅEProgram-based rule (allows all GamesLocalShare traffic)\n" +
+                    "ÅEUDP 45677 (Discovery)\n" +
+                    "ÅETCP 45678 (Game List)\n" +
+                    "ÅETCP 45679 (File Transfer)\n\n" +
                     "If connections STILL fail, you may have third-party security software\n" +
                     "(antivirus/firewall) that needs separate configuration.",
                     "Firewall Configured",

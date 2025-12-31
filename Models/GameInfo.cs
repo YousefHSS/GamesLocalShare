@@ -1,3 +1,5 @@
+using System.Windows.Media;
+
 namespace GamesLocalShare.Models;
 
 /// <summary>
@@ -67,6 +69,12 @@ public class GameInfo
         }
         return $"{size:0.##} {sizes[order]}";
     }
+
+    /// <summary>
+    /// Runtime-only cover image to display in the UI. Not serialized.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public ImageSource? CoverImage { get; set; }
 }
 
 public enum GamePlatform

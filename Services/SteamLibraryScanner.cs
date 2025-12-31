@@ -1,4 +1,7 @@
 using System.IO;
+using System.Net.Http;
+using System.Text.RegularExpressions;
+using System.Windows.Media.Imaging;
 using GamesLocalShare.Models;
 using Gameloop.Vdf;
 using Gameloop.Vdf.Linq;
@@ -13,6 +16,7 @@ public class SteamLibraryScanner
 {
     private string? _steamPath;
     private readonly List<string> _scanErrors = [];
+    private static readonly HttpClient _httpClient = new HttpClient();
 
     /// <summary>
     /// Gets any errors that occurred during the last scan
@@ -295,7 +299,7 @@ public class SteamLibraryScanner
             catch { }
         }
 
-        return new GameInfo
+        var game = new GameInfo
         {
             AppId = appId,
             Name = name,
@@ -306,6 +310,125 @@ public class SteamLibraryScanner
             Platform = GamePlatform.Steam,
             IsInstalled = Directory.Exists(installPath)
         };
+
+        // Try to load a cover image (non-blocking best-effort) - run synchronously on background thread
+        try
+        {
+            TryLoadSteamCover(game);
+        }
+        catch (Exception ex)
+        {
+            _scanErrors.Add($"Cover load failed for {game.Name}: {ex.Message}");
+        }
+
+        return game;
+    }
+
+    /// <summary>
+    /// Attempts to download a cover image for the given game using the Steam CDN (falls back to other sizes).
+    /// This runs synchronously and is intended to be called from the background scanner thread.
+    /// </summary>
+    private void TryLoadSteamCover(GameInfo game)
+    {
+        if (string.IsNullOrWhiteSpace(game.AppId))
+            return;
+
+        if (!int.TryParse(game.AppId, out var appIdNumeric))
+            return;
+
+        // List of candidate image URLs (try higher-res images first)
+        var candidates = new[]
+        {
+            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appIdNumeric}/library_600x900.jpg",
+            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appIdNumeric}/header.jpg",
+            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appIdNumeric}/capsule_184x69.jpg",
+            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appIdNumeric}/capsule_231x87.jpg"
+        };
+
+        foreach (var url in candidates)
+        {
+            try
+            {
+                using var resp = _httpClient.Send(new HttpRequestMessage(HttpMethod.Get, url));
+                if (!resp.IsSuccessStatusCode)
+                    continue;
+
+                var bytes = resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+                if (bytes == null || bytes.Length == 0)
+                    continue;
+
+                // Create BitmapImage from bytes
+                var bmp = new BitmapImage();
+                using var ms = new MemoryStream(bytes);
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.StreamSource = ms;
+                bmp.EndInit();
+                bmp.Freeze(); // make it cross-thread accessible
+
+                game.CoverImage = bmp;
+                return;
+            }
+            catch
+            {
+                // ignore and try next
+            }
+        }
+
+        // CDN attempts failed - fall back to scraping SteamDB search results for first image
+        TryScrapeSteamDbCover(game);
+    }
+
+    /// <summary>
+    /// Try to scrape steamdb.info search page for the game's first result image and download it.
+    /// Best-effort; may fail silently.
+    /// </summary>
+    private void TryScrapeSteamDbCover(GameInfo game)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(game.Name))
+                return;
+
+            var query = System.Uri.EscapeDataString(game.Name);
+            var url = $"https://steamdb.info/search/?a=all&q={query}";
+            var html = _httpClient.GetStringAsync(url).GetAwaiter().GetResult();
+            if (string.IsNullOrWhiteSpace(html))
+                return;
+
+            // Find first <img ... src="..."> in the page
+            var m = Regex.Match(html, "<img[^>]+src=\"([^\"]+)\"", RegexOptions.IgnoreCase);
+            if (!m.Success)
+                return;
+
+            var imgUrl = m.Groups[1].Value;
+            if (imgUrl.StartsWith("//"))
+                imgUrl = "https:" + imgUrl;
+            else if (imgUrl.StartsWith("/"))
+                imgUrl = "https://steamdb.info" + imgUrl;
+
+            using var resp = _httpClient.Send(new HttpRequestMessage(HttpMethod.Get, imgUrl));
+            if (!resp.IsSuccessStatusCode)
+                return;
+
+            var bytes = resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+            if (bytes == null || bytes.Length == 0)
+                return;
+
+            var bmp = new BitmapImage();
+            using var ms = new MemoryStream(bytes);
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.StreamSource = ms;
+            bmp.EndInit();
+            bmp.Freeze();
+
+            game.CoverImage = bmp;
+        }
+        catch (Exception ex)
+        {
+            _scanErrors.Add($"SteamDB scrape failed for {game.Name}: {ex.Message}");
+        }
     }
 
     /// <summary>

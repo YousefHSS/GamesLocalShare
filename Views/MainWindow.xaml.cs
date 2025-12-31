@@ -43,6 +43,11 @@ public partial class MainWindow : MetroWindow
             LoadSvgIntoResource("IconWired", Path.Combine(basePath, "Icons", "wired.svg"));
             LoadSvgIntoResource("IconWifi", Path.Combine(basePath, "Icons", "wifi.svg"));
             LoadSvgIntoResource("IconCheck", Path.Combine(svgDir, "check.svg"));
+
+            // Load PNG icons into resources (steam/epic/xbox)
+            LoadBitmapIntoResource("IconSteam", Path.Combine(basePath, "Icons", "steam.png"));
+            LoadBitmapIntoResource("IconEpic", Path.Combine(basePath, "Icons", "epic.png"));
+            LoadBitmapIntoResource("IconXbox", Path.Combine(basePath, "Icons", "xbox.png"));
         }
         catch (Exception ex)
         {
@@ -100,6 +105,32 @@ public partial class MainWindow : MetroWindow
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to load SVG resource {resourceKey}: {ex.Message}");
+        }
+    }
+
+    private void LoadBitmapIntoResource(string resourceKey, string filePath)
+    {
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.EndInit();
+                // Store as ImageSource so bindings to Image.Source work
+                this.Resources[resourceKey] = bitmap as ImageSource;
+                System.Diagnostics.Debug.WriteLine($"Loaded {resourceKey} from {filePath}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"File not found: {filePath} for {resourceKey}");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load bitmap resource {resourceKey}: {ex.Message}");
         }
     }
 
