@@ -76,7 +76,7 @@
                         <TextBlock Text="Step 2" Foreground="White" FontSize="10" VerticalAlignment="Center"/>
                     </Border>
                     <Button Command="{Binding StartNetworkCommand}" 
-                            Visibility="{Binding IsNetworkActive, Converter={StaticResource BoolToVis}}"
+                            Visibility="{Binding IsNetworkActive, Converter={StaticResource InvertedBoolToVisConverter}}"
                             Style="{DynamicResource MahApps.Styles.Button.Square}"
                             Background="#44FFFFFF"
                             Padding="15,8" Margin="0,0,20,0">
@@ -84,7 +84,7 @@
                     </Button>
 
                     <Button Command="{Binding StopNetworkCommand}" 
-                            Visibility="{Binding IsNetworkActive, Converter={StaticResource InvertedBoolToVisConverter}}"
+                            Visibility="{Binding IsNetworkActive, Converter={StaticResource BoolToVis}}"
                             Style="{DynamicResource MahApps.Styles.Button.Square}"
                             Background="#44FFFFFF"
                             Padding="15,8" Margin="0,0,20,0">

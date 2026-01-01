@@ -1290,8 +1290,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             var report = await NetworkDiagnosticService.GenerateReportAsync(LocalIpAddress, targetIp);
 
-            // Show the report in a message box (could be improved with a dedicated dialog)
-            MessageBox.Show(report, "Network Diagnostic Report", MessageBoxButton.OK, MessageBoxImage.Information);
+            // Show the report in a scrollable dialog
+            var reportDialog = new Views.DiagnosticReportDialog(report, "Network Diagnostic Report");
+            reportDialog.ShowDialog();
 
             StatusMessage = "Network diagnostic complete";
             AddLog("Network diagnostic completed", LogMessageType.Info);
@@ -1350,7 +1351,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         sb.AppendLine();
         sb.AppendLine("For detailed diagnosis, select a peer and click 'Diagnose Connection'");
 
-        MessageBox.Show(sb.ToString(), "Network Information", MessageBoxButton.OK, MessageBoxImage.Information);
+        // Use scrollable dialog instead of MessageBox
+        var reportDialog = new Views.DiagnosticReportDialog(sb.ToString(), "Network Information");
+        reportDialog.ShowDialog();
         
         AddLog("Quick subnet check completed", LogMessageType.Info);
     }
