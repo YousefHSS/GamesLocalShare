@@ -213,40 +213,62 @@
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Padding="6" Margin="1" CornerRadius="3">
-                                    <Border.Background>
-                                        <ImageBrush ImageSource="{Binding CoverImage}" Stretch="UniformToFill" Opacity="0.82"/>
-                                    </Border.Background>
                                     <Grid>
-                                        <Border Background="{DynamicResource MahApps.Brushes.Gray8}" Opacity="0.0" CornerRadius="3"/>
+                                        <!-- Background layer with gradient opacity -->
+                                        <Border CornerRadius="3">
+                                            <Border.Background>
+                                                <ImageBrush ImageSource="{Binding CoverImage}" Stretch="UniformToFill"/>
+                                            </Border.Background>
+                                            <Border.OpacityMask>
+                                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                                    <GradientStop Color="#00000000" Offset="0"/>
+                                                    <GradientStop Color="#33000000" Offset="0.3"/>
+                                                    <GradientStop Color="#DD000000" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.OpacityMask>
+                                        </Border>
+                                        
+                                        <!-- Grey overlay on left side -->
+                                        <Border CornerRadius="3">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                                    <GradientStop Color="{DynamicResource MahApps.Colors.Gray8}" Offset="0"/>
+                                                    <GradientStop Color="#88424242" Offset="0.3"/>
+                                                    <GradientStop Color="#00000000" Offset="0.6"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+                                        
+                                        <!-- Content -->
                                         <StackPanel Margin="6">
                                             <controls:OutlinedText Text="{Binding Name}"
                                                                    FontWeight="SemiBold"
-                                                                   FontSize="16"
+                                                                   FontSize="12"
                                                                    Foreground="White"
                                                                    Stroke="#AA000000"
-                                                                   StrokeThickness="3.5"
+                                                                   StrokeThickness="3.2"
                                                                    SnapsToDevicePixels="True"
                                                                    UseLayoutRounding="True"/>
                                             <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
                                                 <controls:OutlinedText Text="{Binding BuildId}" 
-                                                                       FontSize="13" 
+                                                                       FontSize="10" 
                                                                        Foreground="{DynamicResource MahApps.Brushes.Accent}"
                                                                        Stroke="#AA000000"
-                                                                       StrokeThickness="3.0"
+                                                                       StrokeThickness="2.5"
                                                                        SnapsToDevicePixels="True"
                                                                        UseLayoutRounding="True"/>
                                                 <controls:OutlinedText Text=" - " 
-                                                                       FontSize="13" 
+                                                                       FontSize="10" 
                                                                        Foreground="{DynamicResource MahApps.Brushes.Gray5}"
                                                                        Stroke="#AA000000"
-                                                                       StrokeThickness="3.0"
+                                                                       StrokeThickness="2.5"
                                                                        SnapsToDevicePixels="True"
                                                                        UseLayoutRounding="True"/>
                                                 <controls:OutlinedText Text="{Binding FormattedSize}" 
                                                                        Foreground="{DynamicResource MahApps.Brushes.Gray5}" 
-                                                                       FontSize="13"
+                                                                       FontSize="10"
                                                                        Stroke="#AA000000"
-                                                                       StrokeThickness="3.0"
+                                                                       StrokeThickness="2.5"
                                                                        SnapsToDevicePixels="True"
                                                                        UseLayoutRounding="True"/>
                                             </StackPanel>
