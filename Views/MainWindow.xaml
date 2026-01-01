@@ -25,6 +25,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <conv:StringToResourceConverter x:Key="StringToResourceConverter"/>
         <conv:GamePlatformToIconConverter x:Key="GamePlatformToIconConverter"/>
+        <conv:NullToVisConverter x:Key="NullToVisConverter"/>
         <!-- Icons loaded from the Icons folder placed next to the app executable -->
         <DrawingImage x:Key="IconGames" Drawing="{x:Null}" />
         <DrawingImage x:Key="IconPeers" Drawing="{x:Null}" />
@@ -36,9 +37,6 @@
         <DrawingImage x:Key="IconWired" Drawing="{x:Null}" />
         <DrawingImage x:Key="IconWifi" Drawing="{x:Null}" />
         <DrawingImage x:Key="IconLog" Drawing="{x:Null}" />
-        <!--<DrawingImage x:Key="IconSteam" Drawing="{x:Null}" />
-        <DrawingImage x:Key="IconEpic" Drawing="{x:Null}" />
-        <DrawingImage x:Key="IconXbox" Drawing="{x:Null}" />-->
     </Window.Resources>
 
     <Grid>
@@ -194,7 +192,10 @@
                              SelectedItem="{Binding SelectedLocalGame}"
                              Background="Transparent"
                              BorderThickness="0"
-                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingStackPanel.IsVirtualizing="True"
+                             VirtualizingStackPanel.VirtualizationMode="Recycling">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
                                 <Setter Property="Tag" Value="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
@@ -208,29 +209,43 @@
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
+                                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                <Setter Property="VerticalContentAlignment" Value="Top" />
+                                <Setter Property="VerticalAlignment" Value="Top" />
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Padding="6" Margin="1" CornerRadius="3">
-                                    <Border.Background>
-                                        <ImageBrush ImageSource="{Binding CoverImage}" Stretch="UniformToFill" Opacity="0.82"/>
-                                    </Border.Background>
+                                <Border Padding="6" Margin="6" CornerRadius="3" Background="{DynamicResource MahApps.Brushes.Gray8}" SnapsToDevicePixels="True" UseLayoutRounding="True" Width="250" Height="140">
                                     <Grid>
+                                        <!-- Placeholder background is the Border.Background above. Image overlays when available -->
+                                        <Image Source="{Binding CoverImage}"
+                                               Stretch="UniformToFill"
+                                               StretchDirection="Both"
+                                               Opacity="0.82"
+                                               Visibility="{Binding CoverImage, Converter={StaticResource NullToVisConverter}}"
+                                               Width="250"
+                                               Height="140"
+                                               SnapsToDevicePixels="True"
+                                               HorizontalAlignment="Stretch"
+                                               VerticalAlignment="Stretch"
+                                               ClipToBounds="True"/>
+
                                         <Border Background="{DynamicResource MahApps.Brushes.Gray8}" Opacity="0.0" CornerRadius="3"/>
                                         <StackPanel Margin="6">
                                             <controls:OutlinedText Text="{Binding Name}"
                                                                    FontWeight="SemiBold"
-                                                                   FontSize="12"
+                                                                   FontSize="16"
                                                                    Foreground="White"
                                                                    Stroke="#AA000000"
-                                                                   StrokeThickness="3.2"
+                                                                   StrokeThickness="2.0"
                                                                    SnapsToDevicePixels="True"
-                                                                   UseLayoutRounding="True"/>
+                                                                   UseLayoutRounding="True"
+                                                                   TextWrapping="Wrap"/>
                                             <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                                <TextBlock Text="{Binding BuildId}" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Accent}"/>
+                                                <controls:OutlinedText Text="{Binding BuildId}" FontSize="14" Foreground="{DynamicResource MahApps.Brushes.Accent}" Stroke="#AA000000" StrokeThickness="2.0" SnapsToDevicePixels="True" UseLayoutRounding="True"/>
                                                 <TextBlock Text=" - " FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
-                                                <TextBlock Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10"/>
+                                                <controls:OutlinedText Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="14" Stroke="#AA000000" StrokeThickness="2.0" SnapsToDevicePixels="True" UseLayoutRounding="True"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Grid>
@@ -387,7 +402,10 @@
                              SelectedItem="{Binding SelectedPeerGame}"
                              Background="Transparent"
                              BorderThickness="0"
-                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingStackPanel.IsVirtualizing="True"
+                             VirtualizingStackPanel.VirtualizationMode="Recycling">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem" BasedOn="{StaticResource MahApps.Styles.ListBoxItem}">
                                 <Setter Property="Tag" Value="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
@@ -400,25 +418,38 @@
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
+                                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                <Setter Property="VerticalContentAlignment" Value="Top" />
+                                <Setter Property="VerticalAlignment" Value="Top" />
                             </Style>
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Padding="6" Margin="1" CornerRadius="3">
-                                    <Border.Background>
-                                        <ImageBrush ImageSource="{Binding CoverImage}" Stretch="UniformToFill" Opacity="0.12"/>
-                                    </Border.Background>
+                                <Border Padding="6" Margin="6" CornerRadius="3" Background="{DynamicResource MahApps.Brushes.Gray8}" Width="250" Height="100">
+                                    <!-- Placeholder bg is Border.Background; show cover image on top when available -->
                                     <Grid>
+                                        <Image Source="{Binding CoverImage}"
+                                               Stretch="UniformToFill"
+                                               StretchDirection="Both"
+                                               Opacity="0.12"
+                                               Visibility="{Binding CoverImage, Converter={StaticResource NullToVisConverter}}"
+                                               Width="250"
+                                               Height="100"
+                                               SnapsToDevicePixels="True"
+                                               HorizontalAlignment="Stretch"
+                                               VerticalAlignment="Stretch"
+                                               ClipToBounds="True"/>
+
                                         <Border Background="{DynamicResource MahApps.Brushes.Gray8}" Opacity="0.92" CornerRadius="3"/>
                                         <StackPanel Margin="6">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap"/>
                                             <TextBlock Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
-                    </ListBox>
+                     </ListBox>
 
                     <mah:ProgressRing Grid.Row="2" IsActive="{Binding IsScanningPeers}" Width="40" Height="40"/>
                 </Grid>
@@ -468,7 +499,7 @@
                             <DataTemplate>
                                 <Border Padding="8" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
                                     <StackPanel>
-                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap"/>
                                         <Border Background="{DynamicResource MahApps.Brushes.Gray7}" CornerRadius="3" Padding="6,3" Margin="0,4,0,0">
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding LocalGame.BuildId}" Foreground="OrangeRed" FontSize="10" FontWeight="Bold"/>
@@ -507,18 +538,17 @@
                                     Style="{StaticResource MahApps.Styles.Button.Square}"
                                     Background="#FF8B5CF6"
                                     Padding="10,8">
-                                <!-- add xmlns at top of the XAML root: xmlns:controls="clr-namespace:GamesLocalShare.Controls" -->
-<controls:OutlinedText Text="Download New Game"
-                       FontSize="12"
-                       FontFamily="Segoe UI"
-                       FontWeight="SemiBold"
-                       Foreground="White"
-                       Stroke="#1F000000"
-                       StrokeThickness="1.6"
-                       SnapsToDevicePixels="True"
-                       UseLayoutRounding="True"
-                       VerticalAlignment="Center"
-                       HorizontalAlignment="Center"/>
+                                <controls:OutlinedText Text="Download New Game"
+                                                       FontSize="12"
+                                                       FontFamily="Segoe UI"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="White"
+                                                       Stroke="#1F000000"
+                                                       StrokeThickness="1.6"
+                                                       SnapsToDevicePixels="True"
+                                                       UseLayoutRounding="True"
+                                                       VerticalAlignment="Center"
+                                                       HorizontalAlignment="Center"/>
                             </Button>
 
                             <!-- Progress -->
@@ -531,7 +561,7 @@
                                     <ProgressBar Value="{Binding CurrentTransferProgress}" Height="8" Minimum="0" Maximum="100"/>
                                     
                                     <!-- File name on its own line -->
-                                    <TextBlock Text="{Binding CurrentTransferFile}" FontSize="9" TextTrimming="CharacterEllipsis" 
+                                    <TextBlock Text="{Binding CurrentTransferFile}" FontSize="9" TextWrapping="Wrap" 
                                                Foreground="{DynamicResource MahApps.Brushes.Gray5}" Margin="0,4,0,0"/>
                                     
                                     <!-- Speed on its own line - clickable to toggle units -->
@@ -622,7 +652,7 @@
                             <DataTemplate>
                                 <Border Padding="8" Margin="1" Background="{DynamicResource MahApps.Brushes.Gray8}" CornerRadius="3">
                                     <StackPanel>
-                                        <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap"/>
                                         <ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Height="6" Minimum="0" Maximum="100" Margin="0,4,0,0"/>
                                         <Grid Margin="0,3,0,0">
                                             <TextBlock Text="{Binding FormattedProgress}" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray3}"/>
@@ -741,7 +771,7 @@
                                 <TextBlock Text="{Binding Message}" 
                                            Foreground="{DynamicResource MahApps.Brushes.Gray3}" 
                                            FontSize="10"
-                                           TextTrimming="CharacterEllipsis"/>
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

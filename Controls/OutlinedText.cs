@@ -49,6 +49,10 @@ public class OutlinedText : FrameworkElement
         DependencyProperty.Register(nameof(StrokeThickness), typeof(double), typeof(OutlinedText),
             new FrameworkPropertyMetadata(1.5, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsMeasure));
 
+    public static readonly DependencyProperty TextWrappingProperty =
+        DependencyProperty.Register(nameof(TextWrapping), typeof(TextWrapping), typeof(OutlinedText),
+            new FrameworkPropertyMetadata(TextWrapping.NoWrap, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.AffectsMeasure));
+
     public string Text
     {
         get => (string)GetValue(TextProperty);
@@ -91,12 +95,18 @@ public class OutlinedText : FrameworkElement
         set => SetValue(StrokeThicknessProperty, value);
     }
 
+    public TextWrapping TextWrapping
+    {
+        get => (TextWrapping)GetValue(TextWrappingProperty);
+        set => SetValue(TextWrappingProperty, value);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         if (string.IsNullOrEmpty(Text))
             return new Size(0, 0);
 
-        var formatted = CreateFormattedText();
+        var formatted = CreateFormattedText(availableSize);
         var pen = new Pen(Stroke, StrokeThickness) { LineJoin = PenLineJoin.Round };
 
         // Build geometry positioned at baseline so bounds include ascenders/descenders
@@ -128,7 +138,7 @@ public class OutlinedText : FrameworkElement
         if (string.IsNullOrEmpty(Text))
             return;
 
-        var formatted = CreateFormattedText();
+        var formatted = CreateFormattedText(new Size(ActualWidth, ActualHeight));
         var pen = new Pen(Stroke, StrokeThickness) { LineJoin = PenLineJoin.Round };
 
         // Build geometry at baseline origin, then compute render bounds and translate so top-left aligns with control (0,0)
@@ -136,14 +146,16 @@ public class OutlinedText : FrameworkElement
         var bounds = geom.GetRenderBounds(pen);
 
         var translate = new TranslateTransform(-bounds.X, -bounds.Y);
-        geom.Transform = translate;
+        drawingContext.PushTransform(translate);
 
         // Draw stroke then fill using same geometry for exact overlap
         drawingContext.DrawGeometry(null, pen, geom);
         drawingContext.DrawGeometry(Foreground, null, geom);
+
+        drawingContext.Pop();
     }
 
-    private FormattedText CreateFormattedText()
+    private FormattedText CreateFormattedText(Size availableSize)
     {
         var dpi = VisualTreeHelper.GetDpi(this);
         var ft = new FormattedText(
@@ -157,6 +169,9 @@ public class OutlinedText : FrameworkElement
 
         ft.TextAlignment = TextAlignment.Left;
         ft.Trimming = TextTrimming.None;
+
+        ft.MaxTextWidth = 10000.0;
+        ft.MaxTextHeight = 10000.0;
 
         return ft;
     }

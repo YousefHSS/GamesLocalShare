@@ -210,6 +210,19 @@ public class SteamLibraryScanner
                             if (game != null && !string.IsNullOrEmpty(game.Name))
                             {
                                 games.Add(game);
+
+                                // Start cover loading in background so the scanner doesn't wait for all images
+                                Task.Run(() =>
+                                {
+                                    try
+                                    {
+                                        TryLoadSteamCover(game);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _scanErrors.Add($"Cover load failed for {game.Name}: {ex.Message}");
+                                    }
+                                });
                             }
                         }
                         catch (Exception ex)
@@ -311,22 +324,14 @@ public class SteamLibraryScanner
             IsInstalled = Directory.Exists(installPath)
         };
 
-        // Try to load a cover image (non-blocking best-effort) - run synchronously on background thread
-        try
-        {
-            TryLoadSteamCover(game);
-        }
-        catch (Exception ex)
-        {
-            _scanErrors.Add($"Cover load failed for {game.Name}: {ex.Message}");
-        }
+        // Do not block scanning by loading covers here; cover loading will be started asynchronously by ScanGamesAsync
 
         return game;
     }
 
     /// <summary>
     /// Attempts to download a cover image for the given game using the Steam CDN (falls back to other sizes).
-    /// This runs synchronously and is intended to be called from the background scanner thread.
+    /// This runs synchronously and is intended to be called from a background worker/task.
     /// </summary>
     private void TryLoadSteamCover(GameInfo game)
     {
@@ -362,6 +367,8 @@ public class SteamLibraryScanner
                 using var ms = new MemoryStream(bytes);
                 bmp.BeginInit();
                 bmp.CacheOption = BitmapCacheOption.OnLoad;
+                // Decode to thumbnail width to keep consistent sizes and reduce memory
+                bmp.DecodePixelWidth = 300;
                 bmp.StreamSource = ms;
                 bmp.EndInit();
                 bmp.Freeze(); // make it cross-thread accessible
@@ -419,6 +426,8 @@ public class SteamLibraryScanner
             using var ms = new MemoryStream(bytes);
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
+            // Decode to thumbnail width to keep consistent sizes and reduce memory
+            bmp.DecodePixelWidth = 300;
             bmp.StreamSource = ms;
             bmp.EndInit();
             bmp.Freeze();

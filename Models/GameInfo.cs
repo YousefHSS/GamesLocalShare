@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows.Media;
 
 namespace GamesLocalShare.Models;
@@ -5,7 +6,7 @@ namespace GamesLocalShare.Models;
 /// <summary>
 /// Represents information about an installed game
 /// </summary>
-public class GameInfo
+public class GameInfo : INotifyPropertyChanged
 {
     /// <summary>
     /// Unique identifier for the game (Steam AppId)
@@ -59,7 +60,7 @@ public class GameInfo
 
     private static string FormatBytes(long bytes)
     {
-        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
+        string[] sizes = new[] { "B", "KB", "MB", "GB", "TB" };
         int order = 0;
         double size = bytes;
         while (size >= 1024 && order < sizes.Length - 1)
@@ -70,11 +71,31 @@ public class GameInfo
         return $"{size:0.##} {sizes[order]}";
     }
 
+    private ImageSource? _coverImage;
+
     /// <summary>
     /// Runtime-only cover image to display in the UI. Not serialized.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public ImageSource? CoverImage { get; set; }
+    public ImageSource? CoverImage
+    {
+        get => _coverImage;
+        set
+        {
+            if (_coverImage != value)
+            {
+                _coverImage = value;
+                OnPropertyChanged(nameof(CoverImage));
+            }
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected void OnPropertyChanged(string propertyName)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public enum GamePlatform
