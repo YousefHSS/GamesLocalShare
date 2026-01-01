@@ -1253,4 +1253,105 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsTransferring = false;
         AddLog("Transfer stopped - progress saved for resume", LogMessageType.Warning);
     }
+
+    [RelayCommand]
+    private async Task RunNetworkDiagnosticAsync()
+    {
+        // Determine which IP to diagnose
+        string targetIp;
+        
+        if (SelectedPeer != null)
+        {
+            targetIp = SelectedPeer.IpAddress;
+        }
+        else if (!string.IsNullOrWhiteSpace(ManualPeerIp))
+        {
+            targetIp = ManualPeerIp.Trim();
+        }
+        else
+        {
+            // Ask user for IP
+            var inputDialog = new Views.InputDialog("Enter the IP address to diagnose:", "Network Diagnostic");
+            if (inputDialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(inputDialog.ResponseText))
+            {
+                targetIp = inputDialog.ResponseText.Trim();
+            }
+            else
+            {
+                StatusMessage = "Network diagnostic cancelled - no IP provided";
+                return;
+            }
+        }
+
+        try
+        {
+            StatusMessage = $"Running network diagnostic for {targetIp}...";
+            AddLog($"Starting network diagnostic for {targetIp}", LogMessageType.Info);
+
+            var report = await NetworkDiagnosticService.GenerateReportAsync(LocalIpAddress, targetIp);
+
+            // Show the report in a message box (could be improved with a dedicated dialog)
+            MessageBox.Show(report, "Network Diagnostic Report", MessageBoxButton.OK, MessageBoxImage.Information);
+
+            StatusMessage = "Network diagnostic complete";
+            AddLog("Network diagnostic completed", LogMessageType.Info);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Diagnostic error: {ex.Message}";
+            AddLog($"Network diagnostic error: {ex.Message}", LogMessageType.Error);
+            MessageBox.Show($"Error running diagnostic: {ex.Message}", "Diagnostic Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task QuickSubnetCheckAsync()
+    {
+        // Quick check to see if we might have subnet issues
+        var interfaces = NetworkDiagnosticService.GetAllNetworkInterfaces();
+        
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("YOUR NETWORK INTERFACES");
+        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine();
+        
+        foreach (var iface in interfaces)
+        {
+            var typeIcon = iface.IsWireless ? "?? WiFi" : "?? Ethernet";
+            sb.AppendLine($"{typeIcon}: {iface.Description}");
+            sb.AppendLine($"    IP Address: {iface.IpAddress}");
+            sb.AppendLine($"    Subnet: {iface.SubnetMask}");
+            sb.AppendLine($"    Network: {iface.NetworkAddress}");
+            sb.AppendLine($"    Gateway: {iface.Gateway}");
+            sb.AppendLine();
+        }
+
+        // Check for subnet problems
+        var distinctNetworks = interfaces.Select(i => i.NetworkAddress).Distinct().ToList();
+        if (distinctNetworks.Count > 1)
+        {
+            sb.AppendLine("?? WARNING: You have multiple network interfaces on different subnets!");
+            sb.AppendLine("This could cause connectivity issues. Consider disabling one adapter.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("TROUBLESHOOTING TIPS");
+        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine();
+        sb.AppendLine("If you can't connect to a peer, check if your IP ranges match:");
+        sb.AppendLine($"  Your IP: {LocalIpAddress}");
+        sb.AppendLine();
+        sb.AppendLine("Common subnet patterns:");
+        sb.AppendLine("  ? 192.168.0.x and 192.168.0.y Å® ? Same subnet, should work");
+        sb.AppendLine("  ? 192.168.0.x and 192.168.1.y Å® ? Different subnets!");
+        sb.AppendLine("  ? 192.168.0.x and 172.28.0.y Å® ? Different networks entirely!");
+        sb.AppendLine();
+        sb.AppendLine("For detailed diagnosis, select a peer and click 'Diagnose Connection'");
+
+        MessageBox.Show(sb.ToString(), "Network Information", MessageBoxButton.OK, MessageBoxImage.Information);
+        
+        AddLog("Quick subnet check completed", LogMessageType.Info);
+    }
 }
