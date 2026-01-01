@@ -221,16 +221,34 @@
                                         <StackPanel Margin="6">
                                             <controls:OutlinedText Text="{Binding Name}"
                                                                    FontWeight="SemiBold"
-                                                                   FontSize="12"
+                                                                   FontSize="16"
                                                                    Foreground="White"
                                                                    Stroke="#AA000000"
-                                                                   StrokeThickness="3.2"
+                                                                   StrokeThickness="3.5"
                                                                    SnapsToDevicePixels="True"
                                                                    UseLayoutRounding="True"/>
                                             <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                                <TextBlock Text="{Binding BuildId}" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Accent}"/>
-                                                <TextBlock Text=" - " FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray5}"/>
-                                                <TextBlock Text="{Binding FormattedSize}" Foreground="{DynamicResource MahApps.Brushes.Gray5}" FontSize="10"/>
+                                                <controls:OutlinedText Text="{Binding BuildId}" 
+                                                                       FontSize="13" 
+                                                                       Foreground="{DynamicResource MahApps.Brushes.Accent}"
+                                                                       Stroke="#AA000000"
+                                                                       StrokeThickness="3.0"
+                                                                       SnapsToDevicePixels="True"
+                                                                       UseLayoutRounding="True"/>
+                                                <controls:OutlinedText Text=" - " 
+                                                                       FontSize="13" 
+                                                                       Foreground="{DynamicResource MahApps.Brushes.Gray5}"
+                                                                       Stroke="#AA000000"
+                                                                       StrokeThickness="3.0"
+                                                                       SnapsToDevicePixels="True"
+                                                                       UseLayoutRounding="True"/>
+                                                <controls:OutlinedText Text="{Binding FormattedSize}" 
+                                                                       Foreground="{DynamicResource MahApps.Brushes.Gray5}" 
+                                                                       FontSize="13"
+                                                                       Stroke="#AA000000"
+                                                                       StrokeThickness="3.0"
+                                                                       SnapsToDevicePixels="True"
+                                                                       UseLayoutRounding="True"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Grid>
