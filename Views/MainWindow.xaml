@@ -15,7 +15,9 @@
         WindowState="Normal"
         GlowBrush="{DynamicResource MahApps.Brushes.Accent}"
         BorderThickness="1"
-        FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol">
+        FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
 
     <Window.DataContext>
         <vm:MainViewModel/>
@@ -111,10 +113,12 @@
                             Style="{DynamicResource MahApps.Styles.Button.Square}"
                             Background="#FFEF4444"
                             Padding="15,8" Margin="10,0,0,0"
+                            FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                             ToolTip="Configure Windows Firewall to allow network communication">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Image x:Name="ImageWarning" Width="16" Height="16" Margin="0,0,6,0"/>
-                            <TextBlock Text="Configure Firewall" VerticalAlignment="Center" Foreground="White" FontWeight="SemiBold"/>
+                            <TextBlock Text="⚠ Configure Firewall" VerticalAlignment="Center" Foreground="White" FontWeight="SemiBold"
+                                       FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -323,8 +327,10 @@
                                         Background="#FFEF4444"
                                         Padding="8,2"
                                         Margin="0,0,5,0"
+                                        FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                         ToolTip="Run network diagnostic to troubleshoot connection issues (subnet mismatch, firewall, etc.)">
-                                    <TextBlock Text="?? Diagnose" FontSize="11" Foreground="White"/>
+                                    <TextBlock Text="⚠ Diagnose" FontSize="11" Foreground="White"
+                                               FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
                                 </Button>
                                 <Button Command="{Binding TestConnectionToPeerCommand}"
                                         Style="{DynamicResource MahApps.Styles.Button.Square}"
@@ -371,8 +377,10 @@
                                     Style="{DynamicResource MahApps.Styles.Button.Square}"
                                     Background="#FFEF4444"
                                     Padding="8,3" FontSize="10"
+                                    FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                                     ToolTip="Diagnose connection issues with this IP">
-                                <TextBlock Text="??" Foreground="White"/>
+                                <TextBlock Text="⚠" Foreground="White"
+                                           FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
                             </Button>
                         </Grid>
                     </Border>
@@ -396,7 +404,7 @@
                                             <MenuItem Header="Test Connection"
                                                       Command="{Binding PlacementTarget.Tag.TestConnectionToPeerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                       CommandParameter="{Binding}"/>
-                                            <MenuItem Header="?? Diagnose Connection Issues"
+                                            <MenuItem Header="⚠ Diagnose Connection Issues"
                                                       Command="{Binding PlacementTarget.Tag.RunNetworkDiagnosticCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                       CommandParameter="{Binding}"/>
                                             <Separator/>
@@ -734,8 +742,10 @@
                             Background="{DynamicResource MahApps.Brushes.Gray8}"
                             Width="85" Height="24"
                             Margin="0,0,10,0"
+                            FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                             ToolTip="View your network interfaces and subnet information">
-                        <TextBlock Text="?? Net Info" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"/>
+                        <TextBlock Text="🌐 Net Info" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"
+                                   FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
                     </Button>
                     
                     <!-- High Speed Mode Toggle - improved styling -->
@@ -798,22 +808,27 @@
                          ItemsSource="{Binding LogMessages}"
                          Background="Transparent"
                          BorderThickness="0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal" Margin="0,1">
                                 <TextBlock Text="{Binding FormattedTime}" 
                                            Foreground="{DynamicResource MahApps.Brushes.Gray5}" 
                                            FontSize="10" 
-                                           Width="55"/>
+                                           Width="55"
+                                           FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
                                 <TextBlock Text="{Binding TypeIcon}" 
                                            Foreground="{Binding TypeColor}" 
                                            FontSize="10" 
-                                           Width="20"/>
+                                           Width="20"
+                                           FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
+                                           TextOptions.TextFormattingMode="Display"/>
                                 <TextBlock Text="{Binding Message}" 
                                            Foreground="{DynamicResource MahApps.Brushes.Gray3}" 
                                            FontSize="10"
-                                           TextTrimming="CharacterEllipsis"/>
+                                           TextTrimming="CharacterEllipsis"
+                                           FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

@@ -32,7 +32,7 @@ public partial class App : Application
     private void PromptForFirewallConfiguration()
     {
         var result = MessageBox.Show(
-            "?? FIREWALL CONFIGURATION REQUIRED\n\n" +
+            "? FIREWALL CONFIGURATION REQUIRED\n\n" +
             "GamesLocalShare needs to configure Windows Firewall so other computers can:\n\n" +
             "• Discover this computer on the network\n" +
             "• See your game list\n" +
@@ -73,7 +73,7 @@ public partial class App : Application
         {
             MessageBox.Show(
                 "Firewall was NOT configured.\n\n" +
-                "?? Other computers will NOT be able to download games from you!\n\n" +
+                "? Other computers will NOT be able to download games from you!\n\n" +
                 "You can configure it later by clicking the red 'Configure Firewall' button.",
                 "Firewall Not Configured",
                 MessageBoxButton.OK,

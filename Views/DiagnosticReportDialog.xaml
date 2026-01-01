@@ -7,7 +7,8 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         ShowInTaskbar="False"
-        Background="{DynamicResource MahApps.Brushes.Gray10}">
+        Background="{DynamicResource MahApps.Brushes.Gray10}"
+        FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol">
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
@@ -28,11 +29,12 @@
                          BorderThickness="0"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
-                         FontFamily="Consolas, Courier New"
+                         FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                          FontSize="11"
                          Foreground="{DynamicResource MahApps.Brushes.Gray2}"
                          VerticalScrollBarVisibility="Disabled"
-                         HorizontalScrollBarVisibility="Disabled"/>
+                         HorizontalScrollBarVisibility="Disabled"
+                         TextOptions.TextFormattingMode="Display"/>
             </ScrollViewer>
         </Border>
 

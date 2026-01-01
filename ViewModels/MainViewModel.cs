@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -124,7 +124,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Show firewall warning if not configured
         if (!FirewallConfigured)
         {
-            StatusMessage = "?? Firewall not configured - click 'Configure Firewall' to fix connection issues";
+            StatusMessage = "⚠ Firewall not configured - click 'Configure Firewall' to fix connection issues";
             AddLog("Firewall not configured - other computers may not be able to connect", LogMessageType.Warning);
         }
     }
@@ -154,7 +154,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         Application.Current.Dispatcher.BeginInvoke(() =>
         {
-            StatusMessage = "?? A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
+            StatusMessage = "⚠ A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
             AddLog("A peer requested games but none scanned yet", LogMessageType.Warning);
         });
     }
@@ -307,14 +307,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (success)
             {
                 FirewallConfigured = true;
-                StatusMessage = "? Firewall configured successfully!";
+                StatusMessage = "✓ Firewall configured successfully!";
                 MessageBox.Show(
                     "Firewall rules have been added successfully!\n\n" +
                     "Added rules:\n" +
-                    "�EProgram-based rule (allows all GamesLocalShare traffic)\n" +
-                    "�EUDP 45677 (Discovery)\n" +
-                    "�ETCP 45678 (Game List)\n" +
-                    "�ETCP 45679 (File Transfer)\n\n" +
+                    "• Program-based rule (allows all GamesLocalShare traffic)\n" +
+                    "• UDP 45677 (Discovery)\n" +
+                    "• TCP 45678 (Game List)\n" +
+                    "• TCP 45679 (File Transfer)\n\n" +
                     "If connections STILL fail, you may have third-party security software\n" +
                     "(antivirus/firewall) that needs separate configuration.",
                     "Firewall Configured",
@@ -394,7 +394,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Check firewall first
             if (!FirewallConfigured)
             {
-                StatusMessage = "?? Firewall not configured - peers may not be able to connect to you";
+                StatusMessage = "⚠ Firewall not configured - peers may not be able to connect to you";
             }
 
             StatusMessage = "Starting network discovery...";
@@ -410,7 +410,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             catch (InvalidOperationException ex)
             {
                 // Port already in use
-                StatusMessage = $"?? Network started but file transfer failed: {ex.Message}";
+                StatusMessage = $"⚠ Network started but file transfer failed: {ex.Message}";
                 MessageBox.Show(
                     $"Warning: File Transfer Service failed to start!\n\n{ex.Message}\n\n" +
                     "Other computers will NOT be able to download games FROM this computer.\n\n" +
@@ -430,12 +430,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                status += " - ?? File transfer NOT listening!";
+                status += " - ⚠ File transfer NOT listening!";
             }
             
             if (!FirewallConfigured)
             {
-                status += " (?? firewall not configured)";
+                status += " (⚠ firewall not configured)";
             }
             
             StatusMessage = status;
@@ -1197,12 +1197,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             using var client1 = new System.Net.Sockets.TcpClient();
             var cts1 = new CancellationTokenSource(5000);
             await client1.ConnectAsync(SelectedPeer.IpAddress, 45678, cts1.Token);
-            results.AppendLine("  ? SUCCESS - Connected!");
+            results.AppendLine("  ✓ SUCCESS - Connected!");
             client1.Close();
         }
         catch (Exception ex)
         {
-            results.AppendLine($"  ? FAILED - {ex.Message}");
+            results.AppendLine($"  ✗ FAILED - {ex.Message}");
         }
         
         // Test TCP 45679 (file transfer)
@@ -1213,12 +1213,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             using var client2 = new System.Net.Sockets.TcpClient();
             var cts2 = new CancellationTokenSource(5000);
             await client2.ConnectAsync(SelectedPeer.IpAddress, 45679, cts2.Token);
-            results.AppendLine("  ? SUCCESS - Connected!");
+            results.AppendLine("  ✓ SUCCESS - Connected!");
             client2.Close();
         }
         catch (Exception ex)
         {
-            results.AppendLine($"  ? FAILED - {ex.Message}");
+            results.AppendLine($"  ✗ FAILED - {ex.Message}");
         }
 
         results.AppendLine();
@@ -1312,14 +1312,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var interfaces = NetworkDiagnosticService.GetAllNetworkInterfaces();
         
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("═══════════════════════════════════════");
         sb.AppendLine("YOUR NETWORK INTERFACES");
-        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("═══════════════════════════════════════");
         sb.AppendLine();
         
         foreach (var iface in interfaces)
         {
-            var typeIcon = iface.IsWireless ? "?? WiFi" : "?? Ethernet";
+            var typeIcon = iface.IsWireless ? "📶 WiFi" : "🔌 Ethernet";
             sb.AppendLine($"{typeIcon}: {iface.Description}");
             sb.AppendLine($"    IP Address: {iface.IpAddress}");
             sb.AppendLine($"    Subnet: {iface.SubnetMask}");
@@ -1332,22 +1332,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var distinctNetworks = interfaces.Select(i => i.NetworkAddress).Distinct().ToList();
         if (distinctNetworks.Count > 1)
         {
-            sb.AppendLine("?? WARNING: You have multiple network interfaces on different subnets!");
+            sb.AppendLine("⚠ WARNING: You have multiple network interfaces on different subnets!");
             sb.AppendLine("This could cause connectivity issues. Consider disabling one adapter.");
         }
 
         sb.AppendLine();
-        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("═══════════════════════════════════════");
         sb.AppendLine("TROUBLESHOOTING TIPS");
-        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("═══════════════════════════════════════");
         sb.AppendLine();
         sb.AppendLine("If you can't connect to a peer, check if your IP ranges match:");
         sb.AppendLine($"  Your IP: {LocalIpAddress}");
         sb.AppendLine();
         sb.AppendLine("Common subnet patterns:");
-        sb.AppendLine("  ? 192.168.0.x and 192.168.0.y �� ? Same subnet, should work");
-        sb.AppendLine("  ? 192.168.0.x and 192.168.1.y �� ? Different subnets!");
-        sb.AppendLine("  ? 192.168.0.x and 172.28.0.y �� ? Different networks entirely!");
+        sb.AppendLine("  ✓ 192.168.0.x and 192.168.0.y → ✓ Same subnet, should work");
+        sb.AppendLine("  ✓ 192.168.0.x and 192.168.1.y → ✗ Different subnets!");
+        sb.AppendLine("  ✓ 192.168.0.x and 172.28.0.y → ✗ Different networks entirely!");
         sb.AppendLine();
         sb.AppendLine("For detailed diagnosis, select a peer and click 'Diagnose Connection'");
 

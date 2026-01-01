@@ -1,4 +1,4 @@
-using System.Diagnostics;
+ï»¿using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -299,7 +299,7 @@ public class NetworkDiagnosticService
             {
                 Success = true,
                 Title = "Subnet Check",
-                Message = $"? Both devices are on the same subnet: {localSubnet}.x",
+                Message = $"âœ”ï¸ Both devices are on the same subnet: {localSubnet}.x",
                 Severity = DiagnosticSeverity.Info
             };
         }
@@ -308,7 +308,7 @@ public class NetworkDiagnosticService
         return new DiagnosticResult
         {
             Success = false,
-            Title = "?? SUBNET MISMATCH DETECTED",
+            Title = "âš  SUBNET MISMATCH DETECTED",
             Message = $"Your devices are on DIFFERENT subnets!\n\n" +
                      $"  Your IP: {localIp} (subnet: {localSubnet}.x)\n" +
                      $"  Peer IP: {peerIp} (subnet: {peerSubnet}.x)\n\n" +
@@ -321,16 +321,16 @@ public class NetworkDiagnosticService
     private static string GetSubnetMismatchSuggestion(string localIp, string peerIp)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
         sb.AppendLine("SOLUTIONS (try in order):");
-        sb.AppendLine("???????????????????????????????????????????????????????");
+        sb.AppendLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
         sb.AppendLine();
         sb.AppendLine("1. QUICKEST FIX - Set a static IP on one device:");
         sb.AppendLine($"   On the device with IP {peerIp}:");
-        sb.AppendLine($"   ? Open Network Settings ¨ Change adapter options");
-        sb.AppendLine($"   ? Right-click the network adapter ¨ Properties");
-        sb.AppendLine($"   ? Select 'Internet Protocol Version 4' ¨ Properties");
-        sb.AppendLine($"   ? Choose 'Use the following IP address':");
+        sb.AppendLine($"   â–¸ Open Network Settings â†’ Change adapter options");
+        sb.AppendLine($"   â–¸ Right-click the network adapter â†’ Properties");
+        sb.AppendLine($"   â–¸ Select 'Internet Protocol Version 4' â†’ Properties");
+        sb.AppendLine($"   â–¸ Choose 'Use the following IP address':");
         
         // Suggest an IP in the same subnet as local
         var localParts = localIp.Split('.');
@@ -343,18 +343,18 @@ public class NetworkDiagnosticService
         
         sb.AppendLine();
         sb.AppendLine("2. CHECK YOUR NETWORK EQUIPMENT:");
-        sb.AppendLine("   ? You may have multiple routers creating separate networks");
-        sb.AppendLine("   ? A switch with built-in DHCP can cause this");
-        sb.AppendLine("   ? WiFi and Ethernet may be isolated by router settings");
+        sb.AppendLine("   â–¸ You may have multiple routers creating separate networks");
+        sb.AppendLine("   â–¸ A switch with built-in DHCP can cause this");
+        sb.AppendLine("   â–¸ WiFi and Ethernet may be isolated by router settings");
         sb.AppendLine();
         sb.AppendLine("3. ROUTER CONFIGURATION:");
-        sb.AppendLine("   ? Log into your router (usually 192.168.0.1 or 192.168.1.1)");
-        sb.AppendLine("   ? Look for 'AP Isolation' or 'Client Isolation' ¨ Disable it");
-        sb.AppendLine("   ? Check if there's a secondary router ¨ Set it to 'Bridge Mode'");
+        sb.AppendLine("   â–¸ Log into your router (usually 192.168.0.1 or 192.168.1.1)");
+        sb.AppendLine("   â–¸ Look for 'AP Isolation' or 'Client Isolation' â†’ Disable it");
+        sb.AppendLine("   â–¸ Check if there's a secondary router â†’ Set it to 'Bridge Mode'");
         sb.AppendLine();
         sb.AppendLine("4. CONNECT BOTH DEVICES THE SAME WAY:");
-        sb.AppendLine("   ? Try connecting both via WiFi, OR");
-        sb.AppendLine("   ? Try connecting both via Ethernet cable");
+        sb.AppendLine("   â–¸ Try connecting both via WiFi, OR");
+        sb.AppendLine("   â–¸ Try connecting both via Ethernet cable");
         
         return sb.ToString();
     }
@@ -392,7 +392,7 @@ public class NetworkDiagnosticService
                 Success = true,
                 Title = "Multiple Network Interfaces Detected",
                 Message = $"Your computer has {interfaces.Count} network interface(s) on {distinctSubnets.Count} different subnet(s):\n" +
-                         string.Join("\n", interfaces.Select(i => $"  ? {i.Description}: {i.IpAddress} ({i.NetworkAddress})")),
+                         string.Join("\n", interfaces.Select(i => $"  â–¸ {i.Description}: {i.IpAddress} ({i.NetworkAddress})")),
                 Severity = DiagnosticSeverity.Warning,
                 Suggestion = "If you're having connection issues, try disabling one of the network adapters temporarily."
             });
@@ -411,7 +411,7 @@ public class NetworkDiagnosticService
             {
                 Success = true,
                 Title = "Ping Test",
-                Message = $"? Ping to {peerIp} successful! Response time: {roundtrip}ms",
+                Message = $"âœ“ Ping to {peerIp} successful! Response time: {roundtrip}ms",
                 Severity = DiagnosticSeverity.Info
             };
         }
@@ -420,13 +420,13 @@ public class NetworkDiagnosticService
         {
             Success = false,
             Title = "Ping Test",
-            Message = $"? Ping to {peerIp} FAILED: {error}",
+            Message = $"âœ— Ping to {peerIp} FAILED: {error}",
             Severity = DiagnosticSeverity.Error,
             Suggestion = "The peer device is not reachable at the network level. This usually means:\n" +
-                        "  ? Devices are on different subnets (see above)\n" +
-                        "  ? Firewall is blocking ICMP/ping\n" +
-                        "  ? The device is offline or IP is incorrect\n" +
-                        "  ? Network equipment is blocking traffic between devices"
+                        "  â–¸ Devices are on different subnets (see above)\n" +
+                        "  â–¸ Firewall is blocking ICMP/ping\n" +
+                        "  â–¸ The device is offline or IP is incorrect\n" +
+                        "  â–¸ Network equipment is blocking traffic between devices"
         };
     }
 
@@ -446,8 +446,8 @@ public class NetworkDiagnosticService
                 Success = success,
                 Title = $"Port {port} ({name})",
                 Message = success 
-                    ? $"? Port {port} is reachable"
-                    : $"? Port {port} connection failed: {error}",
+                    ? $"âœ“ Port {port} is reachable"
+                    : $"âœ— Port {port} connection failed: {error}",
                 Severity = success ? DiagnosticSeverity.Info : DiagnosticSeverity.Warning,
                 Suggestion = success ? null : $"Make sure the peer has:\n  1. Started the network in the app\n  2. Configured their firewall\n  3. No other app using port {port}"
             });
@@ -519,9 +519,9 @@ public class NetworkDiagnosticService
                     Message = $"Multiple hops detected ({hopCount}). Traffic may be going through multiple routers.",
                     Severity = DiagnosticSeverity.Warning,
                     Suggestion = "Multiple network hops can indicate:\n" +
-                                "  ? Multiple routers between devices\n" +
-                                "  ? Complex network setup\n" +
-                                "  ? Possible subnet isolation"
+                                "  â–¸ Multiple routers between devices\n" +
+                                "  â–¸ Complex network setup\n" +
+                                "  â–¸ Possible subnet isolation"
                 };
             }
 
@@ -551,9 +551,9 @@ public class NetworkDiagnosticService
     public static async Task<string> GenerateReportAsync(string localIp, string peerIp)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("??????????????????????????????????????????????????????????????????");
-        sb.AppendLine("?           NETWORK DIAGNOSTIC REPORT                            ?");
-        sb.AppendLine("??????????????????????????????????????????????????????????????????");
+        sb.AppendLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+        sb.AppendLine("â•‘         NETWORK DIAGNOSTIC REPORT                        â•‘");
+        sb.AppendLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
         sb.AppendLine();
         sb.AppendLine($"  Your IP:    {localIp}");
         sb.AppendLine($"  Peer IP:    {peerIp}");
@@ -566,22 +566,22 @@ public class NetworkDiagnosticService
         {
             var icon = result.Severity switch
             {
-                DiagnosticSeverity.Info => "??",
-                DiagnosticSeverity.Warning => "??",
-                DiagnosticSeverity.Error => "?",
-                DiagnosticSeverity.Critical => "??",
-                _ => "?"
+                DiagnosticSeverity.Info => "â„¹ï¸",
+                DiagnosticSeverity.Warning => "âš ",
+                DiagnosticSeverity.Error => "âœ—",
+                DiagnosticSeverity.Critical => "ðŸ”´",
+                _ => "â€¢"
             };
 
-            sb.AppendLine($"„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ");
+            sb.AppendLine($"â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€");
             sb.AppendLine($"{icon} {result.Title}");
-            sb.AppendLine($"„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ„Ÿ");
+            sb.AppendLine($"â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€");
             sb.AppendLine(result.Message);
             
             if (!string.IsNullOrEmpty(result.Suggestion))
             {
                 sb.AppendLine();
-                sb.AppendLine("?? SUGGESTION:");
+                sb.AppendLine("ðŸ’¡ SUGGESTION:");
                 sb.AppendLine(result.Suggestion);
             }
             sb.AppendLine();
@@ -591,21 +591,21 @@ public class NetworkDiagnosticService
         var criticalCount = results.Count(r => r.Severity == DiagnosticSeverity.Critical);
         var errorCount = results.Count(r => r.Severity == DiagnosticSeverity.Error);
         
-        sb.AppendLine("????????????????????????????????????????????????????????????????");
+        sb.AppendLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
         sb.AppendLine("SUMMARY");
-        sb.AppendLine("????????????????????????????????????????????????????????????????");
+        sb.AppendLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
         
         if (criticalCount > 0)
         {
-            sb.AppendLine("?? CRITICAL ISSUE DETECTED - See subnet mismatch solution above!");
+            sb.AppendLine("ðŸ”´ CRITICAL ISSUE DETECTED - See subnet mismatch solution above!");
         }
         else if (errorCount > 0)
         {
-            sb.AppendLine($"? {errorCount} error(s) found - Review the suggestions above.");
+            sb.AppendLine($"âœ— {errorCount} error(s) found - Review the suggestions above.");
         }
         else
         {
-            sb.AppendLine("? No critical issues detected. Connection should work.");
+            sb.AppendLine("âœ“ No critical issues detected. Connection should work.");
         }
 
         return sb.ToString();

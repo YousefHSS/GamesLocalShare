@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using GamesLocalShare.Models;
@@ -105,7 +105,7 @@ public class BoolToSpeedModeConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
         if (value is bool isHighSpeed)
-            return isHighSpeed ? "? Wired" : "?? WiFi";
+            return isHighSpeed ? "🖇️ Wired" : "\U0001f6dc WiFi";
         return "?? WiFi";
     }
 

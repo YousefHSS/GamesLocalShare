@@ -39,16 +39,16 @@ public class LogMessage
     };
 
     /// <summary>
-    /// Icon based on message type (using ASCII-safe characters)
+    /// Icon based on message type (using emoji characters)
     /// </summary>
     public string TypeIcon => Type switch
     {
-        LogMessageType.Success => "[OK]",
-        LogMessageType.Error => "[X]",
-        LogMessageType.Warning => "[!]",
-        LogMessageType.Transfer => "[>]",
-        LogMessageType.Network => "[~]",
-        _ => "[*]"
+        LogMessageType.Success => "?",      // Checkmark
+        LogMessageType.Error => "?",        // X mark
+        LogMessageType.Warning => "?",      // Warning sign
+        LogMessageType.Transfer => "?",     // Down arrow
+        LogMessageType.Network => "??",     // Satellite antenna
+        _ => "?"                            // Info symbol
     };
 
     public LogMessage() { }
