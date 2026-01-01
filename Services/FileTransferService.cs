@@ -454,6 +454,11 @@ public class FileTransferService : IDisposable
                             ? (double)transferredBytes / _currentTransferState.TotalBytes * 100 
                             : 0;
 
+                        // Calculate estimated time remaining
+                        var bytesRemaining = _currentTransferState.TotalBytes - transferredBytes;
+                        var estimatedSecondsRemaining = speed > 0 ? bytesRemaining / (double)speed : 0;
+                        var timeRemaining = TimeSpan.FromSeconds(estimatedSecondsRemaining);
+
                         ProgressChanged?.Invoke(this, new TransferProgressEventArgs
                         {
                             GameAppId = remoteGame.AppId,
@@ -461,7 +466,8 @@ public class FileTransferService : IDisposable
                             TransferredBytes = transferredBytes,
                             TotalBytes = _currentTransferState.TotalBytes,
                             SpeedBytesPerSecond = speed,
-                            CurrentFile = fileInfo.RelativePath
+                            CurrentFile = fileInfo.RelativePath,
+                            EstimatedTimeRemaining = timeRemaining
                         });
                     }
 
@@ -1049,6 +1055,7 @@ public class TransferProgressEventArgs : EventArgs
     public long TotalBytes { get; set; }
     public long SpeedBytesPerSecond { get; set; }
     public string CurrentFile { get; set; } = string.Empty;
+    public TimeSpan EstimatedTimeRemaining { get; set; }
 }
 
 public class TransferCompletedEventArgs : EventArgs

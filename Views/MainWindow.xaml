@@ -322,16 +322,6 @@
                                            FontSize="13" Foreground="White" Opacity="0.8"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Command="{Binding RunNetworkDiagnosticCommand}"
-                                        Style="{DynamicResource MahApps.Styles.Button.Square}"
-                                        Background="#FFEF4444"
-                                        Padding="8,2"
-                                        Margin="0,0,5,0"
-                                        FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
-                                        ToolTip="Run network diagnostic to troubleshoot connection issues (subnet mismatch, firewall, etc.)">
-                                    <TextBlock Text="⚠ Diagnose" FontSize="11" Foreground="White"
-                                               FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
-                                </Button>
                                 <Button Command="{Binding TestConnectionToPeerCommand}"
                                         Style="{DynamicResource MahApps.Styles.Button.Square}"
                                         Background="Transparent"
@@ -604,19 +594,36 @@
                                     <TextBlock Text="{Binding CurrentTransferFile}" FontSize="9" TextTrimming="CharacterEllipsis" 
                                                Foreground="{DynamicResource MahApps.Brushes.Gray5}" Margin="0,4,0,0"/>
                                     
-                                    <!-- Speed on its own line - clickable to toggle units -->
-                                    <Button Command="{Binding ToggleSpeedUnitCommand}"
-                                            HorizontalAlignment="Left"
-                                            Style="{DynamicResource MahApps.Styles.Button.Square}"
-                                            Background="Transparent"
-                                            BorderThickness="0"
-                                            Padding="0"
-                                            Margin="0,2,0,0"
-                                            Cursor="Hand"
-                                            ToolTip="Click to toggle between MB/s and Mbps">
-                                        <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="12"
-                                                   Foreground="{DynamicResource MahApps.Brushes.Accent}" FontWeight="Bold"/>
-                                    </Button>
+                                    <!-- Speed and Time Remaining on one line -->
+                                    <Grid Margin="0,2,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        
+                                        <!-- Speed - clickable to toggle units -->
+                                        <Button Grid.Column="0"
+                                                Command="{Binding ToggleSpeedUnitCommand}"
+                                                HorizontalAlignment="Left"
+                                                Style="{DynamicResource MahApps.Styles.Button.Square}"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Padding="0"
+                                                Cursor="Hand"
+                                                ToolTip="Click to toggle between MB/s and Mbps">
+                                            <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="12"
+                                                       Foreground="{DynamicResource MahApps.Brushes.Accent}" FontWeight="Bold"/>
+                                        </Button>
+                                        
+                                        <!-- Time Remaining -->
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding CurrentTransferTimeRemaining, StringFormat='ETA: {0}'}" 
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource MahApps.Brushes.Gray4}"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"
+                                                   Margin="10,0,0,0"/>
+                                    </Grid>
                                     
                                     <!-- Pause/Stop buttons -->
                                     <Grid Margin="0,6,0,0">

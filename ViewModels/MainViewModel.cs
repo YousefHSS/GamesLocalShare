@@ -60,6 +60,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _currentTransferFile = string.Empty;
 
     [ObservableProperty]
+    private string _currentTransferTimeRemaining = string.Empty;
+
+    [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ResumeTransferCommand))]
     [NotifyCanExecuteChangedFor(nameof(StartSyncCommand))]
     [NotifyCanExecuteChangedFor(nameof(DownloadNewGameCommand))]
@@ -931,6 +934,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentTransferProgress = e.Progress;
             CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond, ShowSpeedInMbps);
             CurrentTransferFile = e.CurrentFile;
+            CurrentTransferTimeRemaining = FormatTimeRemaining(e.EstimatedTimeRemaining);
 
             if (SelectedSyncItem != null)
             {
@@ -948,6 +952,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsTransferring = false;
             CurrentTransferProgress = 0;
             CurrentTransferFile = string.Empty;
+            CurrentTransferTimeRemaining = string.Empty;
 
             if (e.Success)
             {
@@ -991,6 +996,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentTransferProgress = 0;
             CurrentTransferFile = string.Empty;
             CurrentTransferGameName = string.Empty;
+            CurrentTransferTimeRemaining = string.Empty;
 
             var action = e.IsPaused ? "paused" : "stopped";
             var message = $"Transfer {action}: {e.GameName}";
@@ -1028,6 +1034,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             return $"{FormatBytes(bytesPerSecond)}/s";
         }
+    }
+
+    private static string FormatTimeRemaining(TimeSpan timeRemaining)
+    {
+        if (timeRemaining.TotalSeconds < 1)
+            return "Calculating...";
+        
+        if (timeRemaining.TotalSeconds > 86400) // More than 24 hours
+            return "More than 1 day";
+        
+        if (timeRemaining.TotalHours >= 1)
+            return $"{(int)timeRemaining.TotalHours}h {timeRemaining.Minutes}m";
+        
+        if (timeRemaining.TotalMinutes >= 1)
+            return $"{(int)timeRemaining.TotalMinutes}m {timeRemaining.Seconds}s";
+        
+        return $"{(int)timeRemaining.TotalSeconds}s";
     }
 
     [RelayCommand]
