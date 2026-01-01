@@ -13,7 +13,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly SteamLibraryScanner _steamScanner;
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
+    private readonly AppSettings _settings;
     private DateTime _lastProgressUpdate = DateTime.MinValue;
+    private System.Timers.Timer? _autoUpdateTimer;
     private const int MaxLogMessages = 100;
 
     [ObservableProperty]
@@ -101,6 +103,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _steamScanner = new SteamLibraryScanner();
         _networkService = new NetworkDiscoveryService();
         _fileTransferService = new FileTransferService();
+        _settings = AppSettings.Load();
 
         // Check admin and firewall status
         IsAdmin = FirewallHelper.IsRunningAsAdmin();
@@ -129,6 +132,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = "⚠ Firewall not configured - click 'Configure Firewall' to fix connection issues";
             AddLog("Firewall not configured - other computers may not be able to connect", LogMessageType.Warning);
+        }
+
+        // Initialize auto-update timer if enabled
+        if (_settings.AutoUpdateGames)
+        {
+            InitializeAutoUpdateTimer();
         }
     }
 
@@ -188,12 +197,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 LocalGames.Clear();
                 foreach (var game in games)
                 {
+                    // Apply hidden status from settings
+                    game.IsHidden = _settings.IsGameHidden(game.AppId);
                     LocalGames.Add(game);
                 }
             });
 
-            // Update file transfer service with local games
-            _fileTransferService.UpdateLocalGames(games);
+            // Update file transfer service with VISIBLE games only
+            var visibleGames = games.Where(g => !g.IsHidden).ToList();
+            _fileTransferService.UpdateLocalGames(visibleGames);
 
             if (games.Count == 0)
             {
@@ -212,7 +224,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                StatusMessage = $"Found {games.Count} installed games";
+                var hiddenCount = games.Count - visibleGames.Count;
+                StatusMessage = hiddenCount > 0
+                    ? $"Found {games.Count} installed games ({hiddenCount} hidden)"
+                    : $"Found {games.Count} installed games";
                 AddLog($"Found {games.Count} installed games", LogMessageType.Success);
             }
 
@@ -220,7 +235,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (IsNetworkActive)
             {
-                await _networkService.UpdateLocalGamesAsync(games);
+                await _networkService.UpdateLocalGamesAsync(visibleGames);
             }
 
             if (NetworkPeers.Count > 0)
@@ -443,15 +458,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             
             StatusMessage = status;
 
-            // Share our games with the network and file transfer service
+            // Share our VISIBLE games with the network and file transfer service
             if (LocalGames.Count > 0)
             {
-                var gamesList = LocalGames.ToList();
-                await _networkService.UpdateLocalGamesAsync(gamesList);
-                _fileTransferService.UpdateLocalGames(gamesList);
+                var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
+                await _networkService.UpdateLocalGamesAsync(visibleGames);
+                _fileTransferService.UpdateLocalGames(visibleGames);
             }
 
             AddLog("Network discovery started", LogMessageType.Info);
+
+            // Start auto-update timer if enabled
+            if (_settings.AutoUpdateGames)
+            {
+                InitializeAutoUpdateTimer();
+            }
         }
         catch (Exception ex)
         {
@@ -1183,6 +1204,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _autoUpdateTimer?.Stop();
+        _autoUpdateTimer?.Dispose();
+        
         _networkService.PeerDiscovered -= OnPeerDiscovered;
         _networkService.PeerLost -= OnPeerLost;
         _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;
@@ -1379,5 +1403,144 @@ public partial class MainViewModel : ObservableObject, IDisposable
         reportDialog.ShowDialog();
         
         AddLog("Quick subnet check completed", LogMessageType.Info);
+    }
+
+    [RelayCommand]
+    private void OpenSettings()
+    {
+        var settingsDialog = new Views.SettingsDialog(_settings, LocalGames.ToList());
+        if (settingsDialog.ShowDialog() == true && settingsDialog.SettingsChanged)
+        {
+            // Apply settings changes
+            ApplySettings();
+            StatusMessage = "Settings saved successfully";
+            AddLog("Settings updated", LogMessageType.Info);
+        }
+    }
+
+    [RelayCommand]
+    private void HideGameFromPeers(GameInfo? game = null)
+    {
+        var target = game ?? SelectedLocalGame;
+        if (target == null)
+            return;
+
+        var result = MessageBox.Show(
+            $"Hide '{target.Name}' from peers?\n\nThis game will no longer be visible to other computers on the network.",
+            "Hide Game",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result == MessageBoxResult.Yes)
+        {
+            _settings.HideGame(target.AppId);
+            target.IsHidden = true;
+            
+            // Update the game list sent to peers
+            _ = UpdateSharedGamesList();
+            
+            StatusMessage = $"'{target.Name}' is now hidden from peers";
+            AddLog($"Hidden game from peers: {target.Name}", LogMessageType.Info);
+        }
+    }
+
+    [RelayCommand]
+    private void UnhideGameFromPeers(GameInfo? game = null)
+    {
+        var target = game ?? SelectedLocalGame;
+        if (target == null)
+            return;
+
+        _settings.UnhideGame(target.AppId);
+        target.IsHidden = false;
+        
+        // Update the game list sent to peers
+        _ = UpdateSharedGamesList();
+        
+        StatusMessage = $"'{target.Name}' is now visible to peers";
+        AddLog($"Unhidden game from peers: {target.Name}", LogMessageType.Info);
+    }
+
+    private void ApplySettings()
+    {
+        // Re-initialize auto-update timer if settings changed
+        _autoUpdateTimer?.Stop();
+        _autoUpdateTimer?.Dispose();
+        _autoUpdateTimer = null;
+
+        if (_settings.AutoUpdateGames && IsNetworkActive)
+        {
+            InitializeAutoUpdateTimer();
+        }
+
+        // Apply hidden games to existing game list
+        foreach (var game in LocalGames)
+        {
+            game.IsHidden = _settings.IsGameHidden(game.AppId);
+        }
+
+        // Update shared games if network is active
+        if (IsNetworkActive)
+        {
+            _ = UpdateSharedGamesList();
+        }
+    }
+
+    private void InitializeAutoUpdateTimer()
+    {
+        _autoUpdateTimer = new System.Timers.Timer(_settings.AutoUpdateCheckInterval * 60 * 1000);
+        _autoUpdateTimer.Elapsed += async (s, e) => await CheckForAutoUpdatesAsync();
+        _autoUpdateTimer.AutoReset = true;
+        _autoUpdateTimer.Start();
+        AddLog($"Auto-update enabled: checking every {_settings.AutoUpdateCheckInterval} minutes", LogMessageType.Info);
+    }
+
+    private async Task CheckForAutoUpdatesAsync()
+    {
+        if (!IsNetworkActive || NetworkPeers.Count == 0 || IsTransferring)
+            return;
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            AddLog("Checking for auto-updates...", LogMessageType.Info);
+        });
+
+        // Check for updates
+        Application.Current.Dispatcher.Invoke(() => UpdateAvailableSyncs());
+
+        if (AvailableSyncs.Count > 0)
+        {
+            AddLog($"Found {AvailableSyncs.Count} game update(s), starting downloads...", LogMessageType.Info);
+            
+            // Download updates one by one
+            foreach (var syncItem in AvailableSyncs.ToList())
+            {
+                if (!_settings.AutoUpdateGames || !IsNetworkActive)
+                    break;
+
+                await Application.Current.Dispatcher.InvokeAsync(async () =>
+                {
+                    SelectedSyncItem = syncItem;
+                    await StartSyncAsync();
+                });
+
+                // Wait a bit between downloads
+                await Task.Delay(5000);
+            }
+        }
+    }
+
+    private async Task UpdateSharedGamesList()
+    {
+        if (!IsNetworkActive)
+            return;
+
+        // Filter out hidden games before sharing
+        var visibleGames = LocalGames.Where(g => !_settings.IsGameHidden(g.AppId)).ToList();
+        
+        _fileTransferService.UpdateLocalGames(visibleGames);
+        await _networkService.UpdateLocalGamesAsync(visibleGames);
+        
+        AddLog($"Updated shared games list: {visibleGames.Count} visible, {LocalGames.Count - visibleGames.Count} hidden", LogMessageType.Info);
     }
 }

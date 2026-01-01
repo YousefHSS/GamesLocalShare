@@ -53,6 +53,12 @@ public class GameInfo
     public bool IsAvailableFromPeer { get; set; } = false;
 
     /// <summary>
+    /// Whether this game is hidden from peers (not shared on network)
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsHidden { get; set; } = false;
+
+    /// <summary>
     /// Formatted size for display
     /// </summary>
     public string FormattedSize => FormatBytes(SizeOnDisk);

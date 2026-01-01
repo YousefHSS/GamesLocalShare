@@ -209,6 +209,35 @@
                                             <MenuItem Header="Open Game Folder"
                                                       Command="{Binding PlacementTarget.Tag.OpenGameFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                       CommandParameter="{Binding}"/>
+                                            <Separator/>
+                                            <MenuItem Header="Hide from Peers"
+                                                      Command="{Binding PlacementTarget.Tag.HideGameFromPeersCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding}">
+                                                <MenuItem.Style>
+                                                    <Style TargetType="MenuItem" BasedOn="{StaticResource MahApps.Styles.MenuItem}">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsHidden}" Value="True">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </MenuItem.Style>
+                                            </MenuItem>
+                                            <MenuItem Header="Unhide from Peers"
+                                                      Command="{Binding PlacementTarget.Tag.UnhideGameFromPeersCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding}">
+                                                <MenuItem.Style>
+                                                    <Style TargetType="MenuItem" BasedOn="{StaticResource MahApps.Styles.MenuItem}">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsHidden}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </MenuItem.Style>
+                                            </MenuItem>
                                         </ContextMenu>
                                     </Setter.Value>
                                 </Setter>
@@ -245,14 +274,22 @@
                                         
                                         <!-- Content -->
                                         <StackPanel Margin="6">
-                                            <controls:OutlinedText Text="{Binding Name}"
-                                                                   FontWeight="SemiBold"
-                                                                   FontSize="12"
-                                                                   Foreground="White"
-                                                                   Stroke="#AA000000"
-                                                                   StrokeThickness="3.2"
-                                                                   SnapsToDevicePixels="True"
-                                                                   UseLayoutRounding="True"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <controls:OutlinedText Text="{Binding Name}"
+                                                                       FontWeight="SemiBold"
+                                                                       FontSize="12"
+                                                                       Foreground="White"
+                                                                       Stroke="#AA000000"
+                                                                       StrokeThickness="3.2"
+                                                                       SnapsToDevicePixels="True"
+                                                                       UseLayoutRounding="True"/>
+                                                <!-- Hidden indicator -->
+                                                <Border Background="#FFEF4444" CornerRadius="2" Padding="4,1" Margin="5,0,0,0" 
+                                                        VerticalAlignment="Center"
+                                                        Visibility="{Binding IsHidden, Converter={StaticResource BoolToVis}}">
+                                                    <TextBlock Text="HIDDEN" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                                </Border>
+                                            </StackPanel>
                                             <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
                                                 <controls:OutlinedText Text="{Binding BuildId}" 
                                                                        FontSize="10" 
@@ -743,6 +780,18 @@
                 <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource MahApps.Brushes.Gray3}" VerticalAlignment="Center"/>
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <!-- Settings Button -->
+                    <Button Command="{Binding OpenSettingsCommand}"
+                            Style="{DynamicResource MahApps.Styles.Button.Square}"
+                            Background="{DynamicResource MahApps.Brushes.Gray8}"
+                            Width="85" Height="24"
+                            Margin="0,0,10,0"
+                            FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
+                            ToolTip="Open Settings - Configure startup, auto-update, and hidden games">
+                        <TextBlock Text="⚙ Settings" FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray2}"
+                                   FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"/>
+                    </Button>
+                    
                     <!-- Network Info Button -->
                     <Button Command="{Binding QuickSubnetCheckCommand}"
                             Style="{DynamicResource MahApps.Styles.Button.Square}"

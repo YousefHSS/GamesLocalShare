@@ -31,7 +31,7 @@
                          TextWrapping="Wrap"
                          FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
                          FontSize="12"
-                         Foreground="#FFFFFFFF"
+                         Foreground="White"
                          VerticalScrollBarVisibility="Disabled"
                          HorizontalScrollBarVisibility="Disabled"
                          TextOptions.TextFormattingMode="Display"/>
