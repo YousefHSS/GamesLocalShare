@@ -311,17 +311,40 @@ public class SteamLibraryScanner
             IsInstalled = Directory.Exists(installPath)
         };
 
-        // Try to load a cover image (non-blocking best-effort) - run synchronously on background thread
-        try
-        {
-            TryLoadSteamCover(game);
-        }
-        catch (Exception ex)
-        {
-            _scanErrors.Add($"Cover load failed for {game.Name}: {ex.Message}");
-        }
+        // Don't load cover images during scanning - they will be loaded asynchronously later
+        // This prevents the UI from blocking while waiting for network downloads
 
         return game;
+    }
+
+    /// <summary>
+    /// Loads cover image for a game asynchronously (non-blocking)
+    /// </summary>
+    public async Task LoadCoverImageAsync(GameInfo game)
+    {
+        await Task.Run(() =>
+        {
+            try
+            {
+                TryLoadSteamCover(game);
+            }
+            catch (Exception ex)
+            {
+                _scanErrors.Add($"Cover load failed for {game.Name}: {ex.Message}");
+            }
+        });
+
+        // Ensure the CoverImage property is set on the UI thread to trigger PropertyChanged
+        if (game.CoverImage != null)
+        {
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                // Force property change notification by setting the property again
+                var image = game.CoverImage;
+                game.CoverImage = null;
+                game.CoverImage = image;
+            });
+        }
     }
 
     /// <summary>

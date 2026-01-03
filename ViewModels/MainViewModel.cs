@@ -229,6 +229,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     ? $"Found {games.Count} installed games ({hiddenCount} hidden)"
                     : $"Found {games.Count} installed games";
                 AddLog($"Found {games.Count} installed games", LogMessageType.Success);
+
+                // Load cover images asynchronously in the background (non-blocking)
+                _ = LoadCoverImagesAsync(games);
             }
 
             await ScanIncompleteTransfersAsync();
@@ -254,6 +257,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsScanning = false;
         }
+    }
+
+    /// <summary>
+    /// Loads cover images for games asynchronously without blocking the UI
+    /// </summary>
+    private async Task LoadCoverImagesAsync(List<GameInfo> games)
+    {
+        StatusMessage = "Loading cover images...";
+        AddLog($"Loading cover images for {games.Count} games in background...", LogMessageType.Info);
+
+        var loadedCount = 0;
+        var tasks = games.Select(async game =>
+        {
+            await _steamScanner.LoadCoverImageAsync(game);
+            
+            // Increment counter (note: this is not thread-safe but close enough for display purposes)
+            Interlocked.Increment(ref loadedCount);
+            
+            // Update UI every few images to show progress
+            if (loadedCount % 5 == 0)
+            {
+                Application.Current.Dispatcher.BeginInvoke(() =>
+                {
+                    StatusMessage = $"Loaded {loadedCount}/{games.Count} cover images...";
+                });
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            StatusMessage = $"Cover images loaded ({loadedCount}/{games.Count})";
+            AddLog($"Loaded {loadedCount} cover images", LogMessageType.Success);
+        });
     }
 
     [RelayCommand]

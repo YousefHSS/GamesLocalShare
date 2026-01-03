@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows.Media;
 
 namespace GamesLocalShare.Models;
@@ -5,8 +7,10 @@ namespace GamesLocalShare.Models;
 /// <summary>
 /// Represents information about an installed game
 /// </summary>
-public class GameInfo
+public class GameInfo : INotifyPropertyChanged
 {
+    private ImageSource? _coverImage;
+
     /// <summary>
     /// Unique identifier for the game (Steam AppId)
     /// </summary>
@@ -56,7 +60,20 @@ public class GameInfo
     /// Whether this game is hidden from peers (not shared on network)
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool IsHidden { get; set; } = false;
+    public bool IsHidden
+    {
+        get => _isHidden;
+        set
+        {
+            if (_isHidden != value)
+            {
+                _isHidden = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    private bool _isHidden = false;
 
     /// <summary>
     /// Formatted size for display
@@ -78,9 +95,28 @@ public class GameInfo
 
     /// <summary>
     /// Runtime-only cover image to display in the UI. Not serialized.
+    /// Notifies UI when the image is loaded.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public ImageSource? CoverImage { get; set; }
+    public ImageSource? CoverImage
+    {
+        get => _coverImage;
+        set
+        {
+            if (_coverImage != value)
+            {
+                _coverImage = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public enum GamePlatform

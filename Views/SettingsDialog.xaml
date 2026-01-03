@@ -8,7 +8,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         ShowInTaskbar="False"
-        Background="{DynamicResource MahApps.Brushes.Gray10}"
+        Background="#FF1E1E1E"
         FontFamily="Segoe UI, Segoe UI Emoji, Segoe UI Symbol">
     
     <Grid Margin="20">
@@ -26,7 +26,9 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <!-- Startup Section -->
-                <Border Background="{DynamicResource MahApps.Brushes.Gray9}" 
+                <Border Background="#FF2D2D2D" 
+                        BorderBrush="#FF3F3F3F"
+                        BorderThickness="1"
                         CornerRadius="5" Padding="15" Margin="0,0,0,15">
                     <StackPanel>
                         <TextBlock Text="🚀 Startup" FontSize="14" FontWeight="SemiBold" 
@@ -58,7 +60,9 @@
                 </Border>
 
                 <!-- Auto-Update Section -->
-                <Border Background="{DynamicResource MahApps.Brushes.Gray9}" 
+                <Border Background="#FF2D2D2D" 
+                        BorderBrush="#FF3F3F3F"
+                        BorderThickness="1"
                         CornerRadius="5" Padding="15" Margin="0,0,0,15">
                     <StackPanel>
                         <TextBlock Text="🔄 Auto-Update Games" FontSize="14" FontWeight="SemiBold" 
@@ -98,7 +102,9 @@
                 </Border>
 
                 <!-- Hidden Games Section -->
-                <Border Background="{DynamicResource MahApps.Brushes.Gray9}" 
+                <Border Background="#FF2D2D2D" 
+                        BorderBrush="#FF3F3F3F"
+                        BorderThickness="1"
                         CornerRadius="5" Padding="15" Margin="0,0,0,15">
                     <StackPanel>
                         <TextBlock Text="👁 Hidden Games" FontSize="14" FontWeight="SemiBold" 
@@ -107,7 +113,9 @@
                         <TextBlock Text="Games hidden from peers:" 
                                    Foreground="White" Margin="0,0,0,5"/>
                         
-                        <Border Background="{DynamicResource MahApps.Brushes.Gray8}" 
+                        <Border Background="#FF1E1E1E" 
+                                BorderBrush="#FF3F3F3F"
+                                BorderThickness="1"
                                 CornerRadius="3" Padding="10" MaxHeight="150">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <ListBox x:Name="HiddenGamesList"
@@ -152,7 +160,9 @@
                 </Border>
 
                 <!-- Other Settings Section -->
-                <Border Background="{DynamicResource MahApps.Brushes.Gray9}" 
+                <Border Background="#FF2D2D2D" 
+                        BorderBrush="#FF3F3F3F"
+                        BorderThickness="1"
                         CornerRadius="5" Padding="15">
                     <StackPanel>
                         <TextBlock Text="⚡ Other Options" FontSize="14" FontWeight="SemiBold" 
