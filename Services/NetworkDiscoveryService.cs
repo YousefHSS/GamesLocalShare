@@ -30,6 +30,11 @@ public class NetworkDiscoveryService : IDisposable
     public NetworkPeer LocalPeer { get; private set; }
 
     /// <summary>
+    /// The file transfer port we're advertising to peers (set by FileTransferService)
+    /// </summary>
+    public int LocalFileTransferPort { get; set; } = 45679;
+
+    /// <summary>
     /// Event raised when a new peer is discovered
     /// </summary>
     public event EventHandler<NetworkPeer>? PeerDiscovered;
@@ -240,6 +245,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
+                SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games // Include our games in the request!
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
@@ -260,6 +266,7 @@ public class NetworkDiscoveryService : IDisposable
                         DisplayName = response.SenderName ?? ipAddress,
                         IpAddress = ipAddress,
                         Port = response.SenderPort > 0 ? response.SenderPort : TcpPort,
+                        FileTransferPort = response.SenderFileTransferPort > 0 ? response.SenderFileTransferPort : 45679,
                         Games = response.Games ?? [],
                         LastSeen = DateTime.Now
                     };
@@ -443,6 +450,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
+                SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games // Include our games!
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
@@ -456,6 +464,12 @@ public class NetworkDiscoveryService : IDisposable
                 {
                     peer.Games = response.Games ?? [];
                     peer.LastSeen = DateTime.Now;
+                    // Update file transfer port if provided
+                    if (response.SenderFileTransferPort > 0)
+                    {
+                        peer.FileTransferPort = response.SenderFileTransferPort;
+                        System.Diagnostics.Debug.WriteLine($"Updated {peer.DisplayName}'s FileTransferPort to {peer.FileTransferPort}");
+                    }
                     
                     ScanProgress?.Invoke(this, $"Received {peer.Games.Count} games from {peer.DisplayName}");
                     PeerGamesUpdated?.Invoke(this, peer);
@@ -712,6 +726,7 @@ public class NetworkDiscoveryService : IDisposable
                             SenderId = LocalPeer.PeerId,
                             SenderName = LocalPeer.DisplayName,
                             SenderPort = LocalPeer.Port,
+                            SenderFileTransferPort = LocalFileTransferPort,
                             Games = LocalPeer.Games
                         };
                         await writer.WriteLineAsync(JsonSerializer.Serialize(response));
@@ -726,6 +741,11 @@ public class NetworkDiscoveryService : IDisposable
                                 {
                                     peer.Games = request.Games;
                                     peer.LastSeen = DateTime.Now;
+                                    // Update file transfer port if provided
+                                    if (request.SenderFileTransferPort > 0)
+                                    {
+                                        peer.FileTransferPort = request.SenderFileTransferPort;
+                                    }
                                     PeerGamesUpdated?.Invoke(this, peer);
                                 }
                             }
@@ -869,6 +889,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
+                SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request));
@@ -884,6 +905,11 @@ public class NetworkDiscoveryService : IDisposable
                     if (response.Games != null)
                     {
                         peer.Games = response.Games;
+                        // Update file transfer port if provided
+                        if (response.SenderFileTransferPort > 0)
+                        {
+                            peer.FileTransferPort = response.SenderFileTransferPort;
+                        }
                         PeerGamesUpdated?.Invoke(this, peer);
                     }
                     return true;
@@ -918,6 +944,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
+                SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(message));
@@ -972,25 +999,29 @@ public class NetworkDiscoveryService : IDisposable
 }
 
 /// <summary>
-/// Message types for network communication
-/// </summary>
-public enum MessageType
-{
-    RequestGameList,
-    GameList,
-    RequestFileTransfer,
-    FileTransferResponse
-}
+    /// Message types for network communication
+    /// </summary>
+    public enum MessageType
+    {
+        RequestGameList,
+        GameList,
+        RequestFileTransfer,
+        FileTransferResponse
+    }
 
-/// <summary>
-/// Network message structure
-/// </summary>
-public class NetworkMessage
-{
-    public MessageType Type { get; set; }
-    public string SenderId { get; set; } = string.Empty;
-    public string? SenderName { get; set; }
-    public int SenderPort { get; set; }
-    public List<GameInfo>? Games { get; set; }
-    public string? GameAppId { get; set; }
-}
+    /// <summary>
+    /// Network message structure
+    /// </summary>
+    public class NetworkMessage
+    {
+        public MessageType Type { get; set; }
+        public string SenderId { get; set; } = string.Empty;
+        public string? SenderName { get; set; }
+        public int SenderPort { get; set; }
+        /// <summary>
+        /// The port the sender is listening on for file transfers (may differ from default 45679)
+        /// </summary>
+        public int SenderFileTransferPort { get; set; } = 45679;
+        public List<GameInfo>? Games { get; set; }
+        public string? GameAppId { get; set; }
+    }

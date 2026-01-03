@@ -311,18 +311,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         transferStatus.AppendLine("=== File Transfer Service ===");
         transferStatus.AppendLine($"Listening: {_fileTransferService.IsListening}");
         transferStatus.AppendLine($"Port: {_fileTransferService.ListeningPort}");
-        transferStatus.AppendLine($"Port Available: {FileTransferService.IsPortAvailable()}");
+        transferStatus.AppendLine($"Primary Port Available: {FileTransferService.IsPrimaryPortAvailable()}");
         transferStatus.AppendLine();
         
         // Add peer info with IPs
         transferStatus.AppendLine("=== Connected Peers ===");
         transferStatus.AppendLine($"My IP: {LocalIpAddress}");
+        transferStatus.AppendLine($"My File Transfer Port: {_fileTransferService.ListeningPort}");
         transferStatus.AppendLine($"Peers found: {NetworkPeers.Count}");
         foreach (var peer in NetworkPeers)
         {
             transferStatus.AppendLine($"  - {peer.DisplayName}");
             transferStatus.AppendLine($"    IP: {peer.IpAddress}");
-            transferStatus.AppendLine($"    Port: {peer.Port}");
+            transferStatus.AppendLine($"    Game List Port: {peer.Port}");
+            transferStatus.AppendLine($"    File Transfer Port: {peer.FileTransferPort}");
             transferStatus.AppendLine($"    Games: {peer.Games.Count}");
             transferStatus.AppendLine($"    Last Seen: {peer.LastSeen:HH:mm:ss}");
         }
@@ -460,6 +462,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             StatusMessage = "Starting network discovery...";
+            AddLog("Starting network discovery...", LogMessageType.Info);
             
             await _networkService.StartAsync();
             
@@ -467,12 +470,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             try
             {
                 await _fileTransferService.StartListeningAsync();
-                System.Diagnostics.Debug.WriteLine($"File transfer service listening: {_fileTransferService.IsListening}");
+                System.Diagnostics.Debug.WriteLine($"File transfer service listening: {_fileTransferService.IsListening} on port {_fileTransferService.ListeningPort}");
+                
+                // Tell the network service what port we're actually using for file transfers
+                _networkService.LocalFileTransferPort = _fileTransferService.ListeningPort;
+                
+                AddLog($"File transfer service started on port {_fileTransferService.ListeningPort}", LogMessageType.Success);
             }
             catch (InvalidOperationException ex)
             {
-                // Port already in use
+                // All ports in use
                 StatusMessage = $"⚠ Network started but file transfer failed: {ex.Message}";
+                AddLog($"File transfer service FAILED to start: {ex.Message}", LogMessageType.Error);
                 MessageBox.Show(
                     $"Warning: File Transfer Service failed to start!\n\n{ex.Message}\n\n" +
                     "Other computers will NOT be able to download games FROM this computer.\n\n" +
@@ -508,9 +517,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
                 await _networkService.UpdateLocalGamesAsync(visibleGames);
                 _fileTransferService.UpdateLocalGames(visibleGames);
+                AddLog($"Shared {visibleGames.Count} games with network", LogMessageType.Info);
             }
 
-            AddLog("Network discovery started", LogMessageType.Info);
+            AddLog("Network started successfully", LogMessageType.Success);
 
             // Start auto-update timer if enabled
             if (_settings.AutoUpdateGames)
@@ -712,14 +722,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (SelectedPeerGame == null || IsTransferring)
             return;
 
+        System.Diagnostics.Debug.WriteLine($"=== DownloadNewGameAsync Called ===");
+        System.Diagnostics.Debug.WriteLine($"  SelectedPeerGame.Name: {SelectedPeerGame.Name}");
+        System.Diagnostics.Debug.WriteLine($"  SelectedPeerGame.AppId: {SelectedPeerGame.AppId}");
+        System.Diagnostics.Debug.WriteLine($"  SelectedPeerGame.InstallPath: {SelectedPeerGame.InstallPath}");
+
         // Find a peer that has this game
         var peer = NetworkPeers.FirstOrDefault(p => p.Games.Any(g => g.AppId == SelectedPeerGame.AppId));
         if (peer == null)
         {
             StatusMessage = "No peer found with this game";
             AddLog("Download failed: No peer found with this game", LogMessageType.Error);
+            System.Diagnostics.Debug.WriteLine($"ERROR: No peer found with AppId {SelectedPeerGame.AppId}");
+            System.Diagnostics.Debug.WriteLine($"  Total peers: {NetworkPeers.Count}");
+            foreach (var p in NetworkPeers)
+            {
+                System.Diagnostics.Debug.WriteLine($"    Peer: {p.DisplayName}, Games: {p.Games.Count}");
+                foreach (var g in p.Games.Take(3))
+                {
+                    System.Diagnostics.Debug.WriteLine($"      - {g.Name} (AppId: {g.AppId})");
+                }
+            }
             return;
         }
+
+        System.Diagnostics.Debug.WriteLine($"  Found peer: {peer.DisplayName} ({peer.IpAddress})");
 
         // Check if we already have this game
         if (LocalGames.Any(g => g.AppId == SelectedPeerGame.AppId))
@@ -737,11 +764,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             AddLog($"Starting download: {SelectedPeerGame.Name} from {peer.DisplayName}", LogMessageType.Transfer);
 
             var targetPath = GetTargetPathForNewGame(SelectedPeerGame);
+            System.Diagnostics.Debug.WriteLine($"  Target path (calculated): {targetPath}");
 
             var success = await _fileTransferService.RequestNewGameDownloadAsync(
                 peer,
                 SelectedPeerGame,
                 targetPath);
+
+            System.Diagnostics.Debug.WriteLine($"  Transfer result: {(success ? "SUCCESS" : "FAILED")}");
 
             if (success)
             {
@@ -753,6 +783,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Download error: {ex.Message}";
             AddLog($"Download error: {ex.Message}", LogMessageType.Error);
+            System.Diagnostics.Debug.WriteLine($"EXCEPTION in DownloadNewGameAsync: {ex}");
         }
         finally
         {
@@ -1281,6 +1312,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var results = new System.Text.StringBuilder();
         results.AppendLine($"=== Connection Test to {SelectedPeer.DisplayName} ===");
         results.AppendLine($"Target IP: {SelectedPeer.IpAddress}");
+        results.AppendLine($"Advertised File Transfer Port: {SelectedPeer.FileTransferPort}");
         results.AppendLine();
 
         // Test TCP 45678 (game list)
@@ -1298,14 +1330,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             results.AppendLine($"  ✗ FAILED - {ex.Message}");
         }
         
-        // Test TCP 45679 (file transfer)
+        // Test peer's advertised file transfer port
         results.AppendLine();
-        results.AppendLine("Testing TCP 45679 (File Transfer)...");
+        results.AppendLine($"Testing TCP {SelectedPeer.FileTransferPort} (Peer's File Transfer Port)...");
         try
         {
             using var client2 = new System.Net.Sockets.TcpClient();
             var cts2 = new CancellationTokenSource(5000);
-            await client2.ConnectAsync(SelectedPeer.IpAddress, 45679, cts2.Token);
+            await client2.ConnectAsync(SelectedPeer.IpAddress, SelectedPeer.FileTransferPort, cts2.Token);
             results.AppendLine("  ✓ SUCCESS - Connected!");
             client2.Close();
         }
@@ -1314,11 +1346,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
             results.AppendLine($"  ✗ FAILED - {ex.Message}");
         }
 
+        // Test primary file transfer port (45679) if different from advertised
+        if (SelectedPeer.FileTransferPort != 45679)
+        {
+            results.AppendLine();
+            results.AppendLine("Testing TCP 45679 (Default File Transfer Port)...");
+            try
+            {
+                using var client3 = new System.Net.Sockets.TcpClient();
+                var cts3 = new CancellationTokenSource(5000);
+                await client3.ConnectAsync(SelectedPeer.IpAddress, 45679, cts3.Token);
+                results.AppendLine("  ✓ SUCCESS - Connected!");
+                client3.Close();
+            }
+            catch (Exception ex)
+            {
+                results.AppendLine($"  ✗ FAILED - {ex.Message}");
+            }
+        }
+
         results.AppendLine();
-        results.AppendLine("If port 45678 works but 45679 fails:");
-        results.AppendLine("- The peer may not have clicked 'Start Network'");
-        results.AppendLine("- Another app may be using port 45679 on the peer");
-        results.AppendLine("- Firewall may be blocking port 45679 specifically");
+        results.AppendLine("═══════════════════════════════════════");
+        results.AppendLine("If game list works but file transfer fails:");
+        results.AppendLine("═══════════════════════════════════════");
+        results.AppendLine("1. The peer may not have clicked 'Start Network'");
+        results.AppendLine("2. Firewall may be blocking the file transfer port");
+        results.AppendLine("3. Another app may be using the port on the peer");
+        results.AppendLine();
+        results.AppendLine($"Your file transfer port: {_fileTransferService.ListeningPort}");
+        results.AppendLine($"Peer's file transfer port: {SelectedPeer.FileTransferPort}");
 
         MessageBox.Show(results.ToString(), "Connection Test Results", MessageBoxButton.OK, MessageBoxImage.Information);
         

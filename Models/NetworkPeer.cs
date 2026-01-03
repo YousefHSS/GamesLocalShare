@@ -21,9 +21,15 @@ public class NetworkPeer
     public string IpAddress { get; set; } = string.Empty;
 
     /// <summary>
-    /// Port the peer is listening on for file transfers
+    /// Port the peer is listening on for game list exchange (TCP 45678)
     /// </summary>
     public int Port { get; set; } = 45678;
+
+    /// <summary>
+    /// Port the peer is listening on for file transfers (default TCP 45679)
+    /// This can be different from the default if the primary port was unavailable
+    /// </summary>
+    public int FileTransferPort { get; set; } = 45679;
 
     /// <summary>
     /// List of games available on this peer

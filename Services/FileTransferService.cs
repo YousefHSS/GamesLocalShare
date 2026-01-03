@@ -13,7 +13,8 @@ namespace GamesLocalShare.Services;
 /// </summary>
 public class FileTransferService : IDisposable
 {
-    private const int TransferPort = 45679;
+    private const int PrimaryTransferPort = 45679;
+    private static readonly int[] FallbackPorts = [45680, 45681, 45682, 45683];
     private const int ConnectionTimeoutMs = 10000;
     private const int MaxParallelFiles = 4;
     
@@ -35,6 +36,7 @@ public class FileTransferService : IDisposable
     private bool _isListening;
     private bool _isPaused;
     private List<GameInfo> _localGames = [];
+    private int _actualListeningPort = PrimaryTransferPort;
 
     /// <summary>
     /// Whether the file transfer service is actively listening
@@ -42,9 +44,9 @@ public class FileTransferService : IDisposable
     public bool IsListening => _isListening;
 
     /// <summary>
-    /// The port the service is listening on
+    /// The port the service is actually listening on (may differ from primary if fallback was used)
     /// </summary>
-    public int ListeningPort => TransferPort;
+    public int ListeningPort => _actualListeningPort;
 
     /// <summary>
     /// Whether a transfer is currently paused
@@ -113,26 +115,52 @@ public class FileTransferService : IDisposable
 
         _cts = new CancellationTokenSource();
         
-        try
+        // Try primary port first, then fallback ports
+        var portsToTry = new List<int> { PrimaryTransferPort };
+        portsToTry.AddRange(FallbackPorts);
+        
+        Exception? lastException = null;
+        
+        foreach (var port in portsToTry)
         {
-            _listener = new TcpListener(IPAddress.Any, TransferPort);
-            _listener.Start();
-            _isListening = true;
-            
-            System.Diagnostics.Debug.WriteLine($"FileTransferService SUCCESSFULLY listening on port {TransferPort}");
+            try
+            {
+                _listener = new TcpListener(IPAddress.Any, port);
+                _listener.Start();
+                _isListening = true;
+                _actualListeningPort = port;
+                
+                if (port != PrimaryTransferPort)
+                {
+                    System.Diagnostics.Debug.WriteLine($"FileTransferService: Primary port {PrimaryTransferPort} unavailable, using fallback port {port}");
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"FileTransferService SUCCESSFULLY listening on port {port}");
+                break;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                System.Diagnostics.Debug.WriteLine($"FileTransferService: Port {port} is already in use, trying next port...");
+                lastException = ex;
+                _listener?.Stop();
+                _listener = null;
+                continue;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"FileTransferService: Error on port {port}: {ex.Message}");
+                lastException = ex;
+                _listener?.Stop();
+                _listener = null;
+                continue;
+            }
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        
+        if (!_isListening)
         {
-            _isListening = false;
-            var errorMsg = $"Port {TransferPort} is already in use! Another instance of the app may be running, or another program is using this port.";
+            var errorMsg = $"Could not start file transfer service. All ports ({PrimaryTransferPort}, {string.Join(", ", FallbackPorts)}) are in use or blocked.";
             System.Diagnostics.Debug.WriteLine($"FileTransferService FAILED: {errorMsg}");
-            throw new InvalidOperationException(errorMsg, ex);
-        }
-        catch (Exception ex)
-        {
-            _isListening = false;
-            System.Diagnostics.Debug.WriteLine($"FileTransferService FAILED to start: {ex.Message}");
-            throw;
+            throw new InvalidOperationException(errorMsg, lastException);
         }
 
         _ = AcceptConnectionsAsync(_cts.Token);
@@ -155,13 +183,13 @@ public class FileTransferService : IDisposable
     }
 
     /// <summary>
-    /// Tests if the file transfer port is available
+    /// Tests if a specific port is available
     /// </summary>
-    public static bool IsPortAvailable()
+    public static bool IsPortAvailable(int port)
     {
         try
         {
-            var listener = new TcpListener(IPAddress.Any, TransferPort);
+            var listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
             listener.Stop();
             return true;
@@ -171,6 +199,11 @@ public class FileTransferService : IDisposable
             return false;
         }
     }
+
+    /// <summary>
+    /// Tests if the primary file transfer port is available
+    /// </summary>
+    public static bool IsPrimaryPortAvailable() => IsPortAvailable(PrimaryTransferPort);
 
     /// <summary>
     /// Scans for incomplete transfers and returns them
@@ -213,6 +246,12 @@ public class FileTransferService : IDisposable
         string targetPath,
         CancellationToken ct = default)
     {
+        System.Diagnostics.Debug.WriteLine($"=== RequestNewGameDownloadAsync ===");
+        System.Diagnostics.Debug.WriteLine($"  Peer: {peer.DisplayName} ({peer.IpAddress})");
+        System.Diagnostics.Debug.WriteLine($"  Remote Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
+        System.Diagnostics.Debug.WriteLine($"  Remote Game InstallPath: {remoteGame.InstallPath}");
+        System.Diagnostics.Debug.WriteLine($"  Target Path (local): {targetPath}");
+        
         var localGame = new GameInfo
         {
             AppId = remoteGame.AppId,
@@ -221,6 +260,8 @@ public class FileTransferService : IDisposable
             BuildId = "0"
         };
 
+        // For new downloads, we need to tell the peer which game we want by AppId
+        // The InstallPath should be empty so the peer uses their own game's path
         return await RequestGameTransferAsync(peer, remoteGame, localGame, isNewDownload: true, ct: ct);
     }
 
@@ -266,10 +307,14 @@ public class FileTransferService : IDisposable
         
         string? appManifestContent = null;
         
+        // Determine which port to use - prefer peer's advertised FileTransferPort, fallback to default
+        var transferPort = peer.FileTransferPort > 0 ? peer.FileTransferPort : PrimaryTransferPort;
+        
         try
         {
             System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
-            System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{TransferPort})");
+            System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{transferPort})");
+            System.Diagnostics.Debug.WriteLine($"Peer's advertised FileTransferPort: {peer.FileTransferPort}");
             System.Diagnostics.Debug.WriteLine($"Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
             System.Diagnostics.Debug.WriteLine($"Buffer: {_bufferSize / 1024}KB, Socket: {_socketBufferSize / 1024}KB");
             System.Diagnostics.Debug.WriteLine($"Resume: {resumeState != null}, CompletedFiles: {resumeState?.CompletedFiles.Count ?? 0}");
@@ -278,29 +323,86 @@ public class FileTransferService : IDisposable
             
             ConfigureSocketForHighPerformance(client);
             
-            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
-            connectCts.CancelAfter(ConnectionTimeoutMs);
-            
-            try
+            // Try the peer's advertised port first, then try fallback ports
+            var portsToTry = new List<int> { transferPort };
+            if (transferPort != PrimaryTransferPort)
             {
-                await client.ConnectAsync(peer.IpAddress, TransferPort, connectCts.Token);
+                portsToTry.Add(PrimaryTransferPort);
             }
-            catch (OperationCanceledException) when (!_transferCts.Token.IsCancellationRequested)
+            portsToTry.AddRange(FallbackPorts.Where(p => p != transferPort));
+            
+            bool connected = false;
+            int connectedPort = 0;
+            
+            foreach (var port in portsToTry)
+            {
+                try
+                {
+                    System.Diagnostics.Debug.WriteLine($"Trying to connect to {peer.IpAddress}:{port}...");
+                    
+                    using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
+                    connectCts.CancelAfter(ConnectionTimeoutMs / portsToTry.Count); // Divide timeout among ports
+                    
+                    // Need to create new client for each attempt
+                    if (connected) break;
+                    
+                    var testClient = new TcpClient();
+                    ConfigureSocketForHighPerformance(testClient);
+                    
+                    await testClient.ConnectAsync(peer.IpAddress, port, connectCts.Token);
+                    
+                    if (testClient.Connected)
+                    {
+                        connected = true;
+                        connectedPort = port;
+                        testClient.Close();
+                        System.Diagnostics.Debug.WriteLine($"? Successfully connected to port {port}");
+                        break;
+                    }
+                    testClient.Close();
+                }
+                catch (OperationCanceledException)
+                {
+                    System.Diagnostics.Debug.WriteLine($"? Connection to port {port} timed out");
+                    continue;
+                }
+                catch (SocketException ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"? Connection to port {port} failed: {ex.SocketErrorCode}");
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"? Connection to port {port} failed: {ex.Message}");
+                    continue;
+                }
+            }
+            
+            if (!connected)
             {
                 throw new Exception(
-                    $"Connection to {peer.DisplayName} ({peer.IpAddress}) timed out on port {TransferPort}.\n\n" +
+                    $"Connection to {peer.DisplayName} ({peer.IpAddress}) failed on all ports.\n\n" +
+                    $"Tried ports: {string.Join(", ", portsToTry)}\n\n" +
                     "Possible causes:\n" +
-                    "1. The app on the remote computer hasn't clicked 'Start Network'\n" +
-                    "2. Firewall on remote computer is blocking port 45679\n" +
-                    "3. Antivirus/security software is blocking the connection");
+                    "1. The peer computer hasn't clicked 'Start Network' yet\n" +
+                    "   ? Ask them to click 'Start Network' and look for 'File transfer ready' in their log\n" +
+                    "2. Firewall on the peer computer is blocking the connection\n" +
+                    "   ? They need to click 'Configure Firewall' as Administrator\n" +
+                    "3. Antivirus/security software is blocking the connection\n" +
+                    "   ? Check Windows Security or third-party antivirus settings");
             }
+            
+            // Now connect for real with the working port
+            using var connectCts2 = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
+            connectCts2.CancelAfter(ConnectionTimeoutMs);
+            await client.ConnectAsync(peer.IpAddress, connectedPort, connectCts2.Token);
 
             if (!client.Connected)
             {
                 throw new Exception($"Could not connect to {peer.DisplayName}.");
             }
 
-            System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} for file transfer");
+            System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} on port {connectedPort} for file transfer");
 
             using var stream = client.GetStream();
             stream.ReadTimeout = 60000;
@@ -312,11 +414,20 @@ public class FileTransferService : IDisposable
             var request = new FileTransferRequest
             {
                 GameAppId = remoteGame.AppId,
-                GamePath = remoteGame.InstallPath,
+                GamePath = isNewDownload ? string.Empty : remoteGame.InstallPath, // For new downloads, let the peer use their own path
                 IsNewDownload = isNewDownload,
                 IncludeManifest = true
             };
+            
+            System.Diagnostics.Debug.WriteLine($"=== Sending Transfer Request ===");
+            System.Diagnostics.Debug.WriteLine($"  GameAppId: {request.GameAppId}");
+            System.Diagnostics.Debug.WriteLine($"  GamePath: '{request.GamePath}' (empty = let peer decide)");
+            System.Diagnostics.Debug.WriteLine($"  IsNewDownload: {request.IsNewDownload}");
+            System.Diagnostics.Debug.WriteLine($"  IncludeManifest: {request.IncludeManifest}");
+            
             var requestJson = JsonSerializer.Serialize(request);
+            System.Diagnostics.Debug.WriteLine($"  Request JSON: {requestJson}");
+            
             writer.Write(requestJson);
             writer.Flush();
 
@@ -618,7 +729,7 @@ public class FileTransferService : IDisposable
 
     private async Task AcceptConnectionsAsync(CancellationToken ct)
     {
-        System.Diagnostics.Debug.WriteLine($"FileTransferService: Starting to accept connections on port {TransferPort}");
+        System.Diagnostics.Debug.WriteLine($"FileTransferService: Starting to accept connections on port {PrimaryTransferPort}");
         
         while (!ct.IsCancellationRequested)
         {
@@ -679,16 +790,30 @@ public class FileTransferService : IDisposable
 
                 var request = JsonSerializer.Deserialize<FileTransferRequest>(requestJson);
 
-                System.Diagnostics.Debug.WriteLine($"Received transfer request: {requestJson}");
+                System.Diagnostics.Debug.WriteLine($"=== Processing Transfer Request ===");
+                System.Diagnostics.Debug.WriteLine($"  Received JSON: {requestJson}");
 
                 if (request == null)
                 {
-                    System.Diagnostics.Debug.WriteLine("Invalid request (null)");
+                    System.Diagnostics.Debug.WriteLine("ERROR: Invalid request (null after deserialization)");
                     writer.Write("{}");
                     return;
                 }
 
+                System.Diagnostics.Debug.WriteLine($"  GameAppId: {request.GameAppId}");
+                System.Diagnostics.Debug.WriteLine($"  GamePath: '{request.GamePath}'");
+                System.Diagnostics.Debug.WriteLine($"  IsNewDownload: {request.IsNewDownload}");
+                System.Diagnostics.Debug.WriteLine($"  IncludeManifest: {request.IncludeManifest}");
+                System.Diagnostics.Debug.WriteLine($"  Local games in memory: {_localGames.Count}");
+
                 var localGame = _localGames.FirstOrDefault(g => g.AppId == request.GameAppId);
+                
+                System.Diagnostics.Debug.WriteLine($"  Lookup by AppId '{request.GameAppId}': {(localGame != null ? "FOUND" : "NOT FOUND")}");
+                if (localGame != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"    Found: {localGame.Name} at {localGame.InstallPath}");
+                }
+                
                 string gamePath;
                 string? steamAppsFolder = null;
                 
@@ -700,7 +825,7 @@ public class FileTransferService : IDisposable
                     {
                         steamAppsFolder = commonFolder.Parent?.FullName;
                     }
-                    System.Diagnostics.Debug.WriteLine($"Found game by AppId: {request.GameAppId} at {gamePath}");
+                    System.Diagnostics.Debug.WriteLine($"? SUCCESS: Found game by AppId: {request.GameAppId} at {gamePath}");
                 }
                 else if (!string.IsNullOrEmpty(request.GamePath) && Directory.Exists(request.GamePath))
                 {
@@ -710,15 +835,18 @@ public class FileTransferService : IDisposable
                     {
                         steamAppsFolder = commonFolder.Parent?.FullName;
                     }
-                    System.Diagnostics.Debug.WriteLine($"Using fallback path from request: {gamePath}");
+                    System.Diagnostics.Debug.WriteLine($"? Using fallback path from request: {gamePath}");
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"Game not found! AppId: {request.GameAppId}, RequestPath: {request.GamePath}");
-                    System.Diagnostics.Debug.WriteLine($"Local games count: {_localGames.Count}");
-                    foreach (var g in _localGames.Take(5))
+                    System.Diagnostics.Debug.WriteLine($"? ERROR: Game not found!");
+                    System.Diagnostics.Debug.WriteLine($"  Requested AppId: {request.GameAppId}");
+                    System.Diagnostics.Debug.WriteLine($"  Requested GamePath: '{request.GamePath}'");
+                    System.Diagnostics.Debug.WriteLine($"  Local games count: {_localGames.Count}");
+                    System.Diagnostics.Debug.WriteLine($"  Available games:");
+                    foreach (var g in _localGames.Take(10))
                     {
-                        System.Diagnostics.Debug.WriteLine($"  - {g.Name} ({g.AppId}): {g.InstallPath}");
+                        System.Diagnostics.Debug.WriteLine($"    - AppId: {g.AppId}, Name: {g.Name}, Path: {g.InstallPath}");
                     }
                     writer.Write("{}");
                     return;
