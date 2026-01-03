@@ -631,6 +631,11 @@
                                     <TextBlock Text="{Binding CurrentTransferFile}" FontSize="9" TextTrimming="CharacterEllipsis" 
                                                Foreground="{DynamicResource MahApps.Brushes.Gray5}" Margin="0,4,0,0"/>
                                     
+                                    <!-- Progress percentage and size info -->
+                                    <TextBlock Text="{Binding CurrentTransferFormattedProgress}" 
+                                               FontSize="10" Foreground="{DynamicResource MahApps.Brushes.Gray3}" 
+                                               Margin="0,2,0,0"/>
+                                    
                                     <!-- Speed and Time Remaining on one line -->
                                     <Grid Margin="0,2,0,0">
                                         <Grid.ColumnDefinitions>

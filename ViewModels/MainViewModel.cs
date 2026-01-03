@@ -91,6 +91,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _networkIconKey = "IconWifi";
 
+    [ObservableProperty]
+    private long _currentTransferTotalBytes;
+
+    [ObservableProperty]
+    private long _currentTransferDownloadedBytes;
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
@@ -994,6 +1000,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond, ShowSpeedInMbps);
             CurrentTransferFile = e.CurrentFile;
             CurrentTransferTimeRemaining = FormatTimeRemaining(e.EstimatedTimeRemaining);
+            CurrentTransferTotalBytes = e.TotalBytes;
+            CurrentTransferDownloadedBytes = e.TransferredBytes;
 
             if (SelectedSyncItem != null)
             {
@@ -1581,4 +1589,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         
         AddLog($"Updated shared games list: {visibleGames.Count} visible, {LocalGames.Count - visibleGames.Count} hidden", LogMessageType.Info);
     }
+
+    public string CurrentTransferFormattedProgress => 
+        $"{CurrentTransferProgress:0.0}% ({FormatBytes(CurrentTransferDownloadedBytes)} / {FormatBytes(CurrentTransferTotalBytes)})";
 }
