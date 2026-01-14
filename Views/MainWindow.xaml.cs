@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using GamesLocalShare.Models;
@@ -173,5 +174,23 @@ public partial class MainWindow : MetroWindow
             System.Diagnostics.Debug.WriteLine($"OpenGameFolder_Click error: {ex}");
             MessageBox.Show($"Failed to open folder: {ex.Message}", "Open Game Folder", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private void MainGrid_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (LogToggle.IsChecked == true && !IsElementOrChild(e.OriginalSource as DependencyObject, LogBorder))
+        {
+            LogToggle.IsChecked = false;
+        }
+    }
+
+    private bool IsElementOrChild(DependencyObject element, DependencyObject parent)
+    {
+        while (element != null)
+        {
+            if (element == parent) return true;
+            element = VisualTreeHelper.GetParent(element);
+        }
+        return false;
     }
 }
