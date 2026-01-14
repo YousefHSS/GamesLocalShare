@@ -1,10 +1,11 @@
-using Microsoft.Win32;
 using System.Diagnostics;
+using System.Runtime.Versioning;
 
 namespace GamesLocalShare.Services;
 
 /// <summary>
 /// Helper for managing Windows startup functionality
+/// On non-Windows platforms, these methods return appropriate defaults
 /// </summary>
 public static class StartupHelper
 {
@@ -16,9 +17,18 @@ public static class StartupHelper
     /// </summary>
     public static bool IsStartupEnabled()
     {
+        if (!OperatingSystem.IsWindows())
+            return false;
+
+        return IsStartupEnabledWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsStartupEnabledWindows()
+    {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RegistryKey, false);
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RegistryKey, false);
             var value = key?.GetValue(AppName);
             return value != null;
         }
@@ -34,9 +44,21 @@ public static class StartupHelper
     /// </summary>
     public static bool SetStartupEnabled(bool enabled)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            Debug.WriteLine("Startup configuration is only supported on Windows");
+            return false;
+        }
+
+        return SetStartupEnabledWindows(enabled);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool SetStartupEnabledWindows(bool enabled)
+    {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RegistryKey, true);
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RegistryKey, true);
             if (key == null)
             {
                 Debug.WriteLine("Could not open registry key");

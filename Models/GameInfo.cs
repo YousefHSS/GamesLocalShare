@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows.Media;
+using Avalonia.Media.Imaging;
 
 namespace GamesLocalShare.Models;
 
@@ -9,7 +9,7 @@ namespace GamesLocalShare.Models;
 /// </summary>
 public class GameInfo : INotifyPropertyChanged
 {
-    private ImageSource? _coverImage;
+    private Bitmap? _coverImage;
 
     /// <summary>
     /// Unique identifier for the game (Steam AppId)
@@ -98,7 +98,7 @@ public class GameInfo : INotifyPropertyChanged
     /// Notifies UI when the image is loaded.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public ImageSource? CoverImage
+    public Bitmap? CoverImage
     {
         get => _coverImage;
         set

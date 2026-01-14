@@ -1,11 +1,13 @@
 using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
-using System.Windows.Media.Imaging;
+using System.Runtime.Versioning;
+using Avalonia;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using GamesLocalShare.Models;
 using Gameloop.Vdf;
 using Gameloop.Vdf.Linq;
-using Microsoft.Win32;
 
 namespace GamesLocalShare.Services;
 
@@ -29,7 +31,7 @@ public class SteamLibraryScanner
     public string? LastSteamPath => _steamPath;
 
     /// <summary>
-    /// Gets the Steam installation path from registry or common locations
+    /// Gets the Steam installation path from registry (Windows) or common locations (cross-platform)
     /// </summary>
     public string? GetSteamPath()
     {
@@ -38,52 +40,69 @@ public class SteamLibraryScanner
 
         _scanErrors.Clear();
 
-        // Method 1: Try registry (64-bit)
+        // Platform-specific Steam path detection
+        if (OperatingSystem.IsWindows())
+        {
+            _steamPath = GetSteamPathWindows();
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            _steamPath = GetSteamPathLinux();
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            _steamPath = GetSteamPathMacOS();
+        }
+
+        if (string.IsNullOrEmpty(_steamPath))
+        {
+            _scanErrors.Add("Could not find Steam installation");
+        }
+
+        return _steamPath;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private string? GetSteamPathWindows()
+    {
+        // Try registry (Windows only)
         try
         {
-            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam");
-            _steamPath = key?.GetValue("InstallPath") as string;
-            if (!string.IsNullOrEmpty(_steamPath) && Directory.Exists(_steamPath))
-            {
-                return _steamPath;
-            }
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam");
+            var path = key?.GetValue("InstallPath") as string;
+            if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+                return path;
         }
         catch (Exception ex)
         {
             _scanErrors.Add($"Registry (64-bit) access failed: {ex.Message}");
         }
 
-        // Method 2: Try registry (32-bit)
         try
         {
-            using var key32 = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam");
-            _steamPath = key32?.GetValue("InstallPath") as string;
-            if (!string.IsNullOrEmpty(_steamPath) && Directory.Exists(_steamPath))
-            {
-                return _steamPath;
-            }
+            using var key32 = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Valve\Steam");
+            var path = key32?.GetValue("InstallPath") as string;
+            if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+                return path;
         }
         catch (Exception ex)
         {
             _scanErrors.Add($"Registry (32-bit) access failed: {ex.Message}");
         }
 
-        // Method 3: Try current user registry
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Valve\Steam");
-            _steamPath = key?.GetValue("SteamPath") as string;
-            if (!string.IsNullOrEmpty(_steamPath) && Directory.Exists(_steamPath))
-            {
-                return _steamPath;
-            }
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Valve\Steam");
+            var path = key?.GetValue("SteamPath") as string;
+            if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+                return path;
         }
         catch (Exception ex)
         {
             _scanErrors.Add($"Registry (CurrentUser) access failed: {ex.Message}");
         }
 
-        // Method 4: Try common installation paths
+        // Try common Windows paths
         var commonPaths = new[]
         {
             @"C:\Program Files (x86)\Steam",
@@ -99,13 +118,41 @@ public class SteamLibraryScanner
         foreach (var path in commonPaths)
         {
             if (Directory.Exists(path) && File.Exists(Path.Combine(path, "steam.exe")))
-            {
-                _steamPath = path;
-                return _steamPath;
-            }
+                return path;
         }
 
-        _scanErrors.Add("Could not find Steam installation in registry or common locations");
+        return null;
+    }
+
+    private string? GetSteamPathLinux()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var commonPaths = new[]
+        {
+            Path.Combine(home, ".steam", "steam"),
+            Path.Combine(home, ".local", "share", "Steam"),
+            Path.Combine(home, ".steam", "debian-installation"),
+            "/usr/share/steam",
+            "/usr/local/share/steam"
+        };
+
+        foreach (var path in commonPaths)
+        {
+            if (Directory.Exists(path) && Directory.Exists(Path.Combine(path, "steamapps")))
+                return path;
+        }
+
+        return null;
+    }
+
+    private string? GetSteamPathMacOS()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var steamPath = Path.Combine(home, "Library", "Application Support", "Steam");
+        
+        if (Directory.Exists(steamPath) && Directory.Exists(Path.Combine(steamPath, "steamapps")))
+            return steamPath;
+
         return null;
     }
 
@@ -240,6 +287,7 @@ public class SteamLibraryScanner
         var report = new System.Text.StringBuilder();
         report.AppendLine("=== Steam Library Scan Report ===");
         report.AppendLine($"Steam Path: {_steamPath ?? "NOT FOUND"}");
+        report.AppendLine($"Platform: {GetPlatformName()}");
         report.AppendLine($"Library Folders Found: {GetLibraryFolders().Count}");
         
         foreach (var folder in GetLibraryFolders())
@@ -258,6 +306,14 @@ public class SteamLibraryScanner
         }
 
         return report.ToString();
+    }
+
+    private static string GetPlatformName()
+    {
+        if (OperatingSystem.IsWindows()) return "Windows";
+        if (OperatingSystem.IsLinux()) return "Linux";
+        if (OperatingSystem.IsMacOS()) return "macOS";
+        return "Unknown";
     }
 
     /// <summary>
@@ -311,9 +367,6 @@ public class SteamLibraryScanner
             IsInstalled = Directory.Exists(installPath)
         };
 
-        // Don't load cover images during scanning - they will be loaded asynchronously later
-        // This prevents the UI from blocking while waiting for network downloads
-
         return game;
     }
 
@@ -334,10 +387,10 @@ public class SteamLibraryScanner
             }
         });
 
-        // Ensure the CoverImage property is set on the UI thread to trigger PropertyChanged
+        // For Avalonia, we need to ensure the image is set on the UI thread
         if (game.CoverImage != null)
         {
-            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 // Force property change notification by setting the property again
                 var image = game.CoverImage;
@@ -349,7 +402,6 @@ public class SteamLibraryScanner
 
     /// <summary>
     /// Attempts to download a cover image for the given game using the Steam CDN (falls back to other sizes).
-    /// This runs synchronously and is intended to be called from the background scanner thread.
     /// </summary>
     private void TryLoadSteamCover(GameInfo game)
     {
@@ -380,15 +432,9 @@ public class SteamLibraryScanner
                 if (bytes == null || bytes.Length == 0)
                     continue;
 
-                // Create BitmapImage from bytes
-                var bmp = new BitmapImage();
+                // Create Avalonia Bitmap from bytes
                 using var ms = new MemoryStream(bytes);
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.StreamSource = ms;
-                bmp.EndInit();
-                bmp.Freeze(); // make it cross-thread accessible
-
+                var bmp = new Bitmap(ms);
                 game.CoverImage = bmp;
                 return;
             }
@@ -396,61 +442,6 @@ public class SteamLibraryScanner
             {
                 // ignore and try next
             }
-        }
-
-        // CDN attempts failed - fall back to scraping SteamDB search results for first image
-        TryScrapeSteamDbCover(game);
-    }
-
-    /// <summary>
-    /// Try to scrape steamdb.info search page for the game's first result image and download it.
-    /// Best-effort; may fail silently.
-    /// </summary>
-    private void TryScrapeSteamDbCover(GameInfo game)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(game.Name))
-                return;
-
-            var query = System.Uri.EscapeDataString(game.Name);
-            var url = $"https://steamdb.info/search/?a=all&q={query}";
-            var html = _httpClient.GetStringAsync(url).GetAwaiter().GetResult();
-            if (string.IsNullOrWhiteSpace(html))
-                return;
-
-            // Find first <img ... src="..."> in the page
-            var m = Regex.Match(html, "<img[^>]+src=\"([^\"]+)\"", RegexOptions.IgnoreCase);
-            if (!m.Success)
-                return;
-
-            var imgUrl = m.Groups[1].Value;
-            if (imgUrl.StartsWith("//"))
-                imgUrl = "https:" + imgUrl;
-            else if (imgUrl.StartsWith("/"))
-                imgUrl = "https://steamdb.info" + imgUrl;
-
-            using var resp = _httpClient.Send(new HttpRequestMessage(HttpMethod.Get, imgUrl));
-            if (!resp.IsSuccessStatusCode)
-                return;
-
-            var bytes = resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-            if (bytes == null || bytes.Length == 0)
-                return;
-
-            var bmp = new BitmapImage();
-            using var ms = new MemoryStream(bytes);
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.StreamSource = ms;
-            bmp.EndInit();
-            bmp.Freeze();
-
-            game.CoverImage = bmp;
-        }
-        catch (Exception ex)
-        {
-            _scanErrors.Add($"SteamDB scrape failed for {game.Name}: {ex.Message}");
         }
     }
 

@@ -1,0 +1,602 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:GamesLocalShare.ViewModels"
+        xmlns:conv="using:GamesLocalShare.Converters"
+        mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="700"
+        x:Class="GamesLocalShare.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Games Local Share - LAN Game Sync"
+        Width="1200" Height="700"
+        MinWidth="900" MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="#1E1E1E"
+        x:Name="MainWindowRoot">
+
+    <Window.Resources>
+        <conv:InvertBoolConverter x:Key="InvertBool" />
+        <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <conv:InvertedBoolToVisibilityConverter x:Key="InvertedBoolToVis" />
+        <conv:BoolToOnlineConverter x:Key="BoolToOnline" />
+        <conv:ZeroToVisibilityConverter x:Key="ZeroToVis" />
+        <conv:NonZeroToVisibilityConverter x:Key="NonZeroToVis" />
+        <conv:NullToBoolConverter x:Key="NullToBool" />
+        <conv:BoolToSpeedModeConverter x:Key="BoolToSpeedMode" />
+        <conv:StringToColorBrushConverter x:Key="StringToColorBrush" />
+        <conv:BoolToHideShowTextConverter x:Key="BoolToHideShowText" />
+        <conv:BoolToHideShowIconConverter x:Key="BoolToHideShowIcon" />
+    </Window.Resources>
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto" PointerPressed="MainGrid_PointerPressed">
+        
+        <!-- Header / Toolbar -->
+        <Border Grid.Row="0" Background="{DynamicResource AccentBrush}" Padding="16">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <!-- Step 1: Scan Games -->
+                    <Border Classes="step-badge">
+                        <TextBlock Text="Step 1" Foreground="White" FontSize="10" VerticalAlignment="Center"/>
+                    </Border>
+                    <Button Classes="secondary" 
+                            Command="{Binding ScanLocalGamesCommand}" 
+                            IsEnabled="{Binding IsScanning, Converter={StaticResource InvertBool}}">
+                        <TextBlock Text="Scan My Games" Foreground="White"/>
+                    </Button>
+
+                    <!-- Step 2: Start Network -->
+                    <Border Classes="step-badge">
+                        <TextBlock Text="Step 2" Foreground="White" FontSize="10" VerticalAlignment="Center"/>
+                    </Border>
+                    <Button Classes="secondary" 
+                            Command="{Binding StartNetworkCommand}" 
+                            IsVisible="{Binding IsNetworkActive, Converter={StaticResource InvertBool}}">
+                        <TextBlock Text="Start Network" Foreground="White"/>
+                    </Button>
+                    <Button Classes="secondary" 
+                            Command="{Binding StopNetworkCommand}" 
+                            IsVisible="{Binding IsNetworkActive}">
+                        <TextBlock Text="Stop Network" Foreground="White"/>
+                    </Button>
+
+                    <!-- Step 3: Find Peers -->
+                    <Border Classes="step-badge" IsVisible="{Binding IsNetworkActive}">
+                        <TextBlock Text="Step 3" Foreground="White" FontSize="10" VerticalAlignment="Center"/>
+                    </Border>
+                    <Button Classes="secondary" 
+                            Command="{Binding ScanForPeersCommand}" 
+                            IsVisible="{Binding IsNetworkActive}"
+                            IsEnabled="{Binding IsScanningPeers, Converter={StaticResource InvertBool}}">
+                        <TextBlock Text="Scan for Peers" Foreground="White"/>
+                    </Button>
+
+                    <!-- Configure Firewall Button (Windows only) -->
+                    <Button Classes="danger" 
+                            Command="{Binding ConfigureFirewallCommand}" 
+                            IsVisible="{Binding !FirewallConfigured}"
+                            ToolTip.Tip="Configure Windows Firewall to allow network communication">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="⚠" Foreground="White"/>
+                            <TextBlock Text="Configure Firewall" Foreground="White" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock Text="Your IP: " Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                    <Button Background="Transparent" 
+                            BorderThickness="0" 
+                            Padding="4,0"
+                            Cursor="Hand"
+                            Command="{Binding CopyLocalIpToClipboardCommand}"
+                            ToolTip.Tip="Click to copy IP address">
+                        <TextBlock Text="{Binding LocalIpAddress}" FontWeight="Bold" Foreground="White" 
+                                   TextDecorations="Underline"/>
+                    </Button>
+                    <TextBlock Text="{Binding IsNetworkActive, Converter={StaticResource BoolToOnline}}" 
+                               VerticalAlignment="Center" Foreground="White"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Instructions Banner -->
+        <Border Grid.Row="1" Background="#2D2D30" Padding="16,10">
+            <TextBlock TextWrapping="Wrap" Foreground="#9CA3AF">
+                <Run FontWeight="Bold" Foreground="{DynamicResource AccentBrush}">How to use:</Run>
+                <Run> 1) Scan games</Run>
+                <Run FontWeight="Bold"> |</Run>
+                <Run> 2) Start network</Run>
+                <Run FontWeight="Bold"> |</Run>
+                <Run> 3) Find peers</Run>
+                <Run FontWeight="Bold"> |</Run>
+                <Run> 4) Download updates OR new games from peers</Run>
+                <Run FontWeight="Bold"> |</Run>
+                <Run FontStyle="Italic" Foreground="{DynamicResource AccentBrush2}"> Incomplete downloads can be resumed!</Run>
+            </TextBlock>
+        </Border>
+
+        <!-- Main Content - 4 Panels -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,8,*,8,*,8,*">
+            
+            <!-- Panel 1: My Games -->
+            <Border Grid.Column="0" Classes="panel">
+                <Grid RowDefinitions="Auto,*">
+                    <Border Grid.Row="0" Classes="panel-header" Background="{DynamicResource AccentBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="🎮" FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="My Games" Classes="header"/>
+                            <TextBlock Text="{Binding LocalGames.Count, StringFormat='({0})'}" 
+                                       FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ListBox Grid.Row="1" 
+                             ItemsSource="{Binding LocalGames}" 
+                             SelectedItem="{Binding SelectedLocalGame}"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="game-item">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Open Game Folder" 
+                                                      Command="{Binding $parent[Window].DataContext.OpenGameFolderCommand}"
+                                                      CommandParameter="{Binding}">
+                                                <MenuItem.Icon>
+                                                    <TextBlock Text="📁" FontSize="14"/>
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                            <Separator/>
+                                            <MenuItem Header="{Binding IsHidden, Converter={StaticResource BoolToHideShowText}}"
+                                                      Command="{Binding $parent[Window].DataContext.ToggleGameVisibilityCommand}"
+                                                      CommandParameter="{Binding}">
+                                                <MenuItem.Icon>
+                                                    <TextBlock Text="{Binding IsHidden, Converter={StaticResource BoolToHideShowIcon}}" FontSize="14"/>
+                                                </MenuItem.Icon>
+                                            </MenuItem>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                    
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <!-- Cover Image -->
+                                        <Border Grid.Column="0" 
+                                                Width="60" Height="90" 
+                                                Margin="0,0,8,0"
+                                                CornerRadius="4"
+                                                ClipToBounds="True"
+                                                Background="#2D2D30">
+                                            <Grid>
+                                                <Image Source="{Binding CoverImage}" 
+                                                       Stretch="UniformToFill"
+                                                       IsVisible="{Binding CoverImage, Converter={StaticResource NullToBool}}"/>
+                                                <TextBlock Text="🎮" 
+                                                           FontSize="24"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="#6B7280"
+                                                           IsVisible="{Binding CoverImage, Converter={StaticResource NullToBool}, ConverterParameter=Invert}"/>
+                                            </Grid>
+                                        </Border>
+                                        
+                                        <!-- Game Info -->
+                                        <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" 
+                                                           Foreground="White" TextTrimming="CharacterEllipsis" MaxWidth="180"/>
+                                                <Border Background="{DynamicResource ErrorBrush}" 
+                                                        CornerRadius="2" Padding="4,1"
+                                                        IsVisible="{Binding IsHidden}">
+                                                    <TextBlock Text="HIDDEN" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding BuildId}" FontSize="10" 
+                                                           Foreground="{DynamicResource AccentBrush}"/>
+                                                <TextBlock Text="-" FontSize="10" Foreground="#6B7280"/>
+                                                <TextBlock Text="{Binding FormattedSize}" FontSize="10" Foreground="#6B7280"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Empty State -->
+                    <StackPanel Grid.Row="1" 
+                                HorizontalAlignment="Center" 
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding LocalGames.Count, Converter={StaticResource ZeroToVis}}"
+                                Spacing="8">
+                        <TextBlock Text="No games found" FontSize="12" Foreground="#6B7280" 
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock Text="Click 'Scan My Games' above" FontSize="11" Foreground="#4B5563" 
+                                   HorizontalAlignment="Center"/>
+                        <Button Command="{Binding ShowTroubleshootInfoCommand}"
+                                HorizontalAlignment="Center"
+                                Padding="12,6">
+                            <TextBlock Text="Troubleshoot" FontSize="11"/>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Loading Spinner -->
+                    <ProgressBar Grid.Row="1" 
+                                 IsIndeterminate="True" 
+                                 IsVisible="{Binding IsScanning}"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Width="40"/>
+                </Grid>
+            </Border>
+
+            <!-- Panel 2: Network Peers & Available From Peers -->
+            <Border Grid.Column="2" Classes="panel">
+                <Grid RowDefinitions="Auto,Auto,*,Auto,*">
+                    <Border Grid.Row="0" Classes="panel-header" Background="{DynamicResource AccentBrush2}">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="🖥️" FontSize="16" VerticalAlignment="Center"/>
+                                <TextBlock Text="Network Peers" Classes="header"/>
+                                <TextBlock Text="{Binding NetworkPeers.Count, StringFormat='({0})'}" 
+                                           FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                                <Button Background="Transparent" Padding="8,4"
+                                        Command="{Binding TestConnectionToPeerCommand}"
+                                        ToolTip.Tip="Test connection to selected peer">
+                                    <TextBlock Text="Test" FontSize="11" Foreground="White"/>
+                                </Button>
+                                <Button Background="Transparent" Padding="8,4"
+                                        Command="{Binding RefreshAllPeersCommand}"
+                                        ToolTip.Tip="Refresh game lists from all peers">
+                                    <TextBlock Text="Refresh" FontSize="11" Foreground="White"/>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Manual IP -->
+                    <Border Grid.Row="1" Padding="8" Background="#252526">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" 
+                                     Text="{Binding ManualPeerIp}" 
+                                     Watermark="IP address (e.g., 192.168.0.100)"
+                                     Margin="0,0,8,0" FontSize="11"
+                                     IsEnabled="{Binding IsNetworkActive}"/>
+                            <Button Grid.Column="1" 
+                                    Classes="primary"
+                                    Command="{Binding ConnectToManualIpCommand}"
+                                    Padding="12,4"
+                                    IsEnabled="{Binding IsNetworkActive}">
+                                <TextBlock Text="Connect" FontSize="11"/>
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <!-- Peers List -->
+                    <ListBox Grid.Row="2" 
+                             ItemsSource="{Binding NetworkPeers}" 
+                             SelectedItem="{Binding SelectedPeer}"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="game-item">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" Foreground="White"/>
+                                            <TextBlock Text="{Binding IpAddress}" Foreground="#6B7280" FontSize="10"/>
+                                        </StackPanel>
+                                        <Border Grid.Column="1" 
+                                                Background="{DynamicResource AccentBrush}" 
+                                                CornerRadius="8" Padding="8,2" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Games.Count}" FontSize="10" Foreground="White"/>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- New Games Available Header -->
+                    <Border Grid.Row="3" Background="{DynamicResource PurpleBrush}" Padding="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="⬇️" FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="New Games from Peers" FontSize="12" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock Text="{Binding AvailableFromPeers.Count, StringFormat='({0})'}" 
+                                       FontSize="12" Foreground="White" Opacity="0.8"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- New Games List -->
+                    <ListBox Grid.Row="4" 
+                             ItemsSource="{Binding AvailableFromPeers}" 
+                             SelectedItem="{Binding SelectedPeerGame}"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="game-item">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="11" 
+                                                   Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding FormattedSize}" Foreground="#6B7280" FontSize="10"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Loading Spinner -->
+                    <ProgressBar Grid.Row="2" 
+                                 IsIndeterminate="True" 
+                                 IsVisible="{Binding IsScanningPeers}"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Width="40"/>
+                </Grid>
+            </Border>
+
+            <!-- Panel 3: Available Updates -->
+            <Border Grid.Column="4" Classes="panel">
+                <Grid RowDefinitions="Auto,*,Auto">
+                    <Border Grid.Row="0" Classes="panel-header" Background="{DynamicResource AccentBrush3}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="🔄" FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="Updates Available" Classes="header"/>
+                            <TextBlock Text="{Binding AvailableSyncs.Count, StringFormat='({0})'}" 
+                                       FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ListBox Grid.Row="1" 
+                             ItemsSource="{Binding AvailableSyncs}" 
+                             SelectedItem="{Binding SelectedSyncItem}"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="game-item">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="12" 
+                                                   Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                        <Border Background="#3C3C3C" CornerRadius="4" Padding="8,4">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding LocalGame.BuildId}" Foreground="OrangeRed" FontSize="10" FontWeight="Bold"/>
+                                                <TextBlock Text="→" FontSize="10" Foreground="#6B7280"/>
+                                                <TextBlock Text="{Binding RemoteGame.BuildId}" Foreground="LimeGreen" FontSize="10" FontWeight="Bold"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Text="{Binding RemotePeer.DisplayName, StringFormat='From: {0}'}" 
+                                                   Foreground="#6B7280" FontSize="10"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Empty State -->
+                    <StackPanel Grid.Row="1" 
+                                HorizontalAlignment="Center" 
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding AvailableSyncs.Count, Converter={StaticResource ZeroToVis}}"
+                                Spacing="4">
+                        <TextBlock Text="No updates" FontSize="12" Foreground="#6B7280" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Connect to peers to check for updates" FontSize="10" 
+                                   Foreground="#4B5563" HorizontalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Action Buttons -->
+                    <Border Grid.Row="2" Padding="8" Background="#252526">
+                        <StackPanel Spacing="8">
+                            <Button Classes="primary" 
+                                    Command="{Binding StartSyncCommand}" 
+                                    IsEnabled="{Binding SelectedSyncItem, Converter={StaticResource NullToBool}}"
+                                    HorizontalAlignment="Stretch">
+                                <TextBlock Text="Download Update" FontWeight="SemiBold"/>
+                            </Button>
+                            
+
+                            <Button Background="{DynamicResource PurpleBrush}"
+                                    Command="{Binding DownloadNewGameCommand}" 
+                                    IsEnabled="{Binding SelectedPeerGame, Converter={StaticResource NullToBool}}"
+                                    HorizontalAlignment="Stretch"
+                                    Padding="12,8">
+                                <TextBlock Text="Download New Game" FontWeight="SemiBold" Foreground="White"/>
+                            </Button>
+
+                            <!-- Progress Panel -->
+                            <Border IsVisible="{Binding IsTransferring}" 
+                                    Background="#3C3C3C"
+                                    CornerRadius="4" Padding="8">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{Binding CurrentTransferGameName}" FontWeight="SemiBold" FontSize="11" 
+                                               Foreground="{DynamicResource AccentBrush}"/>
+                                    <ProgressBar Value="{Binding CurrentTransferProgress}" Minimum="0" Maximum="100"/>
+                                    <TextBlock Text="{Binding CurrentTransferFile}" FontSize="9" 
+                                               Foreground="#6B7280" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding CurrentTransferFormattedProgress}" 
+                                               FontSize="10" Foreground="#9CA3AF"/>
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <Button Grid.Column="0"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Padding="0"
+                                                Cursor="Hand"
+                                                Command="{Binding ToggleSpeedUnitCommand}"
+                                                ToolTip.Tip="Click to toggle between MB/s and Mbps">
+                                            <TextBlock Text="{Binding CurrentTransferSpeed}" FontSize="12"
+                                                       Foreground="{DynamicResource AccentBrush}" FontWeight="Bold"/>
+                                        </Button>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding CurrentTransferTimeRemaining, StringFormat='ETA: {0}'}" 
+                                                   FontSize="11"
+                                                   Foreground="#9CA3AF"
+                                                   HorizontalAlignment="Right"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,*">
+                                        <Button Grid.Column="0" Command="{Binding PauseTransferCommand}"
+                                                Background="{DynamicResource WarningBrush}"
+                                                Padding="8,4" Margin="0,0,4,0">
+                                            <TextBlock Text="Pause" FontSize="10" Foreground="White"/>
+                                        </Button>
+                                        <Button Grid.Column="1" Command="{Binding StopTransferCommand}"
+                                                Classes="danger"
+                                                Padding="8,4" Margin="4,0,0,0">
+                                            <TextBlock Text="Stop" FontSize="10" Foreground="White"/>
+                                        </Button>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Panel 4: Incomplete Downloads -->
+            <Border Grid.Column="6" Classes="panel">
+                <Grid RowDefinitions="Auto,*,Auto">
+                    <Border Grid.Row="0" Classes="panel-header" Background="{DynamicResource ErrorBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="⏸️" FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="Incomplete" Classes="header"/>
+                            <TextBlock Text="{Binding IncompleteTransfers.Count, StringFormat='({0})'}" 
+                                       FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ListBox Grid.Row="1" 
+                             ItemsSource="{Binding IncompleteTransfers}" 
+                             SelectedItem="{Binding SelectedIncompleteTransfer}"
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="game-item">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="12" 
+                                                   Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                        <ProgressBar Value="{Binding ProgressPercent}" Minimum="0" Maximum="100" Height="6"/>
+                                        <Grid>
+                                            <TextBlock Text="{Binding FormattedProgress}" FontSize="10" Foreground="#9CA3AF"/>
+                                            <TextBlock Text="{Binding SourcePeerName, StringFormat='From: {0}'}" 
+                                                       FontSize="10" Foreground="#6B7280" HorizontalAlignment="Right"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Empty State -->
+                    <StackPanel Grid.Row="1" 
+                                HorizontalAlignment="Center" 
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding IncompleteTransfers.Count, Converter={StaticResource ZeroToVis}}"
+                                Spacing="4">
+                        <TextBlock Text="No incomplete downloads" FontSize="12" Foreground="#6B7280" 
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock Text="Interrupted downloads appear here" FontSize="10" 
+                                   Foreground="#4B5563" HorizontalAlignment="Center"/>
+                    </StackPanel>
+
+                    <Border Grid.Row="2" Padding="8" Background="#252526">
+                        <Button Command="{Binding ResumeTransferCommand}" 
+                                Classes="danger"
+                                HorizontalAlignment="Stretch">
+                            <TextBlock Text="Resume Download" FontWeight="SemiBold" Foreground="White"/>
+                        </Button>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="3" Classes="status-bar">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding StatusMessage}" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+                
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <!-- Settings Button -->
+                    <Button Background="#3C3C3C" Padding="12,4"
+                            Command="{Binding OpenSettingsCommand}"
+                            ToolTip.Tip="Open Settings">
+                        <TextBlock Text="⚙ Settings" FontSize="10" Foreground="#9CA3AF"/>
+                    </Button>
+                    
+                    <!-- High Speed Mode Toggle -->
+                    <ToggleButton Command="{Binding ToggleHighSpeedModeCommand}"
+                                  IsChecked="{Binding HighSpeedMode, Mode=OneWay}"
+                                  Background="#3C3C3C"
+                                  Padding="12,4"
+                                  ToolTip.Tip="Toggle between WiFi mode and High-Speed mode">
+                        <TextBlock Text="{Binding HighSpeedMode, Converter={StaticResource BoolToSpeedMode}}" 
+                                   FontSize="10" Foreground="#9CA3AF"/>
+                    </ToggleButton>
+                    
+                    <TextBlock Text="Games Local Share" Foreground="#6B7280" FontSize="10" VerticalAlignment="Center"/>
+                    
+                    <!-- Log Toggle Button -->
+                    <ToggleButton IsChecked="{Binding IsLogVisible}"
+                                  Background="#3C3C3C"
+                                  Padding="12,4"
+                                  ToolTip.Tip="Show/Hide Activity Log">
+                        <TextBlock Text="📋 Log" FontSize="10" Foreground="#9CA3AF"/>
+                    </ToggleButton>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Log Panel (Popup) -->
+        <Border x:Name="LogBorder"
+                Grid.Row="2" 
+                Background="#252526" 
+                CornerRadius="8"
+                Margin="16,0,16,16"
+                Padding="12"
+                VerticalAlignment="Bottom"
+                MaxHeight="200"
+                IsVisible="{Binding IsLogVisible}">
+            <Grid RowDefinitions="Auto,*">
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <TextBlock Text="Activity Log" FontWeight="Bold" Foreground="#9CA3AF"/>
+                    <Button HorizontalAlignment="Right"
+                            Command="{Binding ClearLogCommand}"
+                            Background="Transparent"
+                            Padding="8,2"
+                            ToolTip.Tip="Clear log">
+                        <TextBlock Text="Clear" FontSize="10" Foreground="#6B7280"/>
+                    </Button>
+                </Grid>
+                
+                <ScrollViewer Grid.Row="1">
+                    <ItemsControl ItemsSource="{Binding LogMessages}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2">
+                                    <TextBlock Text="{Binding FormattedTime}" 
+                                               Foreground="#6B7280" 
+                                               FontSize="10" 
+                                               Width="55"/>
+                                    <TextBlock Text="{Binding TypeIcon}" 
+                                               Foreground="{Binding TypeColor, Converter={StaticResource StringToColorBrush}}" 
+                                               FontSize="10" 
+                                               Width="20"/>
+                                    <TextBlock Text="{Binding Message}" 
+                                               Foreground="#9CA3AF" 
+                                               FontSize="10"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
