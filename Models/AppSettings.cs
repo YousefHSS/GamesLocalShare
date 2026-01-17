@@ -13,6 +13,9 @@ public class AppSettings
         "GamesLocalShare",
         "settings.json");
 
+    private static AppSettings? _instance;
+    private static readonly object _lock = new object();
+
     /// <summary>
     /// Whether to start the application with Windows
     /// </summary>
@@ -49,25 +52,67 @@ public class AppSettings
     public bool AutoResumeDownloads { get; set; }
 
     /// <summary>
-    /// Loads settings from disk, or returns defaults if file doesn't exist
+    /// Loads settings from disk, or returns defaults if file doesn't exist.
+    /// Returns a singleton instance to ensure all parts of the app use the same settings.
     /// </summary>
     public static AppSettings Load()
     {
-        try
+        lock (_lock)
         {
-            if (File.Exists(SettingsPath))
+            if (_instance != null)
             {
-                var json = File.ReadAllText(SettingsPath);
-                var settings = JsonSerializer.Deserialize<AppSettings>(json);
-                return settings ?? new AppSettings();
+                System.Diagnostics.Debug.WriteLine("Returning cached settings instance");
+                return _instance;
             }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Error loading settings: {ex.Message}");
-        }
 
-        return new AppSettings();
+            try
+            {
+                System.Diagnostics.Debug.WriteLine($"Loading settings from: {SettingsPath}");
+                
+                if (File.Exists(SettingsPath))
+                {
+                    var json = File.ReadAllText(SettingsPath);
+                    System.Diagnostics.Debug.WriteLine($"? Settings file found, content: {json}");
+                    
+                    var settings = JsonSerializer.Deserialize<AppSettings>(json);
+                    if (settings != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"? Settings loaded successfully");
+                        _instance = settings;
+                        return _instance;
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"? Settings deserialized to null, using defaults");
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"? Settings file not found, using defaults");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"? ERROR loading settings: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"  Stack: {ex.StackTrace}");
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Creating new default settings instance");
+            _instance = new AppSettings();
+            return _instance;
+        }
+    }
+
+    /// <summary>
+    /// Reloads settings from disk, replacing the cached instance
+    /// </summary>
+    public static void Reload()
+    {
+        lock (_lock)
+        {
+            _instance = null;
+            Load();
+        }
     }
 
     /// <summary>
@@ -81,6 +126,7 @@ public class AppSettings
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
                 Directory.CreateDirectory(directory);
+                System.Diagnostics.Debug.WriteLine($"Created settings directory: {directory}");
             }
 
             var json = JsonSerializer.Serialize(this, new JsonSerializerOptions 
@@ -88,10 +134,25 @@ public class AppSettings
                 WriteIndented = true 
             });
             File.WriteAllText(SettingsPath, json);
+            System.Diagnostics.Debug.WriteLine($"? Settings saved successfully to: {SettingsPath}");
+            System.Diagnostics.Debug.WriteLine($"  Settings content: {json}");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error saving settings: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"? ERROR saving settings to {SettingsPath}");
+            System.Diagnostics.Debug.WriteLine($"  Exception: {ex.GetType().Name}");
+            System.Diagnostics.Debug.WriteLine($"  Message: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"  Stack: {ex.StackTrace}");
+            
+            // Try to get more details about the error
+            if (ex is UnauthorizedAccessException)
+            {
+                System.Diagnostics.Debug.WriteLine($"  ? Access denied - check folder permissions");
+            }
+            else if (ex is IOException)
+            {
+                System.Diagnostics.Debug.WriteLine($"  ? IO error - file may be locked");
+            }
         }
     }
 
