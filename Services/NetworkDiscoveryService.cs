@@ -659,52 +659,66 @@ public class NetworkDiscoveryService : IDisposable
                 if (request == null)
                     return;
 
-                System.Diagnostics.Debug.WriteLine($"Received {request.Type} from {request.SenderName} ({remoteIp})");
+                System.Diagnostics.Debug.WriteLine($"Received {request.Type} from {request.SenderName} ({remoteIp}) with {request.Games?.Count ?? 0} games");
 
                 // If we received a request, add/update the sender as a peer
+                bool shouldNotifyGamesUpdated = false;
+                NetworkPeer? peerToNotify = null;
+                
                 if (!string.IsNullOrEmpty(request.SenderId) && request.SenderId != LocalPeer.PeerId)
                 {
                     bool isNew = false;
-                    NetworkPeer? peerToUpdate = null;
                     
                     lock (_peersLock)
                     {
                         if (!_peers.ContainsKey(request.SenderId))
                         {
-                            peerToUpdate = new NetworkPeer
+                            peerToNotify = new NetworkPeer
                             {
                                 PeerId = request.SenderId,
                                 DisplayName = request.SenderName ?? remoteIp,
                                 IpAddress = remoteIp,
                                 Port = request.SenderPort > 0 ? request.SenderPort : TcpPort,
+                                FileTransferPort = request.SenderFileTransferPort > 0 ? request.SenderFileTransferPort : 45679,
                                 Games = request.Games ?? [], // Capture their games from the request!
                                 LastSeen = DateTime.Now
                             };
-                            _peers[request.SenderId] = peerToUpdate;
+                            _peers[request.SenderId] = peerToNotify;
                             isNew = true;
+                            shouldNotifyGamesUpdated = request.Games != null && request.Games.Count > 0;
                         }
                         else
                         {
-                            peerToUpdate = _peers[request.SenderId];
-                            peerToUpdate.LastSeen = DateTime.Now;
+                            peerToNotify = _peers[request.SenderId];
+                            peerToNotify.LastSeen = DateTime.Now;
+                            peerToNotify.IpAddress = remoteIp; // Update IP in case it changed
+                            
+                            // Update file transfer port if provided
+                            if (request.SenderFileTransferPort > 0)
+                            {
+                                peerToNotify.FileTransferPort = request.SenderFileTransferPort;
+                            }
                             
                             // Update their games if they sent them
                             if (request.Games != null && request.Games.Count > 0)
                             {
-                                peerToUpdate.Games = request.Games;
+                                peerToNotify.Games = request.Games;
+                                shouldNotifyGamesUpdated = true;
                             }
                         }
                     }
                     
-                    if (isNew && peerToUpdate != null)
+                    // Fire events outside the lock to prevent deadlocks
+                    if (isNew && peerToNotify != null)
                     {
-                        PeerDiscovered?.Invoke(this, peerToUpdate);
+                        PeerDiscovered?.Invoke(this, peerToNotify);
                     }
                     
                     // If they sent games with the request, notify about the update
-                    if (peerToUpdate != null && request.Games != null && request.Games.Count > 0)
+                    if (shouldNotifyGamesUpdated && peerToNotify != null)
                     {
-                        PeerGamesUpdated?.Invoke(this, peerToUpdate);
+                        System.Diagnostics.Debug.WriteLine($"Notifying PeerGamesUpdated for {peerToNotify.DisplayName} with {peerToNotify.Games.Count} games");
+                        PeerGamesUpdated?.Invoke(this, peerToNotify);
                     }
                 }
 
@@ -733,8 +747,10 @@ public class NetworkDiscoveryService : IDisposable
                         break;
 
                     case MessageType.GameList:
+                        System.Diagnostics.Debug.WriteLine($"Received GameList from {request.SenderName} with {request.Games?.Count ?? 0} games");
                         if (request.Games != null)
                         {
+                            NetworkPeer? gameListPeer = null;
                             lock (_peersLock)
                             {
                                 if (_peers.TryGetValue(request.SenderId, out var peer))
@@ -746,8 +762,13 @@ public class NetworkDiscoveryService : IDisposable
                                     {
                                         peer.FileTransferPort = request.SenderFileTransferPort;
                                     }
-                                    PeerGamesUpdated?.Invoke(this, peer);
+                                    gameListPeer = peer;
                                 }
+                            }
+                            // Invoke event outside of lock to prevent deadlocks
+                            if (gameListPeer != null)
+                            {
+                                PeerGamesUpdated?.Invoke(this, gameListPeer);
                             }
                         }
                         break;

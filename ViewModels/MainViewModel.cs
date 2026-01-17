@@ -989,20 +989,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
             {
-                existing.Games = peer.Games;
+                // Create a new list to ensure the reference changes and triggers UI update
+                existing.Games = peer.Games?.ToList() ?? [];
+                
+                System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: {peer.DisplayName} now has {existing.Games.Count} games");
                 
                 // Force UI update by removing and re-adding
                 var index = NetworkPeers.IndexOf(existing);
-                NetworkPeers.RemoveAt(index);
-                NetworkPeers.Insert(index, existing);
+                if (index >= 0)
+                {
+                    NetworkPeers.RemoveAt(index);
+                    NetworkPeers.Insert(index, existing);
+                }
+            }
+            else
+            {
+                // Peer not in our collection yet, add it
+                System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: Peer {peer.DisplayName} not found in NetworkPeers, adding...");
+                NetworkPeers.Add(peer);
             }
 
             // Recalculate available syncs and new games
             UpdateAvailableSyncs();
             UpdateAvailableFromPeers();
             
-            StatusMessage = $"Received {peer.Games.Count} games from {peer.DisplayName}";
-            AddLog($"Updated game list from {peer.DisplayName}", LogMessageType.Info);
+            StatusMessage = $"Received {peer.Games?.Count ?? 0} games from {peer.DisplayName}";
+            AddLog($"Updated game list from {peer.DisplayName}: {peer.Games?.Count ?? 0} games", LogMessageType.Info);
         });
     }
 
