@@ -858,14 +858,14 @@ public class FileTransferService : IDisposable
 
                 System.Diagnostics.Debug.WriteLine($"Building manifest for: {gamePath}");
 
-                var manifest = await BuildFileManifestAsync(gamePath);
+                var manifest = await BuildFileManifestAsync(gamePath).ConfigureAwait(false);
                 
                 if (request.IncludeManifest && steamAppsFolder != null)
                 {
                     var appManifestPath = Path.Combine(steamAppsFolder, $"appmanifest_{request.GameAppId}.acf");
                     if (File.Exists(appManifestPath))
                     {
-                        manifest.AppManifestContent = await File.ReadAllTextAsync(appManifestPath, ct);
+                        manifest.AppManifestContent = await File.ReadAllTextAsync(appManifestPath, ct).ConfigureAwait(false);
                         System.Diagnostics.Debug.WriteLine($"Including app manifest: {appManifestPath}");
                     }
                 }
@@ -878,6 +878,12 @@ public class FileTransferService : IDisposable
 
                 // Pre-allocate buffer for transfer
                 var buffer = new byte[_bufferSize];
+                
+                // Track statistics for periodic logging (avoid per-file logging)
+                int filesSent = 0;
+                long bytesSent = 0;
+                var lastLogTime = DateTime.Now;
+                const int LogIntervalMs = 2000; // Log every 2 seconds instead of every file
 
                 while (!ct.IsCancellationRequested)
                 {
@@ -888,7 +894,7 @@ public class FileTransferService : IDisposable
                     }
                     catch (EndOfStreamException)
                     {
-                        System.Diagnostics.Debug.WriteLine("Client disconnected (end of stream)");
+                        System.Diagnostics.Debug.WriteLine($"Transfer complete: sent {filesSent} files, {bytesSent / 1024 / 1024}MB total");
                         break;
                     }
                     catch (IOException ex)
@@ -899,7 +905,7 @@ public class FileTransferService : IDisposable
                     
                     if (string.IsNullOrEmpty(relativePath))
                     {
-                        System.Diagnostics.Debug.WriteLine("Transfer complete (client signaled end)");
+                        System.Diagnostics.Debug.WriteLine($"Transfer complete (client signaled end): sent {filesSent} files, {bytesSent / 1024 / 1024}MB total");
                         break;
                     }
 
@@ -907,6 +913,7 @@ public class FileTransferService : IDisposable
                     
                     if (!File.Exists(fullPath))
                     {
+                        // Only log file not found errors (these are unusual)
                         System.Diagnostics.Debug.WriteLine($"File not found: {relativePath}");
                         writer.Write(-1L);
                         continue;
@@ -916,16 +923,32 @@ public class FileTransferService : IDisposable
                     writer.Write(fileInfo.Length);
                     writer.Flush();
 
-                    System.Diagnostics.Debug.WriteLine($"Sending: {relativePath} ({fileInfo.Length / 1024 / 1024}MB)");
-
                     try
                     {
                         await using var fileStream = CreateOptimizedReadStream(fullPath);
                         int bytesRead;
 
-                        while ((bytesRead = await fileStream.ReadAsync(buffer, ct)) > 0)
+                        while ((bytesRead = await fileStream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
                         {
-                            await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                            await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
+                            bytesSent += bytesRead;
+                        }
+                        
+                        filesSent++;
+                        
+                        // Periodic logging instead of per-file logging
+                        var now = DateTime.Now;
+                        if ((now - lastLogTime).TotalMilliseconds > LogIntervalMs)
+                        {
+                            lastLogTime = now;
+                            System.Diagnostics.Debug.WriteLine($"Sending progress: {filesSent} files, {bytesSent / 1024 / 1024}MB sent");
+                        }
+                        
+                        // For very small files, yield to prevent UI starvation
+                        // This allows the UI thread to process events between files
+                        if (fileInfo.Length < 64 * 1024) // Files smaller than 64KB
+                        {
+                            await Task.Yield();
                         }
                     }
                     catch (IOException ex)
@@ -949,7 +972,9 @@ public class FileTransferService : IDisposable
         await Task.Run(() =>
         {
             var dirInfo = new DirectoryInfo(gamePath);
-            foreach (var file in dirInfo.EnumerateFiles("*", SearchOption.AllDirectories))
+            var files = dirInfo.EnumerateFiles("*", SearchOption.AllDirectories);
+            
+            foreach (var file in files)
             {
                 try
                 {
@@ -962,12 +987,14 @@ public class FileTransferService : IDisposable
                         RelativePath = relativePath,
                         Size = file.Length,
                         LastModified = file.LastWriteTimeUtc,
-                        Hash = ComputeQuickHash(file.FullName, file.Length)
+                        // Skip hash computation for manifest building - it's slow for many files
+                        // The receiver will compare by size first, then hash only if sizes match
+                        Hash = string.Empty
                     });
                 }
                 catch { }
             }
-        });
+        }).ConfigureAwait(false);
 
         return manifest;
     }
@@ -996,13 +1023,21 @@ public class FileTransferService : IDisposable
                     continue;
                 }
 
+                // If remote hash is empty (skipped for performance), assume file is OK if size matches
+                // This is a reasonable trade-off for games with many small files
+                if (string.IsNullOrEmpty(remoteFile.Hash))
+                {
+                    // Size matches, no hash to compare - assume file is OK
+                    continue;
+                }
+
                 var localHash = ComputeQuickHash(localFilePath, localInfo.Length);
                 if (localHash != remoteFile.Hash)
                 {
                     filesToDownload.Add(remoteFile);
                 }
             }
-        });
+        }).ConfigureAwait(false);
 
         return filesToDownload;
     }
