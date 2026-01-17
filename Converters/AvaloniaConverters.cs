@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using Avalonia;
 using Avalonia.Data.Converters;
@@ -270,9 +270,9 @@ public class BoolToHideShowIconConverter : IValueConverter
     {
         if (value is bool isHidden)
         {
-            return isHidden ? "??" : "?????";
+            return isHidden ? "👁" : "👁‍🗨";
         }
-        return "?????";
+        return "👁‍🗨";
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

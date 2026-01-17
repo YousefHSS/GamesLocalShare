@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace GamesLocalShare.Models;
@@ -140,10 +140,10 @@ public class DownloadQueueItem : INotifyPropertyChanged
     /// </summary>
     public string TypeIcon => Type switch
     {
-        DownloadQueueItemType.Update => "??",
-        DownloadQueueItemType.Incomplete => "??",
-        DownloadQueueItemType.NewDownload => "??",
-        _ => "??"
+        DownloadQueueItemType.Update => "🔄",
+        DownloadQueueItemType.Incomplete => "⏸️",
+        DownloadQueueItemType.NewDownload => "⬇️",
+        _ => "📦"
     };
 
     private static string FormatBytes(long bytes)

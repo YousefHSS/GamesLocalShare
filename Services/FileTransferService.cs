@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -359,24 +359,24 @@ public class FileTransferService : IDisposable
                             connected = true;
                             connectedPort = port;
                             testClient.Close();
-                            System.Diagnostics.Debug.WriteLine($"? Successfully connected to port {port}");
+                            System.Diagnostics.Debug.WriteLine($"✓ Successfully connected to port {port}");
                             break;
                         }
                         testClient.Close();
                     }
                     catch (OperationCanceledException)
                     {
-                        System.Diagnostics.Debug.WriteLine($"? Connection to port {port} timed out");
+                        System.Diagnostics.Debug.WriteLine($"✗ Connection to port {port} timed out");
                         continue;
                     }
                     catch (SocketException ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"? Connection to port {port} failed: {ex.SocketErrorCode}");
+                        System.Diagnostics.Debug.WriteLine($"✗ Connection to port {port} failed: {ex.SocketErrorCode}");
                         continue;
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"? Connection to port {port} failed: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"✗ Connection to port {port} failed: {ex.Message}");
                         continue;
                     }
                 }
@@ -388,11 +388,11 @@ public class FileTransferService : IDisposable
                         $"Tried ports: {string.Join(", ", portsToTry)}\n\n" +
                         "Possible causes:\n" +
                         "1. The peer computer hasn't clicked 'Start Network' yet\n" +
-                        "   ? Ask them to click 'Start Network' and look for 'File transfer ready' in their log\n" +
+                        "   → Ask them to click 'Start Network' and look for 'File transfer ready' in their log\n" +
                         "2. Firewall on the peer computer is blocking the connection\n" +
-                        "   ? They need to click 'Configure Firewall' as Administrator\n" +
+                        "   → They need to click 'Configure Firewall' as Administrator\n" +
                         "3. Antivirus/security software is blocking the connection\n" +
-                        "   ? Check Windows Security or third-party antivirus settings");
+                        "   → Check Windows Security or third-party antivirus settings");
                 }
                 
                 // Now connect for real with the working port
@@ -829,7 +829,7 @@ public class FileTransferService : IDisposable
                     {
                         steamAppsFolder = commonFolder.Parent?.FullName;
                     }
-                    System.Diagnostics.Debug.WriteLine($"? SUCCESS: Found game by AppId: {request.GameAppId} at {gamePath}");
+                    System.Diagnostics.Debug.WriteLine($"✓ SUCCESS: Found game by AppId: {request.GameAppId} at {gamePath}");
                 }
                 else if (!string.IsNullOrEmpty(request.GamePath) && Directory.Exists(request.GamePath))
                 {
@@ -839,11 +839,11 @@ public class FileTransferService : IDisposable
                     {
                         steamAppsFolder = commonFolder.Parent?.FullName;
                     }
-                    System.Diagnostics.Debug.WriteLine($"? Using fallback path from request: {gamePath}");
+                    System.Diagnostics.Debug.WriteLine($"✓ Using fallback path from request: {gamePath}");
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"? ERROR: Game not found!");
+                    System.Diagnostics.Debug.WriteLine($"✗ ERROR: Game not found!");
                     System.Diagnostics.Debug.WriteLine($"  Requested AppId: {request.GameAppId}");
                     System.Diagnostics.Debug.WriteLine($"  Requested GamePath: '{request.GamePath}'");
                     System.Diagnostics.Debug.WriteLine($"  Local games count: {_localGames.Count}");
