@@ -109,12 +109,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isWindows = OperatingSystem.IsWindows();
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StartQueueCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PauseQueueCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ClearQueueCommand))]
+    private bool _isQueueProcessing;
+
+    [ObservableProperty]
+    private DownloadQueueItem? _currentQueueItem;
+
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
     public ObservableCollection<GameInfo> AvailableFromPeers { get; } = [];
     public ObservableCollection<TransferState> IncompleteTransfers { get; } = [];
     public ObservableCollection<LogMessage> LogMessages { get; } = [];
+    public ObservableCollection<DownloadQueueItem> DownloadQueue { get; } = [];
 
     // Manual command properties for context menu
     public IRelayCommand<GameInfo?> OpenGameFolderCommand { get; }
@@ -174,6 +184,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_settings.AutoUpdateGames)
         {
             InitializeAutoUpdateTimer();
+        }
+
+        // Auto-resume downloads if enabled and network is active
+        if (_settings.AutoResumeDownloads)
+        {
+            _ = AutoResumeDownloadsOnStartupAsync();
         }
     }
 
@@ -1068,6 +1084,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SelectedSyncItem.Progress = e.Progress;
                 SelectedSyncItem.TransferSpeed = e.SpeedBytesPerSecond;
             }
+
+            // Update current queue item if processing queue
+            if (CurrentQueueItem != null)
+            {
+                CurrentQueueItem.Progress = e.Progress;
+                CurrentQueueItem.DownloadedBytes = e.TransferredBytes;
+                CurrentQueueItem.TotalBytes = e.TotalBytes;
+            }
         });
     }
 
@@ -1418,6 +1442,387 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public string CurrentTransferFormattedProgress => 
         $"{CurrentTransferProgress:0.0}% ({FormatBytes(CurrentTransferDownloadedBytes)} / {FormatBytes(CurrentTransferTotalBytes)})";
+
+    #region Download Queue Management
+
+    /// <summary>
+    /// Adds all available updates to the download queue
+    /// </summary>
+    [RelayCommand]
+    private void AddAllUpdatesToQueue()
+    {
+        if (AvailableSyncs.Count == 0)
+        {
+            StatusMessage = "No updates available to add to queue";
+            return;
+        }
+
+        var addedCount = 0;
+        foreach (var syncItem in AvailableSyncs)
+        {
+            // Check if already in queue
+            if (DownloadQueue.Any(q => q.GameAppId == syncItem.RemoteGame.AppId))
+                continue;
+
+            var queueItem = new DownloadQueueItem
+            {
+                Type = DownloadQueueItemType.Update,
+                GameName = syncItem.RemoteGame.Name,
+                GameAppId = syncItem.RemoteGame.AppId,
+                SourcePeerName = syncItem.RemotePeer.DisplayName,
+                TotalBytes = syncItem.RemoteGame.SizeOnDisk,
+                DownloadedBytes = 0,
+                Status = DownloadQueueStatus.Queued,
+                Progress = 0,
+                SyncInfo = syncItem
+            };
+
+            DownloadQueue.Add(queueItem);
+            addedCount++;
+        }
+
+        StatusMessage = $"Added {addedCount} update(s) to download queue";
+        AddLog($"Added {addedCount} updates to queue", LogMessageType.Info);
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Adds all incomplete transfers to the download queue
+    /// </summary>
+    [RelayCommand]
+    private void AddAllIncompleteToQueue()
+    {
+        if (IncompleteTransfers.Count == 0)
+        {
+            StatusMessage = "No incomplete transfers to add to queue";
+            return;
+        }
+
+        var addedCount = 0;
+        foreach (var transfer in IncompleteTransfers)
+        {
+            // Check if already in queue
+            if (DownloadQueue.Any(q => q.GameAppId == transfer.GameAppId))
+                continue;
+
+            var queueItem = new DownloadQueueItem
+            {
+                Type = DownloadQueueItemType.Incomplete,
+                GameName = transfer.GameName,
+                GameAppId = transfer.GameAppId,
+                SourcePeerName = transfer.SourcePeerName,
+                TotalBytes = transfer.TotalBytes,
+                DownloadedBytes = transfer.TransferredBytes,
+                Status = DownloadQueueStatus.Queued,
+                Progress = transfer.ProgressPercent,
+                TransferState = transfer
+            };
+
+            DownloadQueue.Add(queueItem);
+            addedCount++;
+        }
+
+        StatusMessage = $"Added {addedCount} incomplete transfer(s) to download queue";
+        AddLog($"Added {addedCount} incomplete transfers to queue", LogMessageType.Info);
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Moves a queue item up in the list
+    /// </summary>
+    [RelayCommand]
+    private void MoveQueueItemUp(DownloadQueueItem item)
+    {
+        var index = DownloadQueue.IndexOf(item);
+        if (index > 0 && item.Status == DownloadQueueStatus.Queued)
+        {
+            DownloadQueue.Move(index, index - 1);
+            AddLog($"Moved '{item.GameName}' up in queue", LogMessageType.Info);
+        }
+    }
+
+    /// <summary>
+    /// Moves a queue item down in the list
+    /// </summary>
+    [RelayCommand]
+    private void MoveQueueItemDown(DownloadQueueItem item)
+    {
+        var index = DownloadQueue.IndexOf(item);
+        if (index < DownloadQueue.Count - 1 && item.Status == DownloadQueueStatus.Queued)
+        {
+            DownloadQueue.Move(index, index + 1);
+            AddLog($"Moved '{item.GameName}' down in queue", LogMessageType.Info);
+        }
+    }
+
+    /// <summary>
+    /// Removes a specific item from the queue
+    /// </summary>
+    [RelayCommand]
+    private void RemoveFromQueue(DownloadQueueItem item)
+    {
+        if (item.Status == DownloadQueueStatus.Downloading)
+        {
+            StatusMessage = "Cannot remove an active download. Pause it first.";
+            return;
+        }
+
+        DownloadQueue.Remove(item);
+        AddLog($"Removed '{item.GameName}' from queue", LogMessageType.Info);
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Clears all queued items (not active or completed)
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanClearQueue))]
+    private void ClearQueue()
+    {
+        var queuedItems = DownloadQueue.Where(q => q.Status == DownloadQueueStatus.Queued).ToList();
+        
+        foreach (var item in queuedItems)
+        {
+            DownloadQueue.Remove(item);
+        }
+
+        AddLog($"Cleared {queuedItems.Count} queued item(s)", LogMessageType.Info);
+        StatusMessage = $"Cleared {queuedItems.Count} items from queue";
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanClearQueue() => DownloadQueue.Any(q => q.Status == DownloadQueueStatus.Queued);
+
+    /// <summary>
+    /// Starts processing the download queue
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanStartQueue))]
+    private async Task StartQueueAsync()
+    {
+        if (IsQueueProcessing || IsTransferring)
+            return;
+
+        IsQueueProcessing = true;
+        AddLog("Starting download queue processing", LogMessageType.Info);
+        StatusMessage = "Processing download queue...";
+
+        await ProcessDownloadQueueAsync();
+    }
+
+    private bool CanStartQueue() => !IsQueueProcessing && DownloadQueue.Any(q => q.Status == DownloadQueueStatus.Queued);
+
+    /// <summary>
+    /// Pauses queue processing
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanPauseQueue))]
+    private void PauseQueue()
+    {
+        if (!IsQueueProcessing)
+            return;
+
+        IsQueueProcessing = false;
+        
+        if (IsTransferring)
+        {
+            _fileTransferService.PauseTransfer();
+        }
+
+        AddLog("Download queue paused", LogMessageType.Warning);
+        StatusMessage = "Download queue paused";
+    }
+
+    private bool CanPauseQueue() => IsQueueProcessing;
+
+    /// <summary>
+    /// Auto-resumes downloads on startup if enabled in settings
+    /// </summary>
+    private async Task AutoResumeDownloadsOnStartupAsync()
+    {
+        // Wait a bit for the UI to initialize
+        await Task.Delay(2000);
+
+        // Check if we have any incomplete transfers
+        await ScanIncompleteTransfersAsync();
+
+        if (IncompleteTransfers.Count == 0)
+            return;
+
+        AddLog($"Auto-resume: Found {IncompleteTransfers.Count} incomplete transfer(s)", LogMessageType.Info);
+
+        // Check if network is active
+        if (!IsNetworkActive)
+        {
+            AddLog("Auto-resume: Starting network...", LogMessageType.Info);
+            await StartNetworkAsync();
+            
+            // Wait for network to start
+            await Task.Delay(2000);
+        }
+
+        if (!IsNetworkActive)
+        {
+            AddLog("Auto-resume: Network failed to start", LogMessageType.Warning);
+            return;
+        }
+
+        // Add all incomplete transfers to queue
+        AddAllIncompleteToQueueCommand.Execute(null);
+
+        // Wait for peers to be discovered
+        if (NetworkPeers.Count == 0)
+        {
+            AddLog("Auto-resume: Waiting for peers...", LogMessageType.Info);
+            await Task.Delay(5000);
+        }
+
+        if (NetworkPeers.Count == 0)
+        {
+            AddLog("Auto-resume: No peers found, queue will wait", LogMessageType.Warning);
+        }
+
+        // Start the queue
+        if (DownloadQueue.Count > 0)
+        {
+            AddLog("Auto-resume: Starting download queue", LogMessageType.Info);
+            await StartQueueAsync();
+        }
+    }
+
+    /// <summary>
+    /// Processes the download queue sequentially
+    /// </summary>
+    private async Task ProcessDownloadQueueAsync()
+    {
+        while (IsQueueProcessing)
+        {
+            // Get the next queued item
+            var nextItem = DownloadQueue.FirstOrDefault(q => q.Status == DownloadQueueStatus.Queued);
+            
+            if (nextItem == null)
+            {
+                // No more items to process
+                IsQueueProcessing = false;
+                AddLog("Download queue completed", LogMessageType.Success);
+                StatusMessage = "All queued downloads completed";
+                break;
+            }
+
+            CurrentQueueItem = nextItem;
+            nextItem.Status = DownloadQueueStatus.Downloading;
+
+            AddLog($"Starting queued download: {nextItem.GameName}", LogMessageType.Transfer);
+
+            bool success = false;
+
+            try
+            {
+                IsTransferring = true;
+                CurrentTransferGameName = nextItem.GameName;
+
+                if (nextItem.Type == DownloadQueueItemType.Update && nextItem.SyncInfo != null)
+                {
+                    // Process update
+                    var syncItem = nextItem.SyncInfo;
+                    
+                    if (syncItem.IsNewDownload)
+                    {
+                        var targetPath = GetTargetPathForNewGame(syncItem.RemoteGame);
+                        success = await _fileTransferService.RequestNewGameDownloadAsync(
+                            syncItem.RemotePeer,
+                            syncItem.RemoteGame,
+                            targetPath);
+                    }
+                    else if (syncItem.LocalGame != null)
+                    {
+                        success = await _fileTransferService.RequestGameTransferAsync(
+                            syncItem.RemotePeer,
+                            syncItem.RemoteGame,
+                            syncItem.LocalGame);
+                    }
+                }
+                else if (nextItem.Type == DownloadQueueItemType.Incomplete && nextItem.TransferState != null)
+                {
+                    // Process incomplete transfer
+                    var peer = NetworkPeers.FirstOrDefault(p => 
+                        p.Games.Any(g => g.AppId == nextItem.TransferState.GameAppId));
+
+                    if (peer == null)
+                    {
+                        // Try to connect to the original peer
+                        var connected = await _networkService.ConnectToPeerByIpAsync(nextItem.TransferState.SourcePeerIp);
+                        if (connected)
+                        {
+                            peer = NetworkPeers.FirstOrDefault(p => p.IpAddress == nextItem.TransferState.SourcePeerIp);
+                        }
+                    }
+
+                    if (peer != null)
+                    {
+                        success = await _fileTransferService.ResumeTransferAsync(nextItem.TransferState, peer);
+                        
+                        if (success)
+                        {
+                            // Remove from incomplete transfers
+                            var existingTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == nextItem.GameAppId);
+                            if (existingTransfer != null)
+                            {
+                                IncompleteTransfers.Remove(existingTransfer);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        AddLog($"Cannot find peer for {nextItem.GameName}", LogMessageType.Error);
+                    }
+                }
+
+                nextItem.Status = success ? DownloadQueueStatus.Completed : DownloadQueueStatus.Failed;
+
+                if (success)
+                {
+                    nextItem.Progress = 100;
+                    nextItem.DownloadedBytes = nextItem.TotalBytes;
+                }
+            }
+            catch (Exception ex)
+            {
+                nextItem.Status = DownloadQueueStatus.Failed;
+                AddLog($"Queue download failed: {nextItem.GameName} - {ex.Message}", LogMessageType.Error);
+            }
+            finally
+            {
+                IsTransferring = false;
+                CurrentTransferGameName = string.Empty;
+                CurrentQueueItem = null;
+            }
+
+            // Wait a bit before next download
+            await Task.Delay(2000);
+
+            // Check if we should stop
+            if (!IsQueueProcessing)
+                break;
+        }
+
+        // Refresh game list after queue completes
+        if (DownloadQueue.Any(q => q.Status == DownloadQueueStatus.Completed))
+        {
+            await ScanLocalGamesAsync();
+        }
+
+        StartQueueCommand.NotifyCanExecuteChanged();
+        PauseQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    #endregion
 
     // Helper methods for showing dialogs (cross-platform)
     private async Task ShowMessageAsync(string title, string message)

@@ -16,6 +16,7 @@ public partial class SettingsWindow : Window
     
     private CheckBox? _autoStartNetworkCheckBox;
     private CheckBox? _autoUpdateGamesCheckBox;
+    private CheckBox? _autoResumeDownloadsCheckBox;
     private NumericUpDown? _updateIntervalNumeric;
     private CheckBox? _startWithWindowsCheckBox;
     private CheckBox? _minimizeToTrayCheckBox;
@@ -43,6 +44,7 @@ public partial class SettingsWindow : Window
         // Get references to controls
         _autoStartNetworkCheckBox = this.FindControl<CheckBox>("AutoStartNetworkCheckBox");
         _autoUpdateGamesCheckBox = this.FindControl<CheckBox>("AutoUpdateGamesCheckBox");
+        _autoResumeDownloadsCheckBox = this.FindControl<CheckBox>("AutoResumeDownloadsCheckBox");
         _updateIntervalNumeric = this.FindControl<NumericUpDown>("UpdateIntervalNumeric");
         _startWithWindowsCheckBox = this.FindControl<CheckBox>("StartWithWindowsCheckBox");
         _minimizeToTrayCheckBox = this.FindControl<CheckBox>("MinimizeToTrayCheckBox");
@@ -57,6 +59,9 @@ public partial class SettingsWindow : Window
         
         if (_autoUpdateGamesCheckBox != null)
             _autoUpdateGamesCheckBox.IsChecked = _settings.AutoUpdateGames;
+        
+        if (_autoResumeDownloadsCheckBox != null)
+            _autoResumeDownloadsCheckBox.IsChecked = _settings.AutoResumeDownloads;
         
         if (_updateIntervalNumeric != null)
             _updateIntervalNumeric.Value = _settings.AutoUpdateCheckInterval;
@@ -108,8 +113,11 @@ public partial class SettingsWindow : Window
         if (_autoUpdateGamesCheckBox != null)
             _settings.AutoUpdateGames = _autoUpdateGamesCheckBox.IsChecked ?? false;
         
+        if (_autoResumeDownloadsCheckBox != null)
+            _settings.AutoResumeDownloads = _autoResumeDownloadsCheckBox.IsChecked ?? false;
+        
         if (_updateIntervalNumeric != null)
-            _settings.AutoUpdateCheckInterval = (int)_updateIntervalNumeric.Value;
+            _settings.AutoUpdateCheckInterval = (int)(_updateIntervalNumeric.Value ?? 30);
         
         if (_startWithWindowsCheckBox != null)
             _settings.StartWithWindows = _startWithWindowsCheckBox.IsChecked ?? false;
@@ -139,6 +147,9 @@ public partial class SettingsWindow : Window
         
         if (_autoUpdateGamesCheckBox != null)
             _autoUpdateGamesCheckBox.IsChecked = false;
+        
+        if (_autoResumeDownloadsCheckBox != null)
+            _autoResumeDownloadsCheckBox.IsChecked = false;
         
         if (_updateIntervalNumeric != null)
             _updateIntervalNumeric.Value = 30;

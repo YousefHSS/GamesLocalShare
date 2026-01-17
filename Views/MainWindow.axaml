@@ -346,12 +346,21 @@
             <Border Grid.Column="4" Classes="panel">
                 <Grid RowDefinitions="Auto,*,Auto">
                     <Border Grid.Row="0" Classes="panel-header" Background="{DynamicResource AccentBrush3}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="🔄" FontSize="16" VerticalAlignment="Center"/>
-                            <TextBlock Text="Updates Available" Classes="header"/>
-                            <TextBlock Text="{Binding AvailableSyncs.Count, StringFormat='({0})'}" 
-                                       FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="🔄" FontSize="16" VerticalAlignment="Center"/>
+                                <TextBlock Text="Updates Available" Classes="header"/>
+                                <TextBlock Text="{Binding AvailableSyncs.Count, StringFormat='({0})'}" 
+                                           FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Button HorizontalAlignment="Right" 
+                                    Background="Transparent" 
+                                    Padding="8,4"
+                                    Command="{Binding AddAllUpdatesToQueueCommand}"
+                                    ToolTip.Tip="Add all updates to download queue">
+                                <TextBlock Text="+ Queue All" FontSize="10" Foreground="White"/>
+                            </Button>
+                        </Grid>
                     </Border>
 
                     <ListBox Grid.Row="1" 
@@ -458,59 +467,175 @@
                 </Grid>
             </Border>
 
-            <!-- Panel 4: Incomplete Downloads -->
+            <!-- Panel 4: Incomplete Downloads & Download Queue -->
             <Border Grid.Column="6" Classes="panel">
-                <Grid RowDefinitions="Auto,*,Auto">
+                <Grid RowDefinitions="Auto,*,Auto,Auto,*,Auto">
+                    <!-- Incomplete Transfers Header -->
                     <Border Grid.Row="0" Classes="panel-header" Background="{DynamicResource ErrorBrush}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="⏸️" FontSize="16" VerticalAlignment="Center"/>
-                            <TextBlock Text="Incomplete" Classes="header"/>
-                            <TextBlock Text="{Binding IncompleteTransfers.Count, StringFormat='({0})'}" 
-                                       FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="⏸️" FontSize="16" VerticalAlignment="Center"/>
+                                <TextBlock Text="Incomplete" Classes="header"/>
+                                <TextBlock Text="{Binding IncompleteTransfers.Count, StringFormat='({0})'}" 
+                                           FontSize="13" Foreground="White" Opacity="0.8" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Button HorizontalAlignment="Right" 
+                                    Background="Transparent" 
+                                    Padding="8,4"
+                                    Command="{Binding AddAllIncompleteToQueueCommand}"
+                                    ToolTip.Tip="Add all incomplete transfers to queue">
+                                <TextBlock Text="+ Queue All" FontSize="10" Foreground="White"/>
+                            </Button>
+                        </Grid>
                     </Border>
 
+                    <!-- Incomplete Transfers List -->
                     <ListBox Grid.Row="1" 
                              ItemsSource="{Binding IncompleteTransfers}" 
                              SelectedItem="{Binding SelectedIncompleteTransfer}"
                              Background="Transparent"
-                             BorderThickness="0">
+                             BorderThickness="0"
+                             MaxHeight="120">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border Classes="game-item">
                                     <StackPanel Spacing="4">
-                                        <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="12" 
+                                        <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="11" 
                                                    Foreground="White" TextTrimming="CharacterEllipsis"/>
-                                        <ProgressBar Value="{Binding ProgressPercent}" Minimum="0" Maximum="100" Height="6"/>
-                                        <Grid>
-                                            <TextBlock Text="{Binding FormattedProgress}" FontSize="10" Foreground="#9CA3AF"/>
-                                            <TextBlock Text="{Binding SourcePeerName, StringFormat='From: {0}'}" 
-                                                       FontSize="10" Foreground="#6B7280" HorizontalAlignment="Right"/>
-                                        </Grid>
+                                        <ProgressBar Value="{Binding ProgressPercent}" Minimum="0" Maximum="100" Height="4"/>
+                                        <TextBlock Text="{Binding FormattedProgress}" FontSize="9" Foreground="#9CA3AF"/>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <!-- Empty State -->
+                    <!-- Empty State for Incomplete -->
                     <StackPanel Grid.Row="1" 
                                 HorizontalAlignment="Center" 
                                 VerticalAlignment="Center"
                                 IsVisible="{Binding IncompleteTransfers.Count, Converter={StaticResource ZeroToVis}}"
-                                Spacing="4">
-                        <TextBlock Text="No incomplete downloads" FontSize="12" Foreground="#6B7280" 
+                                Spacing="2">
+                        <TextBlock Text="No incomplete downloads" FontSize="10" Foreground="#6B7280" 
                                    HorizontalAlignment="Center"/>
-                        <TextBlock Text="Interrupted downloads appear here" FontSize="10" 
+                    </StackPanel>
+
+                    <Border Grid.Row="2" Padding="4" Background="#252526">
+                        <Button Command="{Binding ResumeTransferCommand}" 
+                                Classes="danger"
+                                Padding="8,4"
+                                HorizontalAlignment="Stretch">
+                            <TextBlock Text="Resume Selected" FontSize="10" FontWeight="SemiBold" Foreground="White"/>
+                        </Button>
+                    </Border>
+
+                    <!-- Download Queue Header -->
+                    <Border Grid.Row="3" Background="#0EA5E9" Padding="8">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="📥" FontSize="14" VerticalAlignment="Center"/>
+                                <TextBlock Text="Download Queue" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                <TextBlock Text="{Binding DownloadQueue.Count, StringFormat='({0})'}" 
+                                           FontSize="11" Foreground="White" Opacity="0.8"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                                <Button Background="Transparent" Padding="4,2"
+                                        Command="{Binding ClearQueueCommand}"
+                                        ToolTip.Tip="Clear queued items">
+                                    <TextBlock Text="Clear" FontSize="9" Foreground="White"/>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Download Queue List -->
+                    <ListBox Grid.Row="4" 
+                             ItemsSource="{Binding DownloadQueue}" 
+                             Background="Transparent"
+                             BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="game-item" Padding="6">
+                                    <Grid ColumnDefinitions="Auto,*,Auto">
+                                        <!-- Type Icon & Status -->
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0">
+                                            <TextBlock Text="{Binding TypeIcon}" FontSize="12"/>
+                                        </StackPanel>
+                                        
+                                        <!-- Game Info -->
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock Text="{Binding GameName}" FontWeight="SemiBold" FontSize="10" 
+                                                       Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                            <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="100" Height="3"
+                                                         IsVisible="{Binding Status, Converter={x:Static conv:EnumToBoolConverter.Instance}, ConverterParameter=Downloading}"/>
+                                            <TextBlock Text="{Binding StatusText}" FontSize="8" 
+                                                       Foreground="{Binding StatusColor, Converter={StaticResource StringToColorBrush}}"/>
+                                        </StackPanel>
+                                        
+                                        <!-- Move/Remove Buttons -->
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                                            <Button Background="Transparent" Padding="2" 
+                                                    Command="{Binding $parent[Window].DataContext.MoveQueueItemUpCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="Move up">
+                                                <TextBlock Text="▲" FontSize="8" Foreground="#6B7280"/>
+                                            </Button>
+                                            <Button Background="Transparent" Padding="2"
+                                                    Command="{Binding $parent[Window].DataContext.MoveQueueItemDownCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="Move down">
+                                                <TextBlock Text="▼" FontSize="8" Foreground="#6B7280"/>
+                                            </Button>
+                                            <Button Background="Transparent" Padding="2"
+                                                    Command="{Binding $parent[Window].DataContext.RemoveFromQueueCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    ToolTip.Tip="Remove from queue">
+                                                <TextBlock Text="✕" FontSize="8" Foreground="#EF4444"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- Empty State for Queue -->
+                    <StackPanel Grid.Row="4" 
+                                HorizontalAlignment="Center" 
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding DownloadQueue.Count, Converter={StaticResource ZeroToVis}}"
+                                Spacing="2">
+                        <TextBlock Text="Queue is empty" FontSize="10" Foreground="#6B7280" 
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock Text="Use '+ Queue All' buttons above" FontSize="8" 
                                    Foreground="#4B5563" HorizontalAlignment="Center"/>
                     </StackPanel>
 
-                    <Border Grid.Row="2" Padding="8" Background="#252526">
-                        <Button Command="{Binding ResumeTransferCommand}" 
-                                Classes="danger"
-                                HorizontalAlignment="Stretch">
-                            <TextBlock Text="Resume Download" FontWeight="SemiBold" Foreground="White"/>
-                        </Button>
+                    <!-- Queue Control Buttons -->
+                    <Border Grid.Row="5" Padding="8" Background="#252526">
+                        <Grid ColumnDefinitions="*,*">
+                            <Button Grid.Column="0" 
+                                    Command="{Binding StartQueueCommand}"
+                                    Background="#0EA5E9"
+                                    Padding="8,6" Margin="0,0,4,0"
+                                    HorizontalAlignment="Stretch">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <TextBlock Text="▶" FontSize="10" Foreground="White"/>
+                                    <TextBlock Text="Start Queue" FontSize="10" FontWeight="SemiBold" Foreground="White"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" 
+                                    Command="{Binding PauseQueueCommand}"
+                                    Background="{DynamicResource WarningBrush}"
+                                    Padding="8,6" Margin="4,0,0,0"
+                                    HorizontalAlignment="Stretch"
+                                    IsVisible="{Binding IsQueueProcessing}">
+                                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                    <TextBlock Text="⏸" FontSize="10" Foreground="White"/>
+                                    <TextBlock Text="Pause" FontSize="10" FontWeight="SemiBold" Foreground="White"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
                     </Border>
                 </Grid>
             </Border>

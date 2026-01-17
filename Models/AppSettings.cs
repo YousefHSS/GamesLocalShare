@@ -44,6 +44,11 @@ public class AppSettings
     public int AutoUpdateCheckInterval { get; set; } = 30;
 
     /// <summary>
+    /// Whether to automatically resume all pending downloads on startup
+    /// </summary>
+    public bool AutoResumeDownloads { get; set; }
+
+    /// <summary>
     /// Loads settings from disk, or returns defaults if file doesn't exist
     /// </summary>
     public static AppSettings Load()

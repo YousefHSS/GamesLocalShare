@@ -76,6 +76,11 @@
                                   Foreground="White"
                                   ToolTip.Tip="When enabled, the app will automatically download updates for your games when newer versions are found on the network"/>
                         
+                        <CheckBox x:Name="AutoResumeDownloadsCheckBox"
+                                  Content="Auto-resume incomplete downloads on startup"
+                                  Foreground="White"
+                                  ToolTip.Tip="When enabled, incomplete downloads will automatically be added to the queue and resumed when the app starts"/>
+                        
                         <StackPanel Spacing="8">
                             <TextBlock Text="Check for updates every:" 
                                        Foreground="White" 

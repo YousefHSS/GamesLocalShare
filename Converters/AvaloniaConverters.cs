@@ -270,9 +270,34 @@ public class BoolToHideShowIconConverter : IValueConverter
     {
         if (value is bool isHidden)
         {
-            return isHidden ? "??" : "??";
+            return isHidden ? "??" : "?????";
         }
-        return "??";
+        return "?????";
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+/// <summary>
+/// Converts enum value to boolean based on parameter
+/// Usage: {Binding Status, Converter={x:Static conv:EnumToBoolConverter.Instance}, ConverterParameter=Downloading}
+/// </summary>
+public class EnumToBoolConverter : IValueConverter
+{
+    public static readonly EnumToBoolConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value == null || parameter == null)
+            return false;
+
+        var enumValue = value.ToString();
+        var targetValue = parameter.ToString();
+
+        return string.Equals(enumValue, targetValue, StringComparison.OrdinalIgnoreCase);
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
