@@ -620,14 +620,38 @@ public class FileTransferService : IDisposable
                 var avgSpeedMbps = avgSpeed * 8 / 1_000_000;
                 System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred / 1024 / 1024}MB, avgSpeed={avgSpeed / 1024 / 1024:F1}MB/s ({avgSpeedMbps:F1} Mbps)");
 
-                TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                if (success)
                 {
-                    GameAppId = remoteGame.AppId,
-                    GameName = remoteGame.Name,
-                    Success = success,
-                    TotalBytesTransferred = totalTransferred,
-                    IsNewDownload = isNewDownload
-                });
+                    TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                    {
+                        GameAppId = remoteGame.AppId,
+                        GameName = remoteGame.Name,
+                        Success = true,
+                        TotalBytesTransferred = totalTransferred,
+                        IsNewDownload = isNewDownload
+                    });
+                }
+                else if (_isPaused)
+                {
+                    TransferStopped?.Invoke(this, new TransferStoppedEventArgs
+                    {
+                        GameName = remoteGame.Name,
+                        IsPaused = true,
+                        TransferredBytes = totalTransferred
+                    });
+                }
+                else
+                {
+                    TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                    {
+                        GameAppId = remoteGame.AppId,
+                        GameName = remoteGame.Name,
+                        Success = false,
+                        TotalBytesTransferred = totalTransferred,
+                        ErrorMessage = "Transfer failed",
+                        IsNewDownload = isNewDownload
+                    });
+                }
 
                 _currentTransferState = null;
                 return success;
@@ -636,6 +660,29 @@ public class FileTransferService : IDisposable
             {
                 System.Diagnostics.Debug.WriteLine("Transfer cancelled (OperationCanceledException)");
                 _currentTransferState?.Save();
+                
+                if (_isPaused)
+                {
+                    TransferStopped?.Invoke(this, new TransferStoppedEventArgs
+                    {
+                        GameName = remoteGame.Name,
+                        IsPaused = true,
+                        TransferredBytes = _currentTransferState?.TransferredBytes ?? 0
+                    });
+                }
+                else
+                {
+                    TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                    {
+                        GameAppId = remoteGame.AppId,
+                        GameName = remoteGame.Name,
+                        Success = false,
+                        ErrorMessage = "Transfer cancelled",
+                        IsNewDownload = isNewDownload
+                    });
+                }
+                
+                _currentTransferState = null;
                 return false;
             }
             catch (SocketException ex)

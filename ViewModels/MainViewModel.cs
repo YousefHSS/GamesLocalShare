@@ -1573,7 +1573,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void MoveQueueItemUp(DownloadQueueItem item)
     {
         var index = DownloadQueue.IndexOf(item);
-        if (index > 0 && item.Status == DownloadQueueStatus.Queued)
+        if (index > 0 && item.Status != DownloadQueueStatus.Downloading)
         {
             DownloadQueue.Move(index, index - 1);
             AddLog($"Moved '{item.GameName}' up in queue", LogMessageType.Info);
@@ -1587,7 +1587,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void MoveQueueItemDown(DownloadQueueItem item)
     {
         var index = DownloadQueue.IndexOf(item);
-        if (index < DownloadQueue.Count - 1 && item.Status == DownloadQueueStatus.Queued)
+        if (index < DownloadQueue.Count - 1 && item.Status != DownloadQueueStatus.Downloading)
         {
             DownloadQueue.Move(index, index + 1);
             AddLog($"Moved '{item.GameName}' down in queue", LogMessageType.Info);
@@ -1620,15 +1620,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ClearQueue()
     {
         AddLog("ClearQueue command executed", LogMessageType.Info);
-        var queuedItems = DownloadQueue.Where(q => q.Status == DownloadQueueStatus.Queued).ToList();
+        var clearableItems = DownloadQueue.Where(q => 
+            q.Status == DownloadQueueStatus.Queued || 
+            q.Status == DownloadQueueStatus.Paused || 
+            q.Status == DownloadQueueStatus.Failed).ToList();
         
-        foreach (var item in queuedItems)
+        foreach (var item in clearableItems)
         {
             DownloadQueue.Remove(item);
         }
 
-        AddLog($"Cleared {queuedItems.Count} queued item(s)", LogMessageType.Info);
-        StatusMessage = $"Cleared {queuedItems.Count} items from queue";
+        AddLog($"Cleared {clearableItems.Count} item(s) from queue", LogMessageType.Info);
+        StatusMessage = $"Cleared {clearableItems.Count} items from queue";
         
         StartQueueCommand.NotifyCanExecuteChanged();
         ClearQueueCommand.NotifyCanExecuteChanged();
@@ -1651,7 +1654,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await ProcessDownloadQueueAsync();
     }
 
-    private bool CanStartQueue() => !IsQueueProcessing && DownloadQueue.Any(q => q.Status == DownloadQueueStatus.Queued);
+    private bool CanStartQueue() => !IsQueueProcessing && DownloadQueue.Any(q => 
+        q.Status == DownloadQueueStatus.Queued || 
+        q.Status == DownloadQueueStatus.Paused);
 
     /// <summary>
     /// Pauses queue processing
@@ -1771,13 +1776,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         while (IsQueueProcessing)
         {
-            // Only get items that are Queued - don't auto-retry paused or failed items
-            // User must explicitly click "Start Queue" again to retry those
-            var nextItem = DownloadQueue.FirstOrDefault(q => q.Status == DownloadQueueStatus.Queued);
+            // Get the next item that is Queued or Paused
+            var nextItem = DownloadQueue.FirstOrDefault(q => 
+                q.Status == DownloadQueueStatus.Queued || 
+                q.Status == DownloadQueueStatus.Paused);
             
             if (nextItem == null)
             {
-                // No more queued items to process
+                // No more items to process
                 IsQueueProcessing = false;
                 var completedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Completed);
                 var failedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Failed);
