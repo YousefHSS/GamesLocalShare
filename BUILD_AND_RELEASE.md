@@ -16,22 +16,36 @@ Output will be in: `bin\Release\net8.0\win-x64\publish\`
 
 ### 2. Create Installer (Choose One)
 
-#### Option A: Inno Setup (Easiest)
+#### Option A: Inno Setup (Easiest - RECOMMENDED)
 
 1. Download and install [Inno Setup](https://jrsoftware.org/isinfo.php)
 2. Open `installer.iss` in Inno Setup
 3. Click **Build > Compile**
 4. Installer will be created in `installer_output\` folder
 
-#### Option B: WiX Toolset (Real MSI)
+**OR** use the build script:
+```powershell
+.\build-release.ps1 -Version "1.0.0" -BuildInstaller
+```
+
+#### Option B: WiX Toolset (Advanced - Real MSI)
+
+**Note**: WiX requires manually listing all files or using heat.exe to harvest them. For simplicity, use Inno Setup instead.
+
+If you still want to use WiX:
 
 ```powershell
 # Install WiX v4
 dotnet tool install --global wix
 
-# Build MSI
-wix build installer.wxs -out GamesLocalShare.msi
+# First, harvest all files from publish folder
+wix heat dir bin\Release\net8.0\win-x64\publish -gg -sfrag -srd -sreg -dr INSTALLFOLDER -cg PublishFiles -out publish-files.wxs
+
+# Then build MSI
+wix build installer.wxs publish-files.wxs -out GamesLocalShare.msi
 ```
+
+**Recommended**: Just use Inno Setup - it's simpler and creates a professional installer.
 
 ### 3. Create GitHub Release
 
@@ -163,8 +177,20 @@ GitHub has a 2GB file limit per release. If your self-contained build is too lar
 
 ### Installer won't build
 
-- **Inno Setup**: Make sure file paths in `installer.iss` match your publish output
-- **WiX**: Install WiX v4: `dotnet tool install --global wix`
+- **Inno Setup**: 
+  - Make sure file paths in `installer.iss` match your publish output
+  - Check that `bin\Release\net8.0\win-x64\publish\` exists
+  - Run `dotnet publish -c Release -r win-x64` first if folder is missing
+  
+- **WiX**: 
+  - WiX v4 requires explicit file listing (wildcards don't work)
+  - Use `heat.exe` to harvest files automatically
+  - **Easier option**: Use Inno Setup instead
+  - Install WiX v4: `dotnet tool install --global wix`
+  
+- **Common issue**: "Source file not found"
+  - Make sure you've built the release first: `dotnet publish -c Release -r win-x64`
+  - Check that the path in the installer script matches your actual publish path
 
 ### .NET 8 not found
 

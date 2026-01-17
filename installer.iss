@@ -2,8 +2,8 @@
 ; Download Inno Setup from: https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Games Local Share"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "Your Name"
+#define MyAppVersion "1.3.0"
+#define MyAppPublisher "YousefHSS"
 #define MyAppURL "https://github.com/YousefHSS/GamesLocalShare"
 #define MyAppExeName "GamesLocalShare.exe"
 
@@ -18,7 +18,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-LicenseFile=LICENSE
+LicenseFile=LICENSE.txt
 OutputDir=installer_output
 OutputBaseFilename=GamesLocalShare-Setup-{#MyAppVersion}
 SetupIconFile=Icons\app.ico

@@ -1,17 +1,29 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GamesLocalShare.Models;
+
+/// <summary>
+/// JSON serialization context to support trimming/AOT
+/// </summary>
+[JsonSerializable(typeof(AppSettings))]
+[JsonSourceGenerationOptions(WriteIndented = true)]
+internal partial class AppSettingsJsonContext : JsonSerializerContext
+{
+}
 
 /// <summary>
 /// Application settings that persist across sessions
 /// </summary>
 public class AppSettings
 {
-    private static readonly string SettingsPath = Path.Combine(
+    private static readonly string SettingsFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "GamesLocalShare",
-        "settings.json");
+        "GamesLocalShare");
+    
+    private static readonly string SettingsPath = Path.Combine(SettingsFolder, "settings.json");
+    private static readonly string SettingsBackupPath = Path.Combine(SettingsFolder, "settings.txt");
 
     private static AppSettings? _instance;
     private static readonly object _lock = new object();
@@ -61,43 +73,61 @@ public class AppSettings
         {
             if (_instance != null)
             {
-                System.Diagnostics.Debug.WriteLine("Returning cached settings instance");
                 return _instance;
             }
 
             try
             {
-                System.Diagnostics.Debug.WriteLine($"Loading settings from: {SettingsPath}");
-                
+                // Ensure directory exists
+                if (!Directory.Exists(SettingsFolder))
+                {
+                    Directory.CreateDirectory(SettingsFolder);
+                }
+
+                // Try to load from JSON first
                 if (File.Exists(SettingsPath))
                 {
-                    var json = File.ReadAllText(SettingsPath);
-                    System.Diagnostics.Debug.WriteLine($"? Settings file found, content: {json}");
-                    
-                    var settings = JsonSerializer.Deserialize<AppSettings>(json);
-                    if (settings != null)
+                    try
                     {
-                        System.Diagnostics.Debug.WriteLine($"? Settings loaded successfully");
-                        _instance = settings;
-                        return _instance;
+                        var json = File.ReadAllText(SettingsPath);
+                        var settings = JsonSerializer.Deserialize(json, AppSettingsJsonContext.Default.AppSettings);
+                        if (settings != null)
+                        {
+                            _instance = settings;
+                            return _instance;
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"? Settings deserialized to null, using defaults");
+                        System.Diagnostics.Debug.WriteLine($"JSON load failed: {ex.Message}");
                     }
                 }
-                else
+
+                // Fallback: try to load from text file
+                if (File.Exists(SettingsBackupPath))
                 {
-                    System.Diagnostics.Debug.WriteLine($"? Settings file not found, using defaults");
+                    try
+                    {
+                        var settings = LoadFromTextFile();
+                        if (settings != null)
+                        {
+                            _instance = settings;
+                            // Re-save as JSON
+                            _instance.Save();
+                            return _instance;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Text file load failed: {ex.Message}");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"? ERROR loading settings: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"  Stack: {ex.StackTrace}");
+                System.Diagnostics.Debug.WriteLine($"Settings load error: {ex.Message}");
             }
 
-            System.Diagnostics.Debug.WriteLine($"Creating new default settings instance");
             _instance = new AppSettings();
             return _instance;
         }
@@ -116,44 +146,108 @@ public class AppSettings
     }
 
     /// <summary>
-    /// Saves settings to disk
+    /// Saves settings to disk (both JSON and text backup)
     /// </summary>
     public void Save()
     {
         try
         {
-            var directory = Path.GetDirectoryName(SettingsPath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            // Ensure directory exists
+            if (!Directory.Exists(SettingsFolder))
             {
-                Directory.CreateDirectory(directory);
-                System.Diagnostics.Debug.WriteLine($"Created settings directory: {directory}");
+                Directory.CreateDirectory(SettingsFolder);
             }
 
-            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions 
-            { 
-                WriteIndented = true 
-            });
+            // Save as JSON using source-generated serializer
+            var json = JsonSerializer.Serialize(this, AppSettingsJsonContext.Default.AppSettings);
             File.WriteAllText(SettingsPath, json);
-            System.Diagnostics.Debug.WriteLine($"? Settings saved successfully to: {SettingsPath}");
-            System.Diagnostics.Debug.WriteLine($"  Settings content: {json}");
+
+            // Also save as plain text backup (guaranteed to work with trimming)
+            SaveToTextFile();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"? ERROR saving settings to {SettingsPath}");
-            System.Diagnostics.Debug.WriteLine($"  Exception: {ex.GetType().Name}");
-            System.Diagnostics.Debug.WriteLine($"  Message: {ex.Message}");
-            System.Diagnostics.Debug.WriteLine($"  Stack: {ex.StackTrace}");
+            System.Diagnostics.Debug.WriteLine($"Settings save error: {ex.Message}");
             
-            // Try to get more details about the error
-            if (ex is UnauthorizedAccessException)
+            // Try text-only save as fallback
+            try
             {
-                System.Diagnostics.Debug.WriteLine($"  ? Access denied - check folder permissions");
+                SaveToTextFile();
             }
-            else if (ex is IOException)
+            catch (Exception ex2)
             {
-                System.Diagnostics.Debug.WriteLine($"  ? IO error - file may be locked");
+                System.Diagnostics.Debug.WriteLine($"Text backup save also failed: {ex2.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Saves settings to a plain text file (fallback for trimmed builds)
+    /// </summary>
+    private void SaveToTextFile()
+    {
+        var lines = new List<string>
+        {
+            $"StartWithWindows={StartWithWindows}",
+            $"AutoUpdateGames={AutoUpdateGames}",
+            $"MinimizeToTray={MinimizeToTray}",
+            $"AutoStartNetwork={AutoStartNetwork}",
+            $"AutoUpdateCheckInterval={AutoUpdateCheckInterval}",
+            $"AutoResumeDownloads={AutoResumeDownloads}",
+            $"HiddenGameIds={string.Join(",", HiddenGameIds)}"
+        };
+        File.WriteAllLines(SettingsBackupPath, lines);
+    }
+
+    /// <summary>
+    /// Loads settings from a plain text file
+    /// </summary>
+    private static AppSettings? LoadFromTextFile()
+    {
+        if (!File.Exists(SettingsBackupPath))
+            return null;
+
+        var settings = new AppSettings();
+        var lines = File.ReadAllLines(SettingsBackupPath);
+        
+        foreach (var line in lines)
+        {
+            var parts = line.Split('=', 2);
+            if (parts.Length != 2) continue;
+
+            var key = parts[0].Trim();
+            var value = parts[1].Trim();
+
+            switch (key)
+            {
+                case "StartWithWindows":
+                    settings.StartWithWindows = bool.TryParse(value, out var sw) && sw;
+                    break;
+                case "AutoUpdateGames":
+                    settings.AutoUpdateGames = bool.TryParse(value, out var aug) && aug;
+                    break;
+                case "MinimizeToTray":
+                    settings.MinimizeToTray = bool.TryParse(value, out var mtt) && mtt;
+                    break;
+                case "AutoStartNetwork":
+                    settings.AutoStartNetwork = bool.TryParse(value, out var asn) && asn;
+                    break;
+                case "AutoUpdateCheckInterval":
+                    settings.AutoUpdateCheckInterval = int.TryParse(value, out var auci) ? auci : 30;
+                    break;
+                case "AutoResumeDownloads":
+                    settings.AutoResumeDownloads = bool.TryParse(value, out var ard) && ard;
+                    break;
+                case "HiddenGameIds":
+                    if (!string.IsNullOrEmpty(value))
+                    {
+                        settings.HiddenGameIds = new HashSet<string>(value.Split(',', StringSplitOptions.RemoveEmptyEntries));
+                    }
+                    break;
+            }
+        }
+
+        return settings;
     }
 
     /// <summary>
@@ -181,4 +275,9 @@ public class AppSettings
         HiddenGameIds.Remove(appId);
         Save();
     }
+
+    /// <summary>
+    /// Gets the settings file path (for display in UI)
+    /// </summary>
+    public static string GetSettingsFilePath() => SettingsPath;
 }
