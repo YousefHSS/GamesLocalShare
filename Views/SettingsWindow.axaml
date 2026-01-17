@@ -45,21 +45,13 @@
                         <CheckBox x:Name="StartWithWindowsCheckBox"
                                   Content="Start application with Windows"
                                   Foreground="White"
-                                  IsEnabled="False"
-                                  ToolTip.Tip="Coming soon - Auto-start the application when Windows starts"/>
+                                  ToolTip.Tip="Auto-start the application when Windows starts"/>
                         
                         <CheckBox x:Name="MinimizeToTrayCheckBox"
-                                  Content="Minimize to system tray instead of taskbar"
+                                  Content="Minimize to system tray instead of closing"
                                   Foreground="White"
-                                  IsEnabled="False"
-                                  ToolTip.Tip="Coming soon - Keep app running in system tray"/>
+                                  ToolTip.Tip="When enabled, clicking the X button will minimize to system tray instead of closing the app"/>
                         
-                        <TextBlock Text="Note: Windows startup and system tray features are coming in a future update." 
-                                   FontSize="11" 
-                                   Foreground="#9CA3AF" 
-                                   FontStyle="Italic"
-                                   TextWrapping="Wrap"
-                                   Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
 

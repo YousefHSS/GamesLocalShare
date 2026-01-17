@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using GamesLocalShare.Models;
+using GamesLocalShare.Services;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -67,7 +68,26 @@ public partial class SettingsWindow : Window
             _updateIntervalNumeric.Value = _settings.AutoUpdateCheckInterval;
         
         if (_startWithWindowsCheckBox != null)
-            _startWithWindowsCheckBox.IsChecked = _settings.StartWithWindows;
+        {
+            // Check actual Windows startup state, not just settings
+            if (OperatingSystem.IsWindows())
+            {
+                var actualStartupState = StartupHelper.IsStartupEnabled();
+                _startWithWindowsCheckBox.IsChecked = actualStartupState;
+                
+                // Sync settings if they differ from actual state
+                if (_settings.StartWithWindows != actualStartupState)
+                {
+                    _settings.StartWithWindows = actualStartupState;
+                    _settings.Save();
+                }
+            }
+            else
+            {
+                _startWithWindowsCheckBox.IsChecked = false;
+                _startWithWindowsCheckBox.IsEnabled = false;
+            }
+        }
         
         if (_minimizeToTrayCheckBox != null)
             _minimizeToTrayCheckBox.IsChecked = _settings.MinimizeToTray;
@@ -120,7 +140,20 @@ public partial class SettingsWindow : Window
             _settings.AutoUpdateCheckInterval = (int)(_updateIntervalNumeric.Value ?? 30);
         
         if (_startWithWindowsCheckBox != null)
-            _settings.StartWithWindows = _startWithWindowsCheckBox.IsChecked ?? false;
+        {
+            var startWithWindows = _startWithWindowsCheckBox.IsChecked ?? false;
+            _settings.StartWithWindows = startWithWindows;
+            
+            // Actually register/unregister with Windows startup
+            if (OperatingSystem.IsWindows())
+            {
+                var success = StartupHelper.SetStartupEnabled(startWithWindows);
+                if (!success)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to {(startWithWindows ? "enable" : "disable")} Windows startup");
+                }
+            }
+        }
         
         if (_minimizeToTrayCheckBox != null)
             _settings.MinimizeToTray = _minimizeToTrayCheckBox.IsChecked ?? false;

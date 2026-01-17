@@ -1,16 +1,23 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Data.Core.Plugins;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
+using GamesLocalShare.Models;
 using GamesLocalShare.Views;
 using GamesLocalShare.Services;
 using System.Linq;
 using System;
+using Avalonia.Platform;
 
 namespace GamesLocalShare;
 
 public partial class App : Application
 {
+    private TrayIcon? _trayIcon;
+    private MainWindow? _mainWindow;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -50,10 +57,102 @@ public partial class App : Application
                 }
             }
 
-            desktop.MainWindow = new MainWindow();
+            _mainWindow = new MainWindow();
+            desktop.MainWindow = _mainWindow;
+            
+            // Setup tray icon
+            SetupTrayIcon(desktop);
+            
+            // Handle shutdown to cleanup tray icon
+            desktop.ShutdownRequested += (s, e) =>
+            {
+                _trayIcon?.Dispose();
+            };
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void SetupTrayIcon(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        var settings = AppSettings.Load();
+        
+        // Create tray icon with context menu
+        var trayMenu = new NativeMenu();
+        
+        var showItem = new NativeMenuItem("Show Window");
+        showItem.Click += (s, e) => ShowMainWindow();
+        trayMenu.Add(showItem);
+        
+        trayMenu.Add(new NativeMenuItemSeparator());
+        
+        var exitItem = new NativeMenuItem("Exit");
+        exitItem.Click += (s, e) =>
+        {
+            _mainWindow?.AllowClose();
+            _trayIcon?.Dispose();
+            desktop.Shutdown();
+        };
+        trayMenu.Add(exitItem);
+
+        _trayIcon = new TrayIcon
+        {
+            ToolTipText = "Games Local Share",
+            Menu = trayMenu,
+            IsVisible = true
+        };
+
+        // Load icon from Icons/app.ico
+        try
+        {
+            // Try to load from avares:// first (embedded resource)
+            try
+            {
+                using var stream = AssetLoader.Open(new Uri("avares://GamesLocalShare/Icons/app.ico"));
+                _trayIcon.Icon = new WindowIcon(stream);
+                System.Diagnostics.Debug.WriteLine("Tray icon loaded from avares://");
+            }
+            catch
+            {
+                // Fallback to file path if avares:// doesn't work
+                var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Icons", "app.ico");
+                if (System.IO.File.Exists(iconPath))
+                {
+                    using var stream = System.IO.File.OpenRead(iconPath);
+                    _trayIcon.Icon = new WindowIcon(stream);
+                    System.Diagnostics.Debug.WriteLine($"Tray icon loaded from file: {iconPath}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"Icon file not found at: {iconPath}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to load tray icon: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+        
+        // Add to TrayIcons collection
+        if (TrayIcon.GetIcons(this) is { } icons)
+        {
+            icons.Add(_trayIcon);
+        }
+        
+        // Double-click on tray icon shows window
+        _trayIcon.Clicked += (s, e) => ShowMainWindow();
+    }
+
+    private void ShowMainWindow()
+    {
+        Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (_mainWindow != null)
+            {
+                _mainWindow.RestoreFromTray();
+            }
+        });
     }
 
     private void PromptForFirewallConfiguration()

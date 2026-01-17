@@ -8,7 +8,7 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <ApplicationIcon></ApplicationIcon>
+    <ApplicationIcon>Icons\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
