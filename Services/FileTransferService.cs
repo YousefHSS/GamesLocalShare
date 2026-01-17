@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Collections.ObjectModel;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -35,7 +36,7 @@ public class FileTransferService : IDisposable
     private TransferState? _currentTransferState;
     private bool _isListening;
     private bool _isPaused;
-    private List<GameInfo> _localGames = [];
+    private ObservableCollection<GameInfo> _localGames = [];
     private int _actualListeningPort = PrimaryTransferPort;
 
     /// <summary>
@@ -83,7 +84,7 @@ public class FileTransferService : IDisposable
     /// </summary>
     public void UpdateLocalGames(IEnumerable<GameInfo> games)
     {
-        _localGames = games.ToList();
+        _localGames = new ObservableCollection<GameInfo>(games);
         System.Diagnostics.Debug.WriteLine($"FileTransferService: Updated local games list ({_localGames.Count} games)");
     }
 

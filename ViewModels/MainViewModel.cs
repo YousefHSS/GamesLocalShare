@@ -989,18 +989,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
             {
-                // Create a new list to ensure the reference changes and triggers UI update
-                existing.Games = peer.Games?.ToList() ?? [];
+                // Clear existing games and add new ones to trigger UI update
+                existing.Games.Clear();
+                foreach (var game in peer.Games)
+                {
+                    existing.Games.Add(game);
+                }
                 
                 System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: {peer.DisplayName} now has {existing.Games.Count} games");
-                
-                // Force UI update by removing and re-adding
-                var index = NetworkPeers.IndexOf(existing);
-                if (index >= 0)
-                {
-                    NetworkPeers.RemoveAt(index);
-                    NetworkPeers.Insert(index, existing);
-                }
             }
             else
             {
@@ -1013,8 +1009,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             UpdateAvailableSyncs();
             UpdateAvailableFromPeers();
             
-            StatusMessage = $"Received {peer.Games?.Count ?? 0} games from {peer.DisplayName}";
-            AddLog($"Updated game list from {peer.DisplayName}: {peer.Games?.Count ?? 0} games", LogMessageType.Info);
+            StatusMessage = $"Received {peer.Games.Count} games from {peer.DisplayName}";
+            AddLog($"Updated game list from {peer.DisplayName}: {peer.Games.Count} games", LogMessageType.Info);
         });
     }
 

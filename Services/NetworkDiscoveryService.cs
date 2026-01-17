@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -267,7 +268,7 @@ public class NetworkDiscoveryService : IDisposable
                         IpAddress = ipAddress,
                         Port = response.SenderPort > 0 ? response.SenderPort : TcpPort,
                         FileTransferPort = response.SenderFileTransferPort > 0 ? response.SenderFileTransferPort : 45679,
-                        Games = response.Games ?? [],
+                        Games = new ObservableCollection<GameInfo>(response.Games ?? []),
                         LastSeen = DateTime.Now
                     };
 
@@ -288,7 +289,7 @@ public class NetworkDiscoveryService : IDisposable
                         else
                         {
                             _peers[peer.PeerId].LastSeen = DateTime.Now;
-                            _peers[peer.PeerId].Games = peer.Games;
+                            _peers[peer.PeerId].Games = new ObservableCollection<GameInfo>(peer.Games);
                             
                             if (peer.Games.Count > 0)
                             {
@@ -412,7 +413,7 @@ public class NetworkDiscoveryService : IDisposable
     /// </summary>
     public async Task UpdateLocalGamesAsync(List<GameInfo> games)
     {
-        LocalPeer.Games = games;
+        LocalPeer.Games = new ObservableCollection<GameInfo>(games);
         
         System.Diagnostics.Debug.WriteLine($"LocalPeer.Games updated with {games.Count} games");
         
@@ -702,7 +703,7 @@ public class NetworkDiscoveryService : IDisposable
                             // Update their games if they sent them
                             if (request.Games != null && request.Games.Count > 0)
                             {
-                                peerToNotify.Games = request.Games;
+                                peerToNotify.Games = new ObservableCollection<GameInfo>(request.Games);
                                 shouldNotifyGamesUpdated = true;
                             }
                         }
@@ -925,7 +926,7 @@ public class NetworkDiscoveryService : IDisposable
                     // Update their games if they changed
                     if (response.Games != null)
                     {
-                        peer.Games = response.Games;
+                        peer.Games = new ObservableCollection<GameInfo>(response.Games);
                         // Update file transfer port if provided
                         if (response.SenderFileTransferPort > 0)
                         {
@@ -1019,6 +1020,7 @@ public class NetworkDiscoveryService : IDisposable
     }
 }
 
+
 /// <summary>
     /// Message types for network communication
     /// </summary>
@@ -1043,6 +1045,6 @@ public class NetworkDiscoveryService : IDisposable
         /// The port the sender is listening on for file transfers (may differ from default 45679)
         /// </summary>
         public int SenderFileTransferPort { get; set; } = 45679;
-        public List<GameInfo>? Games { get; set; }
+        public ObservableCollection<GameInfo>? Games { get; set; }
         public string? GameAppId { get; set; }
     }
