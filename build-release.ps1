@@ -4,7 +4,7 @@
 param(
     [string]$Version = "1.0.0",
     [switch]$BuildInstaller = $false,
-    [switch]$SelfContained = $false
+    [switch]$SelfContained = $true
 )
 
 Write-Host "?? Building GamesLocalShare v$Version..." -ForegroundColor Cyan
