@@ -331,12 +331,51 @@ public class SteamLibraryScanner
         var buildId = appState["buildid"]?.ToString();
         var sizeOnDiskStr = appState["SizeOnDisk"]?.ToString();
         var lastUpdatedStr = appState["LastUpdated"]?.ToString();
+        var stateFlags = appState["StateFlags"]?.ToString();
 
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(name))
             return null;
 
         var installPath = Path.Combine(libraryFolder, "common", installDir ?? name);
         
+        // Check if the game directory actually exists
+        // Steam keeps manifest files for uninstalled games, so we need to verify the folder exists
+        if (!Directory.Exists(installPath))
+        {
+            _scanErrors.Add($"Skipping {name} (AppId: {appId}) - install directory not found: {installPath}");
+            return null;
+        }
+
+        // Check if the directory has any content (not just an empty folder)
+        try
+        {
+            var hasFiles = Directory.EnumerateFileSystemEntries(installPath).Any();
+            if (!hasFiles)
+            {
+                _scanErrors.Add($"Skipping {name} (AppId: {appId}) - install directory is empty: {installPath}");
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _scanErrors.Add($"Skipping {name} (AppId: {appId}) - cannot access directory: {ex.Message}");
+            return null;
+        }
+
+        // Check StateFlags - 4 means fully installed, other values indicate incomplete/updating
+        // StateFlags: 4 = Fully Installed, 2 = Update Required, 1026 = Updating, etc.
+        if (!string.IsNullOrEmpty(stateFlags) && int.TryParse(stateFlags, out int flags))
+        {
+            // Skip if state indicates the game is not fully installed
+            // State 4 = fully installed, State 6 = fully installed + needs update
+            // We want to include games that are at least partially installed (have files)
+            if (flags == 0)
+            {
+                _scanErrors.Add($"Skipping {name} (AppId: {appId}) - StateFlags indicates not installed (flags={flags})");
+                return null;
+            }
+        }
+
         long.TryParse(sizeOnDiskStr, out long sizeOnDisk);
         
         DateTime lastUpdated = DateTime.MinValue;
@@ -346,7 +385,7 @@ public class SteamLibraryScanner
         }
 
         // If we don't have size from manifest, calculate from directory
-        if (sizeOnDisk == 0 && Directory.Exists(installPath))
+        if (sizeOnDisk == 0)
         {
             try
             {
@@ -364,7 +403,7 @@ public class SteamLibraryScanner
             SizeOnDisk = sizeOnDisk,
             LastUpdated = lastUpdated,
             Platform = GamePlatform.Steam,
-            IsInstalled = Directory.Exists(installPath)
+            IsInstalled = true // We've verified the directory exists and has content
         };
 
         return game;

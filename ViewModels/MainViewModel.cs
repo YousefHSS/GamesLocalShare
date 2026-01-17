@@ -129,6 +129,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Manual command properties for context menu
     public IRelayCommand<GameInfo?> OpenGameFolderCommand { get; }
     public IRelayCommand<GameInfo?> ToggleGameVisibilityCommand { get; }
+    public IAsyncRelayCommand<LogMessage> CopyLogMessageCommand { get; }
 
     public MainViewModel()
     {
@@ -169,6 +170,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             game => OpenGameFolder(game));
         ToggleGameVisibilityCommand = new AsyncRelayCommand<GameInfo?>(
             async game => await ToggleGameVisibilityAsync(game));
+        CopyLogMessageCommand = new AsyncRelayCommand<LogMessage>(
+            async logMessage => await CopyLogMessageAsync(logMessage));
 
         // Initial log message
         AddLog("Application started", LogMessageType.Info);
@@ -190,6 +193,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_settings.AutoResumeDownloads)
         {
             _ = AutoResumeDownloadsOnStartupAsync();
+        }
+
+        // Auto-start network if enabled
+        if (_settings.AutoStartNetwork)
+        {
+            _ = StartNetworkAsync();
         }
     }
 
@@ -222,10 +231,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnGamesRequestedButEmpty(object? sender, EventArgs e)
     {
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.UIThread.Post(async () =>
         {
-            StatusMessage = "⚠ A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
-            AddLog("A peer requested games but none scanned yet", LogMessageType.Warning);
+            if (LocalGames.Count == 0)
+            {
+                StatusMessage = "A peer requested your games - scanning automatically...";
+                AddLog("Peer requested games - scanning automatically", LogMessageType.Info);
+                await ScanLocalGamesAsync();
+            }
+            else
+            {
+                StatusMessage = "⚠ A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
+                AddLog("A peer requested games but none scanned yet", LogMessageType.Warning);
+            }
         });
     }
 
@@ -484,12 +502,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private async Task ScanIncompleteTransfersAsync()
     {
-        await Task.Run(() =>
+        await Task.Run(async () =>
         {
             var libraryPaths = _steamScanner.GetLibraryFolders()
                 .Select(f => Path.Combine(f, "common"))
                 .Where(Directory.Exists)
                 .ToList();
+
+            if (libraryPaths.Count == 0)
+            {
+                // Try to scan Steam library to populate library folders
+                await _steamScanner.ScanGamesAsync();
+                libraryPaths = _steamScanner.GetLibraryFolders()
+                    .Select(f => Path.Combine(f, "common"))
+                    .Where(Directory.Exists)
+                    .ToList();
+            }
 
             var incomplete = _fileTransferService.FindIncompleteTransfers(libraryPaths);
 
@@ -1148,6 +1176,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var message = $"Transfer {action}: {e.GameName}";
             StatusMessage = message;
             
+            // Mark current queue item as paused if this was a pause action
+            if (e.IsPaused && CurrentQueueItem != null)
+            {
+                CurrentQueueItem.Status = DownloadQueueStatus.Paused;
+                AddLog($"Queue item marked as paused: {e.GameName}", LogMessageType.Warning);
+            }
+            
             // Refresh incomplete transfers to show the paused/stopped one
             _ = ScanIncompleteTransfersAsync();
         });
@@ -1581,9 +1616,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Clears all queued items (not active or completed)
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanClearQueue))]
+    [RelayCommand]
     private void ClearQueue()
     {
+        AddLog("ClearQueue command executed", LogMessageType.Info);
         var queuedItems = DownloadQueue.Where(q => q.Status == DownloadQueueStatus.Queued).ToList();
         
         foreach (var item in queuedItems)
@@ -1598,14 +1634,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ClearQueueCommand.NotifyCanExecuteChanged();
     }
 
-    private bool CanClearQueue() => DownloadQueue.Any(q => q.Status == DownloadQueueStatus.Queued);
-
     /// <summary>
     /// Starts processing the download queue
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanStartQueue))]
+    [RelayCommand]
     private async Task StartQueueAsync()
     {
+        AddLog("StartQueueAsync command executed", LogMessageType.Info);
         if (IsQueueProcessing || IsTransferring)
             return;
 
@@ -1627,6 +1662,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (!IsQueueProcessing)
             return;
 
+        AddLog("Pausing download queue...", LogMessageType.Warning);
         IsQueueProcessing = false;
         
         if (IsTransferring)
@@ -1634,11 +1670,44 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _fileTransferService.PauseTransfer();
         }
 
+        // Mark current item as paused if it's downloading
+        if (CurrentQueueItem != null && CurrentQueueItem.Status == DownloadQueueStatus.Downloading)
+        {
+            CurrentQueueItem.Status = DownloadQueueStatus.Paused;
+        }
+
         AddLog("Download queue paused", LogMessageType.Warning);
         StatusMessage = "Download queue paused";
     }
 
     private bool CanPauseQueue() => IsQueueProcessing;
+
+    /// <summary>
+    /// Retries all paused and failed items by resetting their status to Queued
+    /// </summary>
+    [RelayCommand]
+    private void RetryFailedAndPaused()
+    {
+        var itemsToRetry = DownloadQueue.Where(q => 
+            q.Status == DownloadQueueStatus.Paused || 
+            q.Status == DownloadQueueStatus.Failed).ToList();
+
+        if (itemsToRetry.Count == 0)
+        {
+            StatusMessage = "No paused or failed items to retry";
+            return;
+        }
+
+        foreach (var item in itemsToRetry)
+        {
+            item.Status = DownloadQueueStatus.Queued;
+        }
+
+        AddLog($"Reset {itemsToRetry.Count} item(s) to queued status for retry", LogMessageType.Info);
+        StatusMessage = $"Reset {itemsToRetry.Count} item(s) for retry - click Start Queue to begin";
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+    }
 
     /// <summary>
     /// Auto-resumes downloads on startup if enabled in settings
@@ -1702,15 +1771,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         while (IsQueueProcessing)
         {
-            // Get the next queued item
+            // Only get items that are Queued - don't auto-retry paused or failed items
+            // User must explicitly click "Start Queue" again to retry those
             var nextItem = DownloadQueue.FirstOrDefault(q => q.Status == DownloadQueueStatus.Queued);
             
             if (nextItem == null)
             {
-                // No more items to process
+                // No more queued items to process
                 IsQueueProcessing = false;
-                AddLog("Download queue completed", LogMessageType.Success);
-                StatusMessage = "All queued downloads completed";
+                var completedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Completed);
+                var failedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Failed);
+                var pausedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Paused);
+                
+                AddLog($"Download queue finished - Completed: {completedCount}, Failed: {failedCount}, Paused: {pausedCount}", LogMessageType.Success);
+                
+                if (failedCount > 0 || pausedCount > 0)
+                {
+                    StatusMessage = $"Queue finished: {completedCount} completed, {failedCount} failed, {pausedCount} paused";
+                }
+                else
+                {
+                    StatusMessage = "All queued downloads completed successfully";
+                }
                 break;
             }
 
@@ -1780,15 +1862,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     else
                     {
                         AddLog($"Cannot find peer for {nextItem.GameName}", LogMessageType.Error);
+                        success = false;
                     }
                 }
 
-                nextItem.Status = success ? DownloadQueueStatus.Completed : DownloadQueueStatus.Failed;
-
-                if (success)
+                // Check if queue was paused during download
+                if (!IsQueueProcessing)
                 {
+                    // Queue was paused - mark item as paused (not failed)
+                    nextItem.Status = DownloadQueueStatus.Paused;
+                    AddLog($"Download paused: {nextItem.GameName}", LogMessageType.Warning);
+                }
+                else if (success)
+                {
+                    nextItem.Status = DownloadQueueStatus.Completed;
                     nextItem.Progress = 100;
                     nextItem.DownloadedBytes = nextItem.TotalBytes;
+                    AddLog($"Download completed: {nextItem.GameName}", LogMessageType.Success);
+                }
+                else
+                {
+                    nextItem.Status = DownloadQueueStatus.Failed;
+                    AddLog($"Download failed: {nextItem.GameName}", LogMessageType.Error);
                 }
             }
             catch (Exception ex)
@@ -1803,12 +1898,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 CurrentQueueItem = null;
             }
 
-            // Wait a bit before next download
-            await Task.Delay(2000);
-
             // Check if we should stop
             if (!IsQueueProcessing)
+            {
+                AddLog("Queue processing stopped by user", LogMessageType.Warning);
                 break;
+            }
+
+            // Wait a bit before next download
+            await Task.Delay(2000);
         }
 
         // Refresh game list after queue completes
@@ -1933,6 +2031,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             StatusMessage = $"Failed to toggle game visibility: {ex.Message}";
             AddLog($"Error toggling game visibility: {ex.Message}", LogMessageType.Error);
+        }
+    }
+
+    private async Task CopyLogMessageAsync(LogMessage logMessage)
+    {
+        try
+        {
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop && 
+                desktop.MainWindow?.Clipboard != null)
+            {
+                await desktop.MainWindow.Clipboard.SetTextAsync(logMessage.Message);
+                StatusMessage = $"Log message copied to clipboard";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to copy log message: {ex.Message}";
         }
     }
 
