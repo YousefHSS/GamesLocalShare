@@ -56,6 +56,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private TransferState? _selectedIncompleteTransfer;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTransferFormattedProgress))]
     private double _currentTransferProgress;
 
     [ObservableProperty]
@@ -95,9 +96,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _networkIconKey = "IconWifi";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTransferFormattedProgress))]
     private long _currentTransferTotalBytes;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTransferFormattedProgress))]
     private long _currentTransferDownloadedBytes;
 
     [ObservableProperty]
