@@ -489,7 +489,10 @@ public class NetworkDiscoveryService : IDisposable
                 {
                     System.Diagnostics.Debug.WriteLine($"Deserialized response: Type={response.Type}, Games count={response.Games?.Count ?? 0}");
                     
-                    peer.Games = response.Games ?? [];
+                    if (response.Games != null && response.Games.Count > 0)
+                    {
+                        peer.Games = response.Games;
+                    }
                     peer.LastSeen = DateTime.Now;
                     // Update file transfer port if provided
                     if (response.SenderFileTransferPort > 0)
