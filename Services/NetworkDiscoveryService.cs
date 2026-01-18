@@ -736,10 +736,16 @@ public class NetworkDiscoveryService : IDisposable
                                 peerToNotify.FileTransferPort = request.SenderFileTransferPort;
                             }
                             
+                            // Only update games if we received a non-empty list
                             if (request.Games != null && request.Games.Count > 0)
                             {
                                 peerToNotify.Games = new ObservableCollection<GameInfo>(request.Games);
                                 shouldNotifyGamesUpdated = true;
+                                System.Diagnostics.Debug.WriteLine($"HandleTcpConnection: Updated {peerToNotify.DisplayName} with {request.Games.Count} games from request");
+                            }
+                            else
+                            {
+                                System.Diagnostics.Debug.WriteLine($"HandleTcpConnection: Received empty game list in request from {peerToNotify.DisplayName} - keeping existing {peerToNotify.Games.Count} games");
                             }
                         }
                     }
@@ -788,8 +794,8 @@ public class NetworkDiscoveryService : IDisposable
                         break;
 
                     case MessageType.GameList:
-                        System.Diagnostics.Debug.WriteLine($"Received GameList from {request.SenderName} with {request.Games?.Count ?? 0} games - updating peer");
-                        if (request.Games != null)
+                        System.Diagnostics.Debug.WriteLine($"Received GameList from {request.SenderName} with {request.Games?.Count ?? 0} games");
+                        if (request.Games != null && request.Games.Count > 0)
                         {
                             NetworkPeer? gameListPeer = null;
                             lock (_peersLock)
@@ -803,12 +809,17 @@ public class NetworkDiscoveryService : IDisposable
                                         peer.FileTransferPort = request.SenderFileTransferPort;
                                     }
                                     gameListPeer = peer;
+                                    System.Diagnostics.Debug.WriteLine($"GameList handler: Updated {peer.DisplayName} with {request.Games.Count} games");
                                 }
                             }
                             if (gameListPeer != null)
                             {
                                 PeerGamesUpdated?.Invoke(this, gameListPeer);
                             }
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"GameList handler: Received empty game list from {request.SenderName} - ignoring to preserve existing games");
                         }
                         break;
                 }
@@ -1008,6 +1019,7 @@ public class NetworkDiscoveryService : IDisposable
                 var response = JsonSerializer.Deserialize(responseLine, NetworkMessageJsonContext.Default.NetworkMessage);
                 if (response != null && response.Games != null && response.Games.Count > 0)
                 {
+                    // Only update if we got games back
                     peer.Games = response.Games;
                     peer.LastSeen = DateTime.Now;
                     if (response.SenderFileTransferPort > 0)
@@ -1016,6 +1028,11 @@ public class NetworkDiscoveryService : IDisposable
                     }
                     System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Received {response.Games.Count} games back from {peer.DisplayName}");
                     PeerGamesUpdated?.Invoke(this, peer);
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Received empty or null game list from {peer.DisplayName} - keeping existing {peer.Games.Count} games");
+                    // Don't update peer.Games if response is empty - keep what we have
                 }
             }
         }
