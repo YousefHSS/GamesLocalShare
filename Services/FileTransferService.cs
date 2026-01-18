@@ -251,6 +251,12 @@ public class FileTransferService : IDisposable
             }
         }
 
+        System.Diagnostics.Debug.WriteLine($"FindIncompleteTransfers: Found {incomplete.Count} incomplete transfers");
+        foreach (var state in incomplete)
+        {
+            System.Diagnostics.Debug.WriteLine($"  - {state.GameName} at {state.TargetPath}");
+        }
+
         return incomplete;
     }
 

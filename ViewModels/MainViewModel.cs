@@ -531,6 +531,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 
                 // Assign new collection to trigger UI update
                 IncompleteTransfers = new ObservableCollection<TransferState>(incomplete);
+                System.Diagnostics.Debug.WriteLine($"ScanIncompleteTransfersAsync: Assigned {IncompleteTransfers.Count} incomplete transfers to UI");
 
                 // Try to re-select the previously selected item, or select the first one
                 if (previousSelectedAppId != null)

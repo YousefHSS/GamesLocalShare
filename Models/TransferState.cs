@@ -1,7 +1,17 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace GamesLocalShare.Models;
+
+/// <summary>
+/// JSON serialization context for TransferState
+/// </summary>
+[JsonSerializable(typeof(TransferState))]
+[JsonSourceGenerationOptions(WriteIndented = true)]
+internal partial class TransferStateJsonContext : JsonSerializerContext
+{
+}
 
 /// <summary>
 /// Represents the state of an in-progress or incomplete transfer
@@ -118,8 +128,9 @@ public class TransferState
             {
                 Directory.CreateDirectory(directory);
             }
-            var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(this, TransferStateJsonContext.Default.TransferState);
             File.WriteAllText(stateFile, json);
+            System.Diagnostics.Debug.WriteLine($"TransferState.Save: Saved state for {GameName} at {stateFile}");
         }
         catch (Exception ex)
         {
@@ -138,7 +149,7 @@ public class TransferState
             if (File.Exists(stateFile))
             {
                 var json = File.ReadAllText(stateFile);
-                return JsonSerializer.Deserialize<TransferState>(json);
+                return JsonSerializer.Deserialize(json, TransferStateJsonContext.Default.TransferState);
             }
         }
         catch (Exception ex)
