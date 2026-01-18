@@ -440,6 +440,7 @@ public class NetworkDiscoveryService : IDisposable
         // Notify all peers of our updated game list
         foreach (var peer in GetPeers())
         {
+            System.Diagnostics.Debug.WriteLine($"UpdateLocalGamesAsync: Sending {games.Count} games to peer {peer.DisplayName} at {peer.IpAddress}:{peer.Port}");
             await SendGameListToPeerAsync(peer);
         }
     }
@@ -763,20 +764,9 @@ public class NetworkDiscoveryService : IDisposable
                         
                         if (LocalPeer.Games.Count == 0)
                         {
-                            System.Diagnostics.Debug.WriteLine($"  WARNING: No games to send! Did you scan games first?");
-                            GamesRequestedButEmpty?.Invoke(this, EventArgs.Empty);
-                        }
-                        else
-                        {
-                            // Log first few games for debugging
-                            foreach (var game in LocalPeer.Games.Take(3))
-                            {
-                                System.Diagnostics.Debug.WriteLine($"  - {game.Name} (AppId: {game.AppId})");
-                            }
-                            if (LocalPeer.Games.Count > 3)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"  ... and {LocalPeer.Games.Count - 3} more games");
-                            }
+                            System.Diagnostics.Debug.WriteLine($"  WARNING: No games to send! Waiting 2 seconds for potential scan to complete...");
+                            await Task.Delay(2000);
+                            System.Diagnostics.Debug.WriteLine($"  After delay: LocalPeer.Games.Count = {LocalPeer.Games.Count}");
                         }
                         
                         var response = new NetworkMessage
@@ -798,7 +788,7 @@ public class NetworkDiscoveryService : IDisposable
                         break;
 
                     case MessageType.GameList:
-                        System.Diagnostics.Debug.WriteLine($"Received GameList from {request.SenderName} with {request.Games?.Count ?? 0} games");
+                        System.Diagnostics.Debug.WriteLine($"Received GameList from {request.SenderName} with {request.Games?.Count ?? 0} games - updating peer");
                         if (request.Games != null)
                         {
                             NetworkPeer? gameListPeer = null;
@@ -1006,11 +996,11 @@ public class NetworkDiscoveryService : IDisposable
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(message, NetworkMessageJsonContext.Default.NetworkMessage));
             
-            System.Diagnostics.Debug.WriteLine($"Sent {LocalPeer.Games.Count} games to {peer.DisplayName}");
+            System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Successfully sent {LocalPeer.Games.Count} games to {peer.DisplayName}");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error sending game list to {peer.DisplayName}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Failed to send games to {peer.DisplayName}: {ex.Message}");
         }
     }
 
