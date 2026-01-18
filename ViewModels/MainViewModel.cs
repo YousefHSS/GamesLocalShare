@@ -233,6 +233,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         Dispatcher.UIThread.Post(async () =>
         {
+            System.Diagnostics.Debug.WriteLine("OnGamesRequestedButEmpty: Peer requested games but LocalGames.Count = {LocalGames.Count}");
             if (LocalGames.Count == 0)
             {
                 StatusMessage = "A peer requested your games - scanning automatically...";
@@ -262,6 +263,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine("ScanLocalGamesAsync: Starting scan...");
             IsScanning = true;
             StatusMessage = "Scanning Steam library...";
             AddLog("Scanning Steam library...", LogMessageType.Info);

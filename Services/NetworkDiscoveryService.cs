@@ -770,8 +770,8 @@ public class NetworkDiscoveryService : IDisposable
                         
                         if (LocalPeer.Games.Count == 0)
                         {
-                            System.Diagnostics.Debug.WriteLine($"  WARNING: No games to send! Waiting 2 seconds for potential scan to complete...");
-                            await Task.Delay(2000);
+                            System.Diagnostics.Debug.WriteLine($"  WARNING: No games to send! Waiting 5 seconds for potential scan to complete...");
+                            await Task.Delay(5000);
                             System.Diagnostics.Debug.WriteLine($"  After delay: LocalPeer.Games.Count = {LocalPeer.Games.Count}");
                         }
                         
