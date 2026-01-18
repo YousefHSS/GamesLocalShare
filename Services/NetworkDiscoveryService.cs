@@ -5,6 +5,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GamesLocalShare.Models;
 
 namespace GamesLocalShare.Services;
@@ -24,6 +25,15 @@ public class NetworkDiscoveryService : IDisposable
     private CancellationTokenSource? _cts;
     private readonly Dictionary<string, NetworkPeer> _peers = new();
     private readonly object _peersLock = new();
+    
+    // JSON serializer options configured for .NET 8
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
+    };
     
     /// <summary>
     /// Our local peer information
@@ -249,7 +259,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games // Include our games in the request!
             };
-            await writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions));
 
             // Read response with timeout
             using var responseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -258,9 +268,11 @@ public class NetworkDiscoveryService : IDisposable
             var responseLine = await reader.ReadLineAsync(responseCts.Token);
             if (!string.IsNullOrEmpty(responseLine))
             {
-                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine);
+                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine, JsonOptions);
                 if (response != null)
                 {
+                    System.Diagnostics.Debug.WriteLine($"Received response from {ipAddress}: {response.Type} with {response.Games?.Count ?? 0} games");
+
                     var peer = new NetworkPeer
                     {
                         PeerId = response.SenderId,
@@ -454,13 +466,13 @@ public class NetworkDiscoveryService : IDisposable
                 SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games // Include our games!
             };
-            await writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions));
 
             // Read response
             var responseLine = await reader.ReadLineAsync(cts.Token);
             if (!string.IsNullOrEmpty(responseLine))
             {
-                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine);
+                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine, JsonOptions);
                 if (response != null)
                 {
                     peer.Games = response.Games ?? [];
@@ -656,7 +668,7 @@ public class NetworkDiscoveryService : IDisposable
                 if (string.IsNullOrEmpty(requestLine))
                     return;
 
-                var request = JsonSerializer.Deserialize<NetworkMessage>(requestLine);
+                var request = JsonSerializer.Deserialize<NetworkMessage>(requestLine, JsonOptions);
                 if (request == null)
                     return;
 
@@ -744,7 +756,7 @@ public class NetworkDiscoveryService : IDisposable
                             SenderFileTransferPort = LocalFileTransferPort,
                             Games = LocalPeer.Games
                         };
-                        await writer.WriteLineAsync(JsonSerializer.Serialize(response));
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(response, JsonOptions));
                         break;
 
                     case MessageType.GameList:
@@ -914,13 +926,13 @@ public class NetworkDiscoveryService : IDisposable
                 SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games
             };
-            await writer.WriteLineAsync(JsonSerializer.Serialize(request));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions));
 
             // Wait for response
             var responseLine = await reader.ReadLineAsync(cts.Token);
             if (!string.IsNullOrEmpty(responseLine))
             {
-                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine);
+                var response = JsonSerializer.Deserialize<NetworkMessage>(responseLine, JsonOptions);
                 if (response != null)
                 {
                     // Update their games if they changed
@@ -969,7 +981,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games
             };
-            await writer.WriteLineAsync(JsonSerializer.Serialize(message));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(message, JsonOptions));
             
             System.Diagnostics.Debug.WriteLine($"Sent {LocalPeer.Games.Count} games to {peer.DisplayName}");
         }
