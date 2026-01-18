@@ -984,10 +984,13 @@ public class NetworkDiscoveryService : IDisposable
             
             using var stream = client.GetStream();
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            using var reader = new StreamReader(stream, Encoding.UTF8);
 
+            // Send our games using RequestGameList instead of GameList
+            // This way the peer will respond with their games
             var message = new NetworkMessage
             {
-                Type = MessageType.GameList,
+                Type = MessageType.RequestGameList,
                 SenderId = LocalPeer.PeerId,
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
@@ -996,11 +999,29 @@ public class NetworkDiscoveryService : IDisposable
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(message, NetworkMessageJsonContext.Default.NetworkMessage));
             
-            System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Successfully sent {LocalPeer.Games.Count} games to {peer.DisplayName}");
+            System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Sent RequestGameList with {LocalPeer.Games.Count} games to {peer.DisplayName}");
+            
+            // Wait for response
+            var responseLine = await reader.ReadLineAsync(cts.Token);
+            if (!string.IsNullOrEmpty(responseLine))
+            {
+                var response = JsonSerializer.Deserialize(responseLine, NetworkMessageJsonContext.Default.NetworkMessage);
+                if (response != null && response.Games != null && response.Games.Count > 0)
+                {
+                    peer.Games = response.Games;
+                    peer.LastSeen = DateTime.Now;
+                    if (response.SenderFileTransferPort > 0)
+                    {
+                        peer.FileTransferPort = response.SenderFileTransferPort;
+                    }
+                    System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Received {response.Games.Count} games back from {peer.DisplayName}");
+                    PeerGamesUpdated?.Invoke(this, peer);
+                }
+            }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Failed to send games to {peer.DisplayName}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Failed to send/receive games with {peer.DisplayName}: {ex.Message}");
         }
     }
 
