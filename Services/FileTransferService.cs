@@ -5,9 +5,25 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GamesLocalShare.Models;
 
 namespace GamesLocalShare.Services;
+
+/// <summary>
+/// JSON serialization context for FileTransfer types
+/// </summary>
+[JsonSerializable(typeof(FileTransferRequest))]
+[JsonSerializable(typeof(FileManifest))]
+[JsonSerializable(typeof(FileTransferInfo))]
+[JsonSerializable(typeof(List<FileTransferInfo>))]
+[JsonSourceGenerationOptions(
+    PropertyNameCaseInsensitive = true,
+    WriteIndented = false,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+internal partial class FileTransferJsonContext : JsonSerializerContext
+{
+}
 
 /// <summary>
 /// Service for transferring game files between peers
@@ -429,14 +445,14 @@ public class FileTransferService : IDisposable
                 System.Diagnostics.Debug.WriteLine($"  IsNewDownload: {request.IsNewDownload}");
                 System.Diagnostics.Debug.WriteLine($"  IncludeManifest: {request.IncludeManifest}");
                 
-                var requestJson = JsonSerializer.Serialize(request);
+                var requestJson = JsonSerializer.Serialize(request, FileTransferJsonContext.Default.FileTransferRequest);
                 System.Diagnostics.Debug.WriteLine($"  Request JSON: {requestJson}");
                 
                 writer.Write(requestJson);
                 writer.Flush();
 
                 var manifestJson = reader.ReadString();
-                var manifest = JsonSerializer.Deserialize<FileManifest>(manifestJson);
+                var manifest = JsonSerializer.Deserialize(manifestJson, FileTransferJsonContext.Default.FileManifest);
 
                 if (manifest == null || manifest.Files.Count == 0)
                 {
@@ -840,7 +856,7 @@ public class FileTransferService : IDisposable
                     return;
                 }
 
-                var request = JsonSerializer.Deserialize<FileTransferRequest>(requestJson);
+                var request = JsonSerializer.Deserialize(requestJson, FileTransferJsonContext.Default.FileTransferRequest);
 
                 System.Diagnostics.Debug.WriteLine($"=== Processing Transfer Request ===");
                 System.Diagnostics.Debug.WriteLine($"  Received JSON: {requestJson}");
@@ -918,7 +934,7 @@ public class FileTransferService : IDisposable
                     }
                 }
                 
-                var manifestJson = JsonSerializer.Serialize(manifest);
+                var manifestJson = JsonSerializer.Serialize(manifest, FileTransferJsonContext.Default.FileManifest);
                 writer.Write(manifestJson);
                 writer.Flush();
 
