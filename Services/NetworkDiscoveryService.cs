@@ -450,6 +450,7 @@ public class NetworkDiscoveryService : IDisposable
     /// </summary>
     public async Task RequestGameListAsync(NetworkPeer peer)
     {
+        System.Diagnostics.Debug.WriteLine($"RequestGameListAsync: Called for peer {peer.DisplayName} at {peer.IpAddress}:{peer.Port}");
         try
         {
             ScanProgress?.Invoke(this, $"Requesting game list from {peer.DisplayName}...");
@@ -459,7 +460,9 @@ public class NetworkDiscoveryService : IDisposable
             client.SendTimeout = 5000;
             
             using var cts = new CancellationTokenSource(10000);
+            System.Diagnostics.Debug.WriteLine($"RequestGameListAsync: Attempting to connect to {peer.IpAddress}:{peer.Port}");
             await client.ConnectAsync(peer.IpAddress, peer.Port, cts.Token);
+            System.Diagnostics.Debug.WriteLine($"RequestGameListAsync: Connected successfully to {peer.DisplayName}");
             
             using var stream = client.GetStream();
             using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };

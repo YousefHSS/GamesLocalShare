@@ -744,6 +744,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         StatusMessage = $"Requesting game list from {SelectedPeer.DisplayName}...";
+        AddLog($"Requesting game list from {SelectedPeer.DisplayName}...", LogMessageType.Info);
         await _networkService.RequestGameListAsync(SelectedPeer);
     }
 
@@ -991,12 +992,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
             {
-                // Clear existing games and add new ones to trigger UI update
-                existing.Games.Clear();
-                foreach (var game in peer.Games)
-                {
-                    existing.Games.Add(game);
-                }
+                // Assign new collection to trigger UI update
+                existing.Games = new ObservableCollection<GameInfo>(peer.Games);
                 
                 System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: {peer.DisplayName} now has {existing.Games.Count} games");
             }
