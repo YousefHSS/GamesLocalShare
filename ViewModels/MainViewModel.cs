@@ -122,7 +122,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
     public ObservableCollection<GameInfo> AvailableFromPeers { get; } = [];
-    public ObservableCollection<TransferState> IncompleteTransfers { get; } = [];
+    [ObservableProperty]
+    private ObservableCollection<TransferState> _incompleteTransfers = [];
     public ObservableCollection<LogMessage> LogMessages { get; } = [];
     public ObservableCollection<DownloadQueueItem> DownloadQueue { get; } = [];
 
@@ -528,31 +529,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // Remember the currently selected game's AppId
                 var previousSelectedAppId = SelectedIncompleteTransfer?.GameAppId;
                 
-                IncompleteTransfers.Clear();
-                foreach (var transfer in incomplete)
-                {
-                    IncompleteTransfers.Add(transfer);
-                }
+                // Assign new collection to trigger UI update
+                IncompleteTransfers = new ObservableCollection<TransferState>(incomplete);
 
                 // Try to re-select the previously selected item, or select the first one
-                if (IncompleteTransfers.Count > 0)
+                if (previousSelectedAppId != null)
                 {
-                    if (previousSelectedAppId != null)
-                    {
-                        SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == previousSelectedAppId);
-                    }
-                    
-                    // If previous selection not found, select the first item
-                    if (SelectedIncompleteTransfer == null)
-                    {
-                        SelectedIncompleteTransfer = IncompleteTransfers.First();
-                    }
-                    
-                    StatusMessage = $"Found {incomplete.Count} incomplete transfer(s) that can be resumed";
+                    SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == previousSelectedAppId);
                 }
-                else
+                
+                // If previous selection not found, select the first item
+                if (SelectedIncompleteTransfer == null)
                 {
-                    SelectedIncompleteTransfer = null;
+                    SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault();
                 }
                 
                 // Force command to re-evaluate CanExecute
@@ -916,7 +905,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (success)
             {
-                IncompleteTransfers.Remove(SelectedIncompleteTransfer);
+                // Remove from incomplete transfers
+                var toRemove = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == SelectedIncompleteTransfer.GameAppId);
+                if (toRemove != null)
+                {
+                    IncompleteTransfers.Remove(toRemove);
+                }
                 await ScanLocalGamesAsync();
             }
         }
@@ -1865,10 +1859,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         if (success)
                         {
                             // Remove from incomplete transfers
-                            var existingTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == nextItem.GameAppId);
-                            if (existingTransfer != null)
+                            var toRemove = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == nextItem.TransferState.GameAppId);
+                            if (toRemove != null)
                             {
-                                IncompleteTransfers.Remove(existingTransfer);
+                                IncompleteTransfers.Remove(toRemove);
                             }
                         }
                     }
