@@ -15,7 +15,9 @@ namespace GamesLocalShare.Services;
 /// </summary>
 [JsonSerializable(typeof(NetworkMessage))]
 [JsonSerializable(typeof(ObservableCollection<GameInfo>))]
+[JsonSerializable(typeof(List<GameInfo>))]
 [JsonSerializable(typeof(GameInfo))]
+[JsonSerializable(typeof(GamePlatform))]
 [JsonSerializable(typeof(MessageType))]
 [JsonSourceGenerationOptions(
     PropertyNameCaseInsensitive = true,
@@ -472,15 +474,21 @@ public class NetworkDiscoveryService : IDisposable
                 SenderFileTransferPort = LocalFileTransferPort,
                 Games = LocalPeer.Games
             };
+            
+            System.Diagnostics.Debug.WriteLine($"Sending request to {peer.DisplayName} with {LocalPeer.Games.Count} of our games");
             await writer.WriteLineAsync(JsonSerializer.Serialize(request, NetworkMessageJsonContext.Default.NetworkMessage));
 
             // Read response
             var responseLine = await reader.ReadLineAsync(cts.Token);
+            System.Diagnostics.Debug.WriteLine($"Raw response from {peer.DisplayName}: {responseLine?.Substring(0, Math.Min(responseLine?.Length ?? 0, 500))}...");
+            
             if (!string.IsNullOrEmpty(responseLine))
             {
                 var response = JsonSerializer.Deserialize(responseLine, NetworkMessageJsonContext.Default.NetworkMessage);
                 if (response != null)
                 {
+                    System.Diagnostics.Debug.WriteLine($"Deserialized response: Type={response.Type}, Games count={response.Games?.Count ?? 0}");
+                    
                     peer.Games = response.Games ?? [];
                     peer.LastSeen = DateTime.Now;
                     // Update file transfer port if provided
@@ -493,6 +501,16 @@ public class NetworkDiscoveryService : IDisposable
                     ScanProgress?.Invoke(this, $"Received {peer.Games.Count} games from {peer.DisplayName}");
                     PeerGamesUpdated?.Invoke(this, peer);
                 }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"ERROR: Failed to deserialize response from {peer.DisplayName}");
+                    ConnectionError?.Invoke(this, $"Failed to deserialize game list from {peer.DisplayName}");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"ERROR: Empty response from {peer.DisplayName}");
+                ConnectionError?.Invoke(this, $"Empty response from {peer.DisplayName}");
             }
         }
         catch (Exception ex)
@@ -737,11 +755,25 @@ public class NetworkDiscoveryService : IDisposable
                 switch (request.Type)
                 {
                     case MessageType.RequestGameList:
-                        System.Diagnostics.Debug.WriteLine($"Responding with {LocalPeer.Games.Count} games to {request.SenderName}");
+                        System.Diagnostics.Debug.WriteLine($"=== Responding to RequestGameList from {request.SenderName} ===");
+                        System.Diagnostics.Debug.WriteLine($"  LocalPeer.Games.Count = {LocalPeer.Games.Count}");
                         
                         if (LocalPeer.Games.Count == 0)
                         {
+                            System.Diagnostics.Debug.WriteLine($"  WARNING: No games to send! Did you scan games first?");
                             GamesRequestedButEmpty?.Invoke(this, EventArgs.Empty);
+                        }
+                        else
+                        {
+                            // Log first few games for debugging
+                            foreach (var game in LocalPeer.Games.Take(3))
+                            {
+                                System.Diagnostics.Debug.WriteLine($"  - {game.Name} (AppId: {game.AppId})");
+                            }
+                            if (LocalPeer.Games.Count > 3)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"  ... and {LocalPeer.Games.Count - 3} more games");
+                            }
                         }
                         
                         var response = new NetworkMessage
@@ -753,7 +785,13 @@ public class NetworkDiscoveryService : IDisposable
                             SenderFileTransferPort = LocalFileTransferPort,
                             Games = LocalPeer.Games
                         };
-                        await writer.WriteLineAsync(JsonSerializer.Serialize(response, NetworkMessageJsonContext.Default.NetworkMessage));
+                        
+                        var responseJson = JsonSerializer.Serialize(response, NetworkMessageJsonContext.Default.NetworkMessage);
+                        System.Diagnostics.Debug.WriteLine($"  Response JSON length: {responseJson.Length} chars");
+                        System.Diagnostics.Debug.WriteLine($"  Response preview: {responseJson.Substring(0, Math.Min(responseJson.Length, 300))}...");
+                        
+                        await writer.WriteLineAsync(responseJson);
+                        System.Diagnostics.Debug.WriteLine($"  Sent response with {LocalPeer.Games.Count} games to {request.SenderName}");
                         break;
 
                     case MessageType.GameList:
