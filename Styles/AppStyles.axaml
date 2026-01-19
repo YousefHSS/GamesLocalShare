@@ -1,0 +1,93 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    
+    <!-- Panel Header Style -->
+    <Style Selector="Border.panel-header">
+        <Setter Property="Padding" Value="12,8" />
+        <Setter Property="CornerRadius" Value="8,8,0,0" />
+    </Style>
+    
+    <!-- Panel Container Style -->
+    <Style Selector="Border.panel">
+        <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Margin" Value="8" />
+    </Style>
+    
+    <!-- Primary Button Style -->
+    <Style Selector="Button.primary">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    
+    <!-- Secondary Button Style -->
+    <Style Selector="Button.secondary">
+        <Setter Property="Background" Value="#44FFFFFF" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    
+    <!-- Danger Button Style -->
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="{DynamicResource ErrorBrush}" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Padding" Value="16,8" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    
+    <!-- Step Badge Style -->
+    <Style Selector="Border.step-badge">
+        <Setter Property="Background" Value="#44000000" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="6,2" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+    
+    <!-- Game Item Style -->
+    <Style Selector="Border.game-item">
+        <Setter Property="Background" Value="{DynamicResource ItemBackgroundBrush}" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="8" />
+        <Setter Property="Margin" Value="2" />
+    </Style>
+    
+    <!-- Status Bar Style -->
+    <Style Selector="Border.status-bar">
+        <Setter Property="Background" Value="{DynamicResource PanelBackgroundBrush}" />
+        <Setter Property="Padding" Value="16,8" />
+    </Style>
+    
+    <!-- ListBox Item Styles -->
+    <Style Selector="ListBoxItem">
+        <Setter Property="Padding" Value="4" />
+        <Setter Property="Margin" Value="2" />
+    </Style>
+    
+    <!-- Progress Bar Accent -->
+    <Style Selector="ProgressBar">
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Height" Value="8" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    
+    <!-- TextBlock Styles -->
+    <Style Selector="TextBlock.header">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+    
+    <Style Selector="TextBlock.subtext">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+    </Style>
+    
+    <Style Selector="TextBlock.muted">
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+    </Style>
+    
+</Styles>

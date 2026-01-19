@@ -1,0 +1,85 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build Release (Framework-Dependent)
+      run: dotnet publish -c Release -r win-x64 --self-contained false -o ./publish-fd
+      
+    - name: Build Release (Self-Contained)
+      run: dotnet publish -c Release -r win-x64 --self-contained true -o ./publish-sc
+      
+    - name: Create ZIP (Framework-Dependent)
+      run: Compress-Archive -Path ./publish-fd/* -DestinationPath GamesLocalShare-win-x64-fd.zip
+      
+    - name: Create ZIP (Self-Contained)
+      run: Compress-Archive -Path ./publish-sc/* -DestinationPath GamesLocalShare-win-x64-sc.zip
+      
+    - name: Download Inno Setup
+      run: |
+        choco install innosetup -y
+        
+    - name: Build Installer
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+      
+    - name: Get version from tag
+      id: get_version
+      run: |
+        $version = $env:GITHUB_REF -replace 'refs/tags/v', ''
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          GamesLocalShare-win-x64-fd.zip
+          GamesLocalShare-win-x64-sc.zip
+          installer_output/GamesLocalShare-Setup-*.exe
+        body: |
+          ## Downloads
+          
+          ### Framework-Dependent (Requires .NET 8)
+          - **GamesLocalShare-win-x64-fd.zip** (~15MB)
+          - Requires [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
+          
+          ### Self-Contained (No .NET Required)
+          - **GamesLocalShare-win-x64-sc.zip** (~60MB)
+          - Everything included, no dependencies needed
+          
+          ### Installer
+          - **GamesLocalShare-Setup-*.exe**
+          - Windows installer with automatic .NET check
+          - Creates Start Menu shortcuts
+          - Optional: Start with Windows
+          
+          ## What's Changed
+          - Initial release
+          
+          ## System Requirements
+          - Windows 10 or later (64-bit)
+          - .NET 8 Desktop Runtime (for framework-dependent version)
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

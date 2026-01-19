@@ -1,0 +1,40 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="GamesLocalShare.App"
+             RequestedThemeVariant="Dark">
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://GamesLocalShare/Styles/AppStyles.axaml" />
+    </Application.Styles>
+    
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- App Colors -->
+            <Color x:Key="AccentColor">#0078D4</Color>
+            <Color x:Key="AccentColor2">#9C27B0</Color>
+            <Color x:Key="AccentColor3">#4CAF50</Color>
+            <Color x:Key="ErrorColor">#EF4444</Color>
+            <Color x:Key="WarningColor">#F59E0B</Color>
+            <Color x:Key="SuccessColor">#22C55E</Color>
+            <Color x:Key="PurpleColor">#8B5CF6</Color>
+            
+            <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+            <SolidColorBrush x:Key="AccentBrush2" Color="{StaticResource AccentColor2}" />
+            <SolidColorBrush x:Key="AccentBrush3" Color="{StaticResource AccentColor3}" />
+            <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}" />
+            <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+            <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
+            <SolidColorBrush x:Key="PurpleBrush" Color="{StaticResource PurpleColor}" />
+            
+            <!-- Panel Colors -->
+            <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#2D2D30" />
+            <SolidColorBrush x:Key="PanelBorderBrush" Color="#3F3F46" />
+            <SolidColorBrush x:Key="ItemBackgroundBrush" Color="#3C3C3C" />
+            
+            <!-- Text Colors -->
+            <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SecondaryTextBrush" Color="#9CA3AF" />
+            <SolidColorBrush x:Key="MutedTextBrush" Color="#6B7280" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

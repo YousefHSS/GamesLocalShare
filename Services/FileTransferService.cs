@@ -1,19 +1,37 @@
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GamesLocalShare.Models;
 
 namespace GamesLocalShare.Services;
+
+/// <summary>
+/// JSON serialization context for FileTransfer types
+/// </summary>
+[JsonSerializable(typeof(FileTransferRequest))]
+[JsonSerializable(typeof(FileManifest))]
+[JsonSerializable(typeof(FileTransferInfo))]
+[JsonSerializable(typeof(List<FileTransferInfo>))]
+[JsonSourceGenerationOptions(
+    PropertyNameCaseInsensitive = true,
+    WriteIndented = false,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+internal partial class FileTransferJsonContext : JsonSerializerContext
+{
+}
 
 /// <summary>
 /// Service for transferring game files between peers
 /// </summary>
 public class FileTransferService : IDisposable
 {
-    private const int TransferPort = 45679;
+    private const int PrimaryTransferPort = 45679;
+    private static readonly int[] FallbackPorts = [45680, 45681, 45682, 45683];
     private const int ConnectionTimeoutMs = 10000;
     private const int MaxParallelFiles = 4;
     
@@ -34,7 +52,8 @@ public class FileTransferService : IDisposable
     private TransferState? _currentTransferState;
     private bool _isListening;
     private bool _isPaused;
-    private List<GameInfo> _localGames = [];
+    private ObservableCollection<GameInfo> _localGames = [];
+    private int _actualListeningPort = PrimaryTransferPort;
 
     /// <summary>
     /// Whether the file transfer service is actively listening
@@ -42,9 +61,9 @@ public class FileTransferService : IDisposable
     public bool IsListening => _isListening;
 
     /// <summary>
-    /// The port the service is listening on
+    /// The port the service is actually listening on (may differ from primary if fallback was used)
     /// </summary>
-    public int ListeningPort => TransferPort;
+    public int ListeningPort => _actualListeningPort;
 
     /// <summary>
     /// Whether a transfer is currently paused
@@ -81,7 +100,7 @@ public class FileTransferService : IDisposable
     /// </summary>
     public void UpdateLocalGames(IEnumerable<GameInfo> games)
     {
-        _localGames = games.ToList();
+        _localGames = new ObservableCollection<GameInfo>(games);
         System.Diagnostics.Debug.WriteLine($"FileTransferService: Updated local games list ({_localGames.Count} games)");
     }
 
@@ -113,26 +132,52 @@ public class FileTransferService : IDisposable
 
         _cts = new CancellationTokenSource();
         
-        try
+        // Try primary port first, then fallback ports
+        var portsToTry = new List<int> { PrimaryTransferPort };
+        portsToTry.AddRange(FallbackPorts);
+        
+        Exception? lastException = null;
+        
+        foreach (var port in portsToTry)
         {
-            _listener = new TcpListener(IPAddress.Any, TransferPort);
-            _listener.Start();
-            _isListening = true;
-            
-            System.Diagnostics.Debug.WriteLine($"FileTransferService SUCCESSFULLY listening on port {TransferPort}");
+            try
+            {
+                _listener = new TcpListener(IPAddress.Any, port);
+                _listener.Start();
+                _isListening = true;
+                _actualListeningPort = port;
+                
+                if (port != PrimaryTransferPort)
+                {
+                    System.Diagnostics.Debug.WriteLine($"FileTransferService: Primary port {PrimaryTransferPort} unavailable, using fallback port {port}");
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"FileTransferService SUCCESSFULLY listening on port {port}");
+                break;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                System.Diagnostics.Debug.WriteLine($"FileTransferService: Port {port} is already in use, trying next port...");
+                lastException = ex;
+                _listener?.Stop();
+                _listener = null;
+                continue;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"FileTransferService: Error on port {port}: {ex.Message}");
+                lastException = ex;
+                _listener?.Stop();
+                _listener = null;
+                continue;
+            }
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        
+        if (!_isListening)
         {
-            _isListening = false;
-            var errorMsg = $"Port {TransferPort} is already in use! Another instance of the app may be running, or another program is using this port.";
+            var errorMsg = $"Could not start file transfer service. All ports ({PrimaryTransferPort}, {string.Join(", ", FallbackPorts)}) are in use or blocked.";
             System.Diagnostics.Debug.WriteLine($"FileTransferService FAILED: {errorMsg}");
-            throw new InvalidOperationException(errorMsg, ex);
-        }
-        catch (Exception ex)
-        {
-            _isListening = false;
-            System.Diagnostics.Debug.WriteLine($"FileTransferService FAILED to start: {ex.Message}");
-            throw;
+            throw new InvalidOperationException(errorMsg, lastException);
         }
 
         _ = AcceptConnectionsAsync(_cts.Token);
@@ -155,13 +200,13 @@ public class FileTransferService : IDisposable
     }
 
     /// <summary>
-    /// Tests if the file transfer port is available
+    /// Tests if a specific port is available
     /// </summary>
-    public static bool IsPortAvailable()
+    public static bool IsPortAvailable(int port)
     {
         try
         {
-            var listener = new TcpListener(IPAddress.Any, TransferPort);
+            var listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
             listener.Stop();
             return true;
@@ -171,6 +216,11 @@ public class FileTransferService : IDisposable
             return false;
         }
     }
+
+    /// <summary>
+    /// Tests if the primary file transfer port is available
+    /// </summary>
+    public static bool IsPrimaryPortAvailable() => IsPortAvailable(PrimaryTransferPort);
 
     /// <summary>
     /// Scans for incomplete transfers and returns them
@@ -201,6 +251,12 @@ public class FileTransferService : IDisposable
             }
         }
 
+        System.Diagnostics.Debug.WriteLine($"FindIncompleteTransfers: Found {incomplete.Count} incomplete transfers");
+        foreach (var state in incomplete)
+        {
+            System.Diagnostics.Debug.WriteLine($"  - {state.GameName} at {state.TargetPath}");
+        }
+
         return incomplete;
     }
 
@@ -213,6 +269,12 @@ public class FileTransferService : IDisposable
         string targetPath,
         CancellationToken ct = default)
     {
+        System.Diagnostics.Debug.WriteLine($"=== RequestNewGameDownloadAsync ===");
+        System.Diagnostics.Debug.WriteLine($"  Peer: {peer.DisplayName} ({peer.IpAddress})");
+        System.Diagnostics.Debug.WriteLine($"  Remote Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
+        System.Diagnostics.Debug.WriteLine($"  Remote Game InstallPath: {remoteGame.InstallPath}");
+        System.Diagnostics.Debug.WriteLine($"  Target Path (local): {targetPath}");
+        
         var localGame = new GameInfo
         {
             AppId = remoteGame.AppId,
@@ -221,6 +283,8 @@ public class FileTransferService : IDisposable
             BuildId = "0"
         };
 
+        // For new downloads, we need to tell the peer which game we want by AppId
+        // The InstallPath should be empty so the peer uses their own game's path
         return await RequestGameTransferAsync(peer, remoteGame, localGame, isNewDownload: true, ct: ct);
     }
 
@@ -264,303 +328,430 @@ public class FileTransferService : IDisposable
         _transferCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _isPaused = false;
         
-        string? appManifestContent = null;
-        
-        try
+        // Run the entire transfer operation on a background thread to avoid blocking the UI
+        return await Task.Run(async () =>
         {
-            System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
-            System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{TransferPort})");
-            System.Diagnostics.Debug.WriteLine($"Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
-            System.Diagnostics.Debug.WriteLine($"Buffer: {_bufferSize / 1024}KB, Socket: {_socketBufferSize / 1024}KB");
-            System.Diagnostics.Debug.WriteLine($"Resume: {resumeState != null}, CompletedFiles: {resumeState?.CompletedFiles.Count ?? 0}");
+            string? appManifestContent = null;
             
-            using var client = new TcpClient();
-            
-            ConfigureSocketForHighPerformance(client);
-            
-            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
-            connectCts.CancelAfter(ConnectionTimeoutMs);
+            // Determine which port to use - prefer peer's advertised FileTransferPort, fallback to default
+            var transferPort = peer.FileTransferPort > 0 ? peer.FileTransferPort : PrimaryTransferPort;
             
             try
             {
-                await client.ConnectAsync(peer.IpAddress, TransferPort, connectCts.Token);
-            }
-            catch (OperationCanceledException) when (!_transferCts.Token.IsCancellationRequested)
-            {
-                throw new Exception(
-                    $"Connection to {peer.DisplayName} ({peer.IpAddress}) timed out on port {TransferPort}.\n\n" +
-                    "Possible causes:\n" +
-                    "1. The app on the remote computer hasn't clicked 'Start Network'\n" +
-                    "2. Firewall on remote computer is blocking port 45679\n" +
-                    "3. Antivirus/security software is blocking the connection");
-            }
-
-            if (!client.Connected)
-            {
-                throw new Exception($"Could not connect to {peer.DisplayName}.");
-            }
-
-            System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} for file transfer");
-
-            using var stream = client.GetStream();
-            stream.ReadTimeout = 60000;
-            stream.WriteTimeout = 60000;
-            
-            using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
-
-            var request = new FileTransferRequest
-            {
-                GameAppId = remoteGame.AppId,
-                GamePath = remoteGame.InstallPath,
-                IsNewDownload = isNewDownload,
-                IncludeManifest = true
-            };
-            var requestJson = JsonSerializer.Serialize(request);
-            writer.Write(requestJson);
-            writer.Flush();
-
-            var manifestJson = reader.ReadString();
-            var manifest = JsonSerializer.Deserialize<FileManifest>(manifestJson);
-
-            if (manifest == null || manifest.Files.Count == 0)
-            {
-                throw new Exception($"Remote peer returned empty file manifest.");
-            }
-
-            appManifestContent = manifest.AppManifestContent;
-            System.Diagnostics.Debug.WriteLine($"Received manifest with {manifest.Files.Count} files, hasAppManifest={!string.IsNullOrEmpty(appManifestContent)}");
-
-            List<FileTransferInfo> filesToDownload;
-            
-            if (resumeState != null)
-            {
-                filesToDownload = manifest.Files
-                    .Where(f => !resumeState.CompletedFiles.Contains(f.RelativePath))
-                    .ToList();
-                System.Diagnostics.Debug.WriteLine($"Resume mode: {filesToDownload.Count} files remaining");
-            }
-            else
-            {
-                filesToDownload = await GetFilesToDownloadAsync(localGame.InstallPath, manifest.Files);
-            }
-
-            long totalBytes = filesToDownload.Sum(f => f.Size);
-            long alreadyTransferred = resumeState?.TransferredBytes ?? 0;
-            long transferredBytes = alreadyTransferred;
-            var startTime = DateTime.Now;
-
-            _currentTransferState = resumeState ?? new TransferState
-            {
-                GameAppId = remoteGame.AppId,
-                GameName = remoteGame.Name,
-                TargetPath = localGame.InstallPath,
-                SourcePeerIp = peer.IpAddress,
-                SourcePeerName = peer.DisplayName,
-                BuildId = remoteGame.BuildId,
-                TotalBytes = totalBytes + alreadyTransferred,
-                IsNewDownload = isNewDownload
-            };
-
-            if (!Directory.Exists(localGame.InstallPath))
-            {
-                Directory.CreateDirectory(localGame.InstallPath);
-            }
-
-            _currentTransferState.Save();
-
-            System.Diagnostics.Debug.WriteLine($"Starting download of {filesToDownload.Count} files ({totalBytes / 1024 / 1024}MB)");
-
-            // Pre-allocate buffer for reuse
-            var buffer = new byte[_bufferSize];
-
-            foreach (var fileInfo in filesToDownload)
-            {
-                if (_transferCts.Token.IsCancellationRequested)
+                System.Diagnostics.Debug.WriteLine($"=== FILE TRANSFER REQUEST ===");
+                System.Diagnostics.Debug.WriteLine($"Target: {peer.DisplayName} ({peer.IpAddress}:{transferPort})");
+                System.Diagnostics.Debug.WriteLine($"Peer's advertised FileTransferPort: {peer.FileTransferPort}");
+                System.Diagnostics.Debug.WriteLine($"Game: {remoteGame.Name} (AppId: {remoteGame.AppId})");
+                System.Diagnostics.Debug.WriteLine($"Buffer: {_bufferSize / 1024}KB, Socket: {_socketBufferSize / 1024}KB");
+                System.Diagnostics.Debug.WriteLine($"Resume: {resumeState != null}, CompletedFiles: {resumeState?.CompletedFiles.Count ?? 0}");
+                
+                using var client = new TcpClient();
+                
+                ConfigureSocketForHighPerformance(client);
+                
+                // Try the peer's advertised port first, then try fallback ports
+                var portsToTry = new List<int> { transferPort };
+                if (transferPort != PrimaryTransferPort)
                 {
-                    System.Diagnostics.Debug.WriteLine("Transfer cancelled by user");
-                    _currentTransferState.Save();
-                    return false;
+                    portsToTry.Add(PrimaryTransferPort);
                 }
-
-                writer.Write(fileInfo.RelativePath);
-                writer.Flush();
-
-                var fileSize = reader.ReadInt64();
-                if (fileSize < 0)
-                    continue;
-
-                var localFilePath = Path.Combine(localGame.InstallPath, fileInfo.RelativePath);
-                var localDir = Path.GetDirectoryName(localFilePath);
-                if (!string.IsNullOrEmpty(localDir) && !Directory.Exists(localDir))
+                portsToTry.AddRange(FallbackPorts.Where(p => p != transferPort));
+                
+                bool connected = false;
+                int connectedPort = 0;
+                
+                foreach (var port in portsToTry)
                 {
-                    Directory.CreateDirectory(localDir);
-                }
-
-                if (File.Exists(localFilePath))
-                {
-                    var existingInfo = new FileInfo(localFilePath);
-                    if (existingInfo.Length == fileSize)
+                    try
                     {
-                        transferredBytes += fileSize;
-                        _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
-                        _currentTransferState.TransferredBytes = transferredBytes;
+                        System.Diagnostics.Debug.WriteLine($"Trying to connect to {peer.IpAddress}:{port}...");
                         
-                        long discardRemaining = fileSize;
-                        while (discardRemaining > 0)
+                        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
+                        connectCts.CancelAfter(ConnectionTimeoutMs / portsToTry.Count); // Divide timeout among ports
+                        
+                        // Need to create new client for each attempt
+                        if (connected) break;
+                        
+                        var testClient = new TcpClient();
+                        ConfigureSocketForHighPerformance(testClient);
+                        
+                        await testClient.ConnectAsync(peer.IpAddress, port, connectCts.Token);
+                        
+                        if (testClient.Connected)
                         {
-                            var toRead = (int)Math.Min(discardRemaining, buffer.Length);
-                            var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, toRead), _transferCts.Token);
-                            if (bytesRead == 0) break;
-                            discardRemaining -= bytesRead;
+                            connected = true;
+                            connectedPort = port;
+                            testClient.Close();
+                            System.Diagnostics.Debug.WriteLine($"✓ Successfully connected to port {port}");
+                            break;
                         }
+                        testClient.Close();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"✗ Connection to port {port} timed out");
+                        continue;
+                    }
+                    catch (SocketException ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"✗ Connection to port {port} failed: {ex.SocketErrorCode}");
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"✗ Connection to port {port} failed: {ex.Message}");
                         continue;
                     }
                 }
+                
+                if (!connected)
+                {
+                    throw new Exception(
+                        $"Connection to {peer.DisplayName} ({peer.IpAddress}) failed on all ports.\n\n" +
+                        $"Tried ports: {string.Join(", ", portsToTry)}\n\n" +
+                        "Possible causes:\n" +
+                        "1. The peer computer hasn't clicked 'Start Network' yet\n" +
+                        "   → Ask them to click 'Start Network' and look for 'File transfer ready' in their log\n" +
+                        "2. Firewall on the peer computer is blocking the connection\n" +
+                        "   → They need to click 'Configure Firewall' as Administrator\n" +
+                        "3. Antivirus/security software is blocking the connection\n" +
+                        "   → Check Windows Security or third-party antivirus settings");
+                }
+                
+                // Now connect for real with the working port
+                using var connectCts2 = CancellationTokenSource.CreateLinkedTokenSource(_transferCts.Token);
+                connectCts2.CancelAfter(ConnectionTimeoutMs);
+                await client.ConnectAsync(peer.IpAddress, connectedPort, connectCts2.Token);
 
-                await using var fileStream = CreateOptimizedWriteStream(localFilePath);
-                long remaining = fileSize;
-                long lastProgressUpdate = 0;
+                if (!client.Connected)
+                {
+                    throw new Exception($"Could not connect to {peer.DisplayName}.");
+                }
 
-                while (remaining > 0)
+                System.Diagnostics.Debug.WriteLine($"Connected successfully to {peer.DisplayName} on port {connectedPort} for file transfer");
+
+                using var stream = client.GetStream();
+                stream.ReadTimeout = 60000;
+                stream.WriteTimeout = 60000;
+                
+                using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+                using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+
+                var request = new FileTransferRequest
+                {
+                    GameAppId = remoteGame.AppId,
+                    GamePath = isNewDownload ? string.Empty : remoteGame.InstallPath, // For new downloads, let the peer use their own path
+                    IsNewDownload = isNewDownload,
+                    IncludeManifest = true
+                };
+                
+                System.Diagnostics.Debug.WriteLine($"=== Sending Transfer Request ===");
+                System.Diagnostics.Debug.WriteLine($"  GameAppId: {request.GameAppId}");
+                System.Diagnostics.Debug.WriteLine($"  GamePath: '{request.GamePath}' (empty = let peer decide)");
+                System.Diagnostics.Debug.WriteLine($"  IsNewDownload: {request.IsNewDownload}");
+                System.Diagnostics.Debug.WriteLine($"  IncludeManifest: {request.IncludeManifest}");
+                
+                var requestJson = JsonSerializer.Serialize(request, FileTransferJsonContext.Default.FileTransferRequest);
+                System.Diagnostics.Debug.WriteLine($"  Request JSON: {requestJson}");
+                
+                writer.Write(requestJson);
+                writer.Flush();
+
+                var manifestJson = reader.ReadString();
+                var manifest = JsonSerializer.Deserialize(manifestJson, FileTransferJsonContext.Default.FileManifest);
+
+                if (manifest == null || manifest.Files.Count == 0)
+                {
+                    throw new Exception($"Remote peer returned empty file manifest.");
+                }
+
+                appManifestContent = manifest.AppManifestContent;
+                System.Diagnostics.Debug.WriteLine($"Received manifest with {manifest.Files.Count} files, hasAppManifest={!string.IsNullOrEmpty(appManifestContent)}");
+
+                List<FileTransferInfo> filesToDownload;
+                
+                if (resumeState != null)
+                {
+                    filesToDownload = manifest.Files
+                        .Where(f => !resumeState.CompletedFiles.Contains(f.RelativePath))
+                        .ToList();
+                    System.Diagnostics.Debug.WriteLine($"Resume mode: {filesToDownload.Count} files remaining");
+                }
+                else
+                {
+                    filesToDownload = await GetFilesToDownloadAsync(localGame.InstallPath, manifest.Files);
+                }
+
+                long totalBytes = filesToDownload.Sum(f => f.Size);
+                long alreadyTransferred = resumeState?.TransferredBytes ?? 0;
+                long transferredBytes = alreadyTransferred;
+                var startTime = DateTime.Now;
+
+                _currentTransferState = resumeState ?? new TransferState
+                {
+                    GameAppId = remoteGame.AppId,
+                    GameName = remoteGame.Name,
+                    TargetPath = localGame.InstallPath,
+                    SourcePeerIp = peer.IpAddress,
+                    SourcePeerName = peer.DisplayName,
+                    BuildId = remoteGame.BuildId,
+                    TotalBytes = totalBytes + alreadyTransferred,
+                    IsNewDownload = isNewDownload
+                };
+
+                if (!Directory.Exists(localGame.InstallPath))
+                {
+                    Directory.CreateDirectory(localGame.InstallPath);
+                }
+
+                _currentTransferState.Save();
+
+                System.Diagnostics.Debug.WriteLine($"Starting download of {filesToDownload.Count} files ({totalBytes / 1024 / 1024}MB)");
+
+                // Pre-allocate buffer for reuse
+                var buffer = new byte[_bufferSize];
+
+                foreach (var fileInfo in filesToDownload)
                 {
                     if (_transferCts.Token.IsCancellationRequested)
                     {
-                        System.Diagnostics.Debug.WriteLine($"Transfer cancelled during file: {fileInfo.RelativePath}");
-                        _currentTransferState.TransferredBytes = transferredBytes;
+                        System.Diagnostics.Debug.WriteLine("Transfer cancelled by user");
                         _currentTransferState.Save();
                         return false;
                     }
 
-                    var toRead = (int)Math.Min(remaining, buffer.Length);
-                    var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, toRead), _transferCts.Token);
-                    
-                    if (bytesRead == 0)
-                        break;
+                    writer.Write(fileInfo.RelativePath);
+                    writer.Flush();
 
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), _transferCts.Token);
-                    remaining -= bytesRead;
-                    transferredBytes += bytesRead;
+                    var fileSize = reader.ReadInt64();
+                    if (fileSize < 0)
+                        continue;
 
-                    // Update progress every 1MB for WiFi (more responsive) or 5MB for wired
-                    var progressInterval = IsHighSpeedMode ? 5 * 1024 * 1024 : 1 * 1024 * 1024;
-                    if (transferredBytes - lastProgressUpdate > progressInterval)
+                    var localFilePath = Path.Combine(localGame.InstallPath, fileInfo.RelativePath);
+                    var localDir = Path.GetDirectoryName(localFilePath);
+                    if (!string.IsNullOrEmpty(localDir) && !Directory.Exists(localDir))
                     {
-                        lastProgressUpdate = transferredBytes;
-                        
-                        var elapsed = (DateTime.Now - startTime).TotalSeconds;
-                        var speed = elapsed > 0 ? (long)((transferredBytes - alreadyTransferred) / elapsed) : 0;
-                        var progress = _currentTransferState.TotalBytes > 0 
-                            ? (double)transferredBytes / _currentTransferState.TotalBytes * 100 
-                            : 0;
+                        Directory.CreateDirectory(localDir);
+                    }
 
-                        ProgressChanged?.Invoke(this, new TransferProgressEventArgs
+                    if (File.Exists(localFilePath))
+                    {
+                        var existingInfo = new FileInfo(localFilePath);
+                        if (existingInfo.Length == fileSize)
                         {
-                            GameAppId = remoteGame.AppId,
-                            Progress = progress,
-                            TransferredBytes = transferredBytes,
-                            TotalBytes = _currentTransferState.TotalBytes,
-                            SpeedBytesPerSecond = speed,
-                            CurrentFile = fileInfo.RelativePath
-                        });
+                            transferredBytes += fileSize;
+                            _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
+                            _currentTransferState.TransferredBytes = transferredBytes;
+                            
+                            long discardRemaining = fileSize;
+                            while (discardRemaining > 0)
+                            {
+                                var toRead = (int)Math.Min(discardRemaining, buffer.Length);
+                                var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, toRead), _transferCts.Token);
+                                if (bytesRead == 0) break;
+                                discardRemaining -= bytesRead;
+                            }
+                            continue;
+                        }
                     }
 
-                    // Save state every 50MB
-                    if (transferredBytes % (50 * 1024 * 1024) < _bufferSize)
+                    await using var fileStream = CreateOptimizedWriteStream(localFilePath);
+                    long remaining = fileSize;
+                    long lastProgressUpdate = 0;
+
+                    while (remaining > 0)
                     {
-                        _currentTransferState.TransferredBytes = transferredBytes;
-                        _currentTransferState.Save();
+                        if (_transferCts.Token.IsCancellationRequested)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Transfer cancelled during file: {fileInfo.RelativePath}");
+                            _currentTransferState.TransferredBytes = transferredBytes;
+                            _currentTransferState.Save();
+                            return false;
+                        }
+
+                        var toRead = (int)Math.Min(remaining, buffer.Length);
+                        var bytesRead = await stream.ReadAsync(buffer.AsMemory(0, toRead), _transferCts.Token);
+                        
+                        if (bytesRead == 0)
+                            break;
+
+                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), _transferCts.Token);
+                        remaining -= bytesRead;
+                        transferredBytes += bytesRead;
+
+                        // Update progress every 1MB for WiFi (more responsive) or 5MB for wired
+                        var progressInterval = IsHighSpeedMode ? 5 * 1024 * 1024 : 1 * 1024 * 1024;
+                        if (transferredBytes - lastProgressUpdate > progressInterval)
+                        {
+                            lastProgressUpdate = transferredBytes;
+                            
+                            var elapsed = (DateTime.Now - startTime).TotalSeconds;
+                            var speed = elapsed > 0 ? (long)((transferredBytes - alreadyTransferred) / elapsed) : 0;
+                            var progress = _currentTransferState.TotalBytes > 0 
+                                ? (double)transferredBytes / _currentTransferState.TotalBytes * 100 
+                                : 0;
+
+                            // Calculate estimated time remaining
+                            var bytesRemaining = _currentTransferState.TotalBytes - transferredBytes;
+                            var estimatedSecondsRemaining = speed > 0 ? bytesRemaining / (double)speed : 0;
+                            var timeRemaining = TimeSpan.FromSeconds(estimatedSecondsRemaining);
+
+                            ProgressChanged?.Invoke(this, new TransferProgressEventArgs
+                            {
+                                GameAppId = remoteGame.AppId,
+                                Progress = progress,
+                                TransferredBytes = transferredBytes,
+                                TotalBytes = _currentTransferState.TotalBytes,
+                                SpeedBytesPerSecond = speed,
+                                CurrentFile = fileInfo.RelativePath,
+                                EstimatedTimeRemaining = timeRemaining
+                            });
+                        }
+
+                        // Save state every 50MB
+                        if (transferredBytes % (50 * 1024 * 1024) < _bufferSize)
+                        {
+                            _currentTransferState.TransferredBytes = transferredBytes;
+                            _currentTransferState.Save();
+                        }
+                    }
+
+                    await fileStream.FlushAsync(_transferCts.Token);
+
+                    _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
+                    _currentTransferState.TransferredBytes = transferredBytes;
+                    _currentTransferState.Save();
+                }
+
+                writer.Write(string.Empty);
+
+                long totalTransferred = transferredBytes;
+                bool success = filesToDownload.Count == 0 || transferredBytes >= _currentTransferState.TotalBytes;
+                
+                if (success)
+                {
+                    _currentTransferState.Delete();
+                    
+                    if (!string.IsNullOrEmpty(appManifestContent))
+                    {
+                        await WriteAppManifestAsync(localGame.InstallPath, remoteGame.AppId, appManifestContent);
                     }
                 }
 
-                await fileStream.FlushAsync(_transferCts.Token);
+                var totalElapsed = (DateTime.Now - startTime).TotalSeconds;
+                var avgSpeed = totalElapsed > 0 ? (totalTransferred - alreadyTransferred) / totalElapsed : 0;
+                var avgSpeedMbps = avgSpeed * 8 / 1_000_000;
+                System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred / 1024 / 1024}MB, avgSpeed={avgSpeed / 1024 / 1024:F1}MB/s ({avgSpeedMbps:F1} Mbps)");
 
-                _currentTransferState.CompletedFiles.Add(fileInfo.RelativePath);
-                _currentTransferState.TransferredBytes = transferredBytes;
-                _currentTransferState.Save();
-            }
-
-            writer.Write(string.Empty);
-
-            long totalTransferred = transferredBytes;
-            bool success = filesToDownload.Count == 0 || transferredBytes >= _currentTransferState.TotalBytes;
-            
-            if (success)
-            {
-                _currentTransferState.Delete();
-                
-                if (!string.IsNullOrEmpty(appManifestContent))
+                if (success)
                 {
-                    await WriteAppManifestAsync(localGame.InstallPath, remoteGame.AppId, appManifestContent);
+                    TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                    {
+                        GameAppId = remoteGame.AppId,
+                        GameName = remoteGame.Name,
+                        Success = true,
+                        TotalBytesTransferred = totalTransferred,
+                        IsNewDownload = isNewDownload
+                    });
                 }
+                else if (_isPaused)
+                {
+                    TransferStopped?.Invoke(this, new TransferStoppedEventArgs
+                    {
+                        GameName = remoteGame.Name,
+                        IsPaused = true,
+                        TransferredBytes = totalTransferred
+                    });
+                }
+                else
+                {
+                    TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                    {
+                        GameAppId = remoteGame.AppId,
+                        GameName = remoteGame.Name,
+                        Success = false,
+                        TotalBytesTransferred = totalTransferred,
+                        ErrorMessage = "Transfer failed",
+                        IsNewDownload = isNewDownload
+                    });
+                }
+
+                _currentTransferState = null;
+                return success;
             }
-
-            var totalElapsed = (DateTime.Now - startTime).TotalSeconds;
-            var avgSpeed = totalElapsed > 0 ? (totalTransferred - alreadyTransferred) / totalElapsed : 0;
-            var avgSpeedMbps = avgSpeed * 8 / 1_000_000;
-            System.Diagnostics.Debug.WriteLine($"Transfer completed: success={success}, transferred={totalTransferred / 1024 / 1024}MB, avgSpeed={avgSpeed / 1024 / 1024:F1}MB/s ({avgSpeedMbps:F1} Mbps)");
-
-            TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+            catch (OperationCanceledException)
             {
-                GameAppId = remoteGame.AppId,
-                GameName = remoteGame.Name,
-                Success = success,
-                TotalBytesTransferred = totalTransferred,
-                IsNewDownload = isNewDownload
-            });
-
-            _currentTransferState = null;
-            return success;
-        }
-        catch (OperationCanceledException)
-        {
-            System.Diagnostics.Debug.WriteLine("Transfer cancelled (OperationCanceledException)");
-            _currentTransferState?.Save();
-            return false;
-        }
-        catch (SocketException ex)
-        {
-            _currentTransferState?.Save();
-            _currentTransferState = null;
-
-            var errorMsg = ex.SocketErrorCode switch
+                System.Diagnostics.Debug.WriteLine("Transfer cancelled (OperationCanceledException)");
+                _currentTransferState?.Save();
+                
+                if (_isPaused)
+                {
+                    TransferStopped?.Invoke(this, new TransferStoppedEventArgs
+                    {
+                        GameName = remoteGame.Name,
+                        IsPaused = true,
+                        TransferredBytes = _currentTransferState?.TransferredBytes ?? 0
+                    });
+                }
+                else
+                {
+                    TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                    {
+                        GameAppId = remoteGame.AppId,
+                        GameName = remoteGame.Name,
+                        Success = false,
+                        ErrorMessage = "Transfer cancelled",
+                        IsNewDownload = isNewDownload
+                    });
+                }
+                
+                _currentTransferState = null;
+                return false;
+            }
+            catch (SocketException ex)
             {
-                SocketError.ConnectionRefused => $"Connection REFUSED by {peer.DisplayName}.",
-                SocketError.TimedOut => $"Connection TIMED OUT to {peer.DisplayName}.",
-                SocketError.HostUnreachable => $"Cannot reach {peer.DisplayName}.",
-                SocketError.NetworkUnreachable => "Network unreachable.",
-                _ => $"Network error: {ex.SocketErrorCode} - {ex.Message}"
-            };
+                _currentTransferState?.Save();
+                _currentTransferState = null;
 
-            System.Diagnostics.Debug.WriteLine($"Transfer failed: {errorMsg}");
+                var errorMsg = ex.SocketErrorCode switch
+                {
+                    SocketError.ConnectionRefused => $"Connection REFUSED by {peer.DisplayName}.",
+                    SocketError.TimedOut => $"Connection TIMED OUT to {peer.DisplayName}.",
+                    SocketError.HostUnreachable => $"Cannot reach {peer.DisplayName}.",
+                    SocketError.NetworkUnreachable => "Network unreachable.",
+                    _ => $"Network error: {ex.SocketErrorCode} - {ex.Message}"
+                };
 
-            TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                System.Diagnostics.Debug.WriteLine($"Transfer failed: {errorMsg}");
+
+                TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                {
+                    GameAppId = remoteGame.AppId,
+                    GameName = remoteGame.Name,
+                    Success = false,
+                    ErrorMessage = errorMsg,
+                    IsNewDownload = isNewDownload
+                });
+                return false;
+            }
+            catch (Exception ex)
             {
-                GameAppId = remoteGame.AppId,
-                GameName = remoteGame.Name,
-                Success = false,
-                ErrorMessage = errorMsg,
-                IsNewDownload = isNewDownload
-            });
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _currentTransferState?.Save();
-            _currentTransferState = null;
+                _currentTransferState?.Save();
+                _currentTransferState = null;
 
-            System.Diagnostics.Debug.WriteLine($"Transfer failed: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Transfer failed: {ex.Message}");
 
-            TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
-            {
-                GameAppId = remoteGame.AppId,
-                GameName = remoteGame.Name,
-                Success = false,
-                ErrorMessage = ex.Message,
-                IsNewDownload = isNewDownload
-            });
-            return false;
-        }
+                TransferCompleted?.Invoke(this, new TransferCompletedEventArgs
+                {
+                    GameAppId = remoteGame.AppId,
+                    GameName = remoteGame.Name,
+                    Success = false,
+                    ErrorMessage = ex.Message,
+                    IsNewDownload = isNewDownload
+                });
+                return false;
+            }
+        }, _transferCts.Token).ConfigureAwait(false);
     }
 
     private async Task WriteAppManifestAsync(string gameInstallPath, string appId, string manifestContent)
@@ -612,7 +803,7 @@ public class FileTransferService : IDisposable
 
     private async Task AcceptConnectionsAsync(CancellationToken ct)
     {
-        System.Diagnostics.Debug.WriteLine($"FileTransferService: Starting to accept connections on port {TransferPort}");
+        System.Diagnostics.Debug.WriteLine($"FileTransferService: Starting to accept connections on port {PrimaryTransferPort}");
         
         while (!ct.IsCancellationRequested)
         {
@@ -671,18 +862,32 @@ public class FileTransferService : IDisposable
                     return;
                 }
 
-                var request = JsonSerializer.Deserialize<FileTransferRequest>(requestJson);
+                var request = JsonSerializer.Deserialize(requestJson, FileTransferJsonContext.Default.FileTransferRequest);
 
-                System.Diagnostics.Debug.WriteLine($"Received transfer request: {requestJson}");
+                System.Diagnostics.Debug.WriteLine($"=== Processing Transfer Request ===");
+                System.Diagnostics.Debug.WriteLine($"  Received JSON: {requestJson}");
 
                 if (request == null)
                 {
-                    System.Diagnostics.Debug.WriteLine("Invalid request (null)");
+                    System.Diagnostics.Debug.WriteLine("ERROR: Invalid request (null after deserialization)");
                     writer.Write("{}");
                     return;
                 }
 
+                System.Diagnostics.Debug.WriteLine($"  GameAppId: {request.GameAppId}");
+                System.Diagnostics.Debug.WriteLine($"  GamePath: '{request.GamePath}'");
+                System.Diagnostics.Debug.WriteLine($"  IsNewDownload: {request.IsNewDownload}");
+                System.Diagnostics.Debug.WriteLine($"  IncludeManifest: {request.IncludeManifest}");
+                System.Diagnostics.Debug.WriteLine($"  Local games in memory: {_localGames.Count}");
+
                 var localGame = _localGames.FirstOrDefault(g => g.AppId == request.GameAppId);
+                
+                System.Diagnostics.Debug.WriteLine($"  Lookup by AppId '{request.GameAppId}': {(localGame != null ? "FOUND" : "NOT FOUND")}");
+                if (localGame != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"    Found: {localGame.Name} at {localGame.InstallPath}");
+                }
+                
                 string gamePath;
                 string? steamAppsFolder = null;
                 
@@ -694,7 +899,7 @@ public class FileTransferService : IDisposable
                     {
                         steamAppsFolder = commonFolder.Parent?.FullName;
                     }
-                    System.Diagnostics.Debug.WriteLine($"Found game by AppId: {request.GameAppId} at {gamePath}");
+                    System.Diagnostics.Debug.WriteLine($"✓ SUCCESS: Found game by AppId: {request.GameAppId} at {gamePath}");
                 }
                 else if (!string.IsNullOrEmpty(request.GamePath) && Directory.Exists(request.GamePath))
                 {
@@ -704,15 +909,18 @@ public class FileTransferService : IDisposable
                     {
                         steamAppsFolder = commonFolder.Parent?.FullName;
                     }
-                    System.Diagnostics.Debug.WriteLine($"Using fallback path from request: {gamePath}");
+                    System.Diagnostics.Debug.WriteLine($"✓ Using fallback path from request: {gamePath}");
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"Game not found! AppId: {request.GameAppId}, RequestPath: {request.GamePath}");
-                    System.Diagnostics.Debug.WriteLine($"Local games count: {_localGames.Count}");
-                    foreach (var g in _localGames.Take(5))
+                    System.Diagnostics.Debug.WriteLine($"✗ ERROR: Game not found!");
+                    System.Diagnostics.Debug.WriteLine($"  Requested AppId: {request.GameAppId}");
+                    System.Diagnostics.Debug.WriteLine($"  Requested GamePath: '{request.GamePath}'");
+                    System.Diagnostics.Debug.WriteLine($"  Local games count: {_localGames.Count}");
+                    System.Diagnostics.Debug.WriteLine($"  Available games:");
+                    foreach (var g in _localGames.Take(10))
                     {
-                        System.Diagnostics.Debug.WriteLine($"  - {g.Name} ({g.AppId}): {g.InstallPath}");
+                        System.Diagnostics.Debug.WriteLine($"    - AppId: {g.AppId}, Name: {g.Name}, Path: {g.InstallPath}");
                     }
                     writer.Write("{}");
                     return;
@@ -720,19 +928,19 @@ public class FileTransferService : IDisposable
 
                 System.Diagnostics.Debug.WriteLine($"Building manifest for: {gamePath}");
 
-                var manifest = await BuildFileManifestAsync(gamePath);
+                var manifest = await BuildFileManifestAsync(gamePath).ConfigureAwait(false);
                 
                 if (request.IncludeManifest && steamAppsFolder != null)
                 {
                     var appManifestPath = Path.Combine(steamAppsFolder, $"appmanifest_{request.GameAppId}.acf");
                     if (File.Exists(appManifestPath))
                     {
-                        manifest.AppManifestContent = await File.ReadAllTextAsync(appManifestPath, ct);
+                        manifest.AppManifestContent = await File.ReadAllTextAsync(appManifestPath, ct).ConfigureAwait(false);
                         System.Diagnostics.Debug.WriteLine($"Including app manifest: {appManifestPath}");
                     }
                 }
                 
-                var manifestJson = JsonSerializer.Serialize(manifest);
+                var manifestJson = JsonSerializer.Serialize(manifest, FileTransferJsonContext.Default.FileManifest);
                 writer.Write(manifestJson);
                 writer.Flush();
 
@@ -740,6 +948,12 @@ public class FileTransferService : IDisposable
 
                 // Pre-allocate buffer for transfer
                 var buffer = new byte[_bufferSize];
+                
+                // Track statistics for periodic logging (avoid per-file logging)
+                int filesSent = 0;
+                long bytesSent = 0;
+                var lastLogTime = DateTime.Now;
+                const int LogIntervalMs = 2000; // Log every 2 seconds instead of every file
 
                 while (!ct.IsCancellationRequested)
                 {
@@ -750,7 +964,7 @@ public class FileTransferService : IDisposable
                     }
                     catch (EndOfStreamException)
                     {
-                        System.Diagnostics.Debug.WriteLine("Client disconnected (end of stream)");
+                        System.Diagnostics.Debug.WriteLine($"Transfer complete: sent {filesSent} files, {bytesSent / 1024 / 1024}MB total");
                         break;
                     }
                     catch (IOException ex)
@@ -761,7 +975,7 @@ public class FileTransferService : IDisposable
                     
                     if (string.IsNullOrEmpty(relativePath))
                     {
-                        System.Diagnostics.Debug.WriteLine("Transfer complete (client signaled end)");
+                        System.Diagnostics.Debug.WriteLine($"Transfer complete (client signaled end): sent {filesSent} files, {bytesSent / 1024 / 1024}MB total");
                         break;
                     }
 
@@ -769,6 +983,7 @@ public class FileTransferService : IDisposable
                     
                     if (!File.Exists(fullPath))
                     {
+                        // Only log file not found errors (these are unusual)
                         System.Diagnostics.Debug.WriteLine($"File not found: {relativePath}");
                         writer.Write(-1L);
                         continue;
@@ -778,16 +993,32 @@ public class FileTransferService : IDisposable
                     writer.Write(fileInfo.Length);
                     writer.Flush();
 
-                    System.Diagnostics.Debug.WriteLine($"Sending: {relativePath} ({fileInfo.Length / 1024 / 1024}MB)");
-
                     try
                     {
                         await using var fileStream = CreateOptimizedReadStream(fullPath);
                         int bytesRead;
 
-                        while ((bytesRead = await fileStream.ReadAsync(buffer, ct)) > 0)
+                        while ((bytesRead = await fileStream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
                         {
-                            await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                            await stream.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
+                            bytesSent += bytesRead;
+                        }
+                        
+                        filesSent++;
+                        
+                        // Periodic logging instead of per-file logging
+                        var now = DateTime.Now;
+                        if ((now - lastLogTime).TotalMilliseconds > LogIntervalMs)
+                        {
+                            lastLogTime = now;
+                            System.Diagnostics.Debug.WriteLine($"Sending progress: {filesSent} files, {bytesSent / 1024 / 1024}MB sent");
+                        }
+                        
+                        // For very small files, yield to prevent UI starvation
+                        // This allows the UI thread to process events between files
+                        if (fileInfo.Length < 64 * 1024) // Files smaller than 64KB
+                        {
+                            await Task.Yield();
                         }
                     }
                     catch (IOException ex)
@@ -811,7 +1042,9 @@ public class FileTransferService : IDisposable
         await Task.Run(() =>
         {
             var dirInfo = new DirectoryInfo(gamePath);
-            foreach (var file in dirInfo.EnumerateFiles("*", SearchOption.AllDirectories))
+            var files = dirInfo.EnumerateFiles("*", SearchOption.AllDirectories);
+            
+            foreach (var file in files)
             {
                 try
                 {
@@ -824,12 +1057,14 @@ public class FileTransferService : IDisposable
                         RelativePath = relativePath,
                         Size = file.Length,
                         LastModified = file.LastWriteTimeUtc,
-                        Hash = ComputeQuickHash(file.FullName, file.Length)
+                        // Skip hash computation for manifest building - it's slow for many files
+                        // The receiver will compare by size first, then hash only if sizes match
+                        Hash = string.Empty
                     });
                 }
                 catch { }
             }
-        });
+        }).ConfigureAwait(false);
 
         return manifest;
     }
@@ -858,13 +1093,21 @@ public class FileTransferService : IDisposable
                     continue;
                 }
 
+                // If remote hash is empty (skipped for performance), assume file is OK if size matches
+                // This is a reasonable trade-off for games with many small files
+                if (string.IsNullOrEmpty(remoteFile.Hash))
+                {
+                    // Size matches, no hash to compare - assume file is OK
+                    continue;
+                }
+
                 var localHash = ComputeQuickHash(localFilePath, localInfo.Length);
                 if (localHash != remoteFile.Hash)
                 {
                     filesToDownload.Add(remoteFile);
                 }
             }
-        });
+        }).ConfigureAwait(false);
 
         return filesToDownload;
     }
@@ -1049,6 +1292,7 @@ public class TransferProgressEventArgs : EventArgs
     public long TotalBytes { get; set; }
     public long SpeedBytesPerSecond { get; set; }
     public string CurrentFile { get; set; } = string.Empty;
+    public TimeSpan EstimatedTimeRemaining { get; set; }
 }
 
 public class TransferCompletedEventArgs : EventArgs

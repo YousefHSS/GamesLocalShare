@@ -1,5 +1,6 @@
 using System.ComponentModel;
-using System.Windows.Media;
+using System.Runtime.CompilerServices;
+using Avalonia.Media.Imaging;
 
 namespace GamesLocalShare.Models;
 
@@ -8,6 +9,8 @@ namespace GamesLocalShare.Models;
 /// </summary>
 public class GameInfo : INotifyPropertyChanged
 {
+    private Bitmap? _coverImage;
+
     /// <summary>
     /// Unique identifier for the game (Steam AppId)
     /// </summary>
@@ -54,13 +57,32 @@ public class GameInfo : INotifyPropertyChanged
     public bool IsAvailableFromPeer { get; set; } = false;
 
     /// <summary>
+    /// Whether this game is hidden from peers (not shared on network)
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsHidden
+    {
+        get => _isHidden;
+        set
+        {
+            if (_isHidden != value)
+            {
+                _isHidden = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    private bool _isHidden = false;
+
+    /// <summary>
     /// Formatted size for display
     /// </summary>
     public string FormattedSize => FormatBytes(SizeOnDisk);
 
     private static string FormatBytes(long bytes)
     {
-        string[] sizes = new[] { "B", "KB", "MB", "GB", "TB" };
+        string[] sizes = ["B", "KB", "MB", "GB", "TB"];
         int order = 0;
         double size = bytes;
         while (size >= 1024 && order < sizes.Length - 1)
@@ -71,13 +93,12 @@ public class GameInfo : INotifyPropertyChanged
         return $"{size:0.##} {sizes[order]}";
     }
 
-    private ImageSource? _coverImage;
-
     /// <summary>
     /// Runtime-only cover image to display in the UI. Not serialized.
+    /// Notifies UI when the image is loaded.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public ImageSource? CoverImage
+    public Bitmap? CoverImage
     {
         get => _coverImage;
         set
@@ -85,14 +106,14 @@ public class GameInfo : INotifyPropertyChanged
             if (_coverImage != value)
             {
                 _coverImage = value;
-                OnPropertyChanged(nameof(CoverImage));
+                OnPropertyChanged();
             }
         }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    protected void OnPropertyChanged(string propertyName)
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }

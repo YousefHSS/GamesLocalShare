@@ -1,10 +1,15 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+
 namespace GamesLocalShare.Models;
 
 /// <summary>
 /// Represents a peer on the local network running the application
 /// </summary>
-public class NetworkPeer
+public class NetworkPeer : INotifyPropertyChanged
 {
+    private ObservableCollection<GameInfo> _games = [];
+
     /// <summary>
     /// Unique identifier for this peer
     /// </summary>
@@ -21,14 +26,31 @@ public class NetworkPeer
     public string IpAddress { get; set; } = string.Empty;
 
     /// <summary>
-    /// Port the peer is listening on for file transfers
+    /// Port the peer is listening on for game list exchange (TCP 45678)
     /// </summary>
     public int Port { get; set; } = 45678;
 
     /// <summary>
+    /// Port the peer is listening on for file transfers (default TCP 45679)
+    /// This can be different from the default if the primary port was unavailable
+    /// </summary>
+    public int FileTransferPort { get; set; } = 45679;
+
+    /// <summary>
     /// List of games available on this peer
     /// </summary>
-    public List<GameInfo> Games { get; set; } = [];
+    public ObservableCollection<GameInfo> Games
+    {
+        get => _games;
+        set
+        {
+            if (_games != value)
+            {
+                _games = value;
+                OnPropertyChanged(nameof(Games));
+            }
+        }
+    }
 
     /// <summary>
     /// Last time we heard from this peer
@@ -46,5 +68,12 @@ public class NetworkPeer
     public void MarkAsSeen()
     {
         LastSeen = DateTime.Now;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected virtual void OnPropertyChanged(string propertyName)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }

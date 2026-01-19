@@ -1,6 +1,9 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GamesLocalShare.Models;
@@ -13,7 +16,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly SteamLibraryScanner _steamScanner;
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
+    private readonly AppSettings _settings;
     private DateTime _lastProgressUpdate = DateTime.MinValue;
+    private System.Timers.Timer? _autoUpdateTimer;
     private const int MaxLogMessages = 100;
 
     [ObservableProperty]
@@ -51,6 +56,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private TransferState? _selectedIncompleteTransfer;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTransferFormattedProgress))]
     private double _currentTransferProgress;
 
     [ObservableProperty]
@@ -58,6 +64,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _currentTransferFile = string.Empty;
+
+    [ObservableProperty]
+    private string _currentTransferTimeRemaining = string.Empty;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ResumeTransferCommand))]
@@ -78,30 +87,69 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string _currentTransferGameName = string.Empty;
 
     [ObservableProperty]
-    private bool _showSpeedInMbps = false; // Toggle between MB/s and Mbps
+    private bool _showSpeedInMbps = false;
 
     [ObservableProperty]
-    private bool _highSpeedMode = false; // For wired connections
+    private bool _highSpeedMode = false;
 
     [ObservableProperty]
     private string _networkIconKey = "IconWifi";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTransferFormattedProgress))]
+    private long _currentTransferTotalBytes;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTransferFormattedProgress))]
+    private long _currentTransferDownloadedBytes;
+
+    [ObservableProperty]
+    private bool _isLogVisible;
+
+    [ObservableProperty]
+    private bool _isWindows = OperatingSystem.IsWindows();
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StartQueueCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PauseQueueCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ClearQueueCommand))]
+    private bool _isQueueProcessing;
+
+    [ObservableProperty]
+    private DownloadQueueItem? _currentQueueItem;
 
     public ObservableCollection<GameInfo> LocalGames { get; } = [];
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
     public ObservableCollection<GameInfo> AvailableFromPeers { get; } = [];
-    public ObservableCollection<TransferState> IncompleteTransfers { get; } = [];
+    [ObservableProperty]
+    private ObservableCollection<TransferState> _incompleteTransfers = [];
     public ObservableCollection<LogMessage> LogMessages { get; } = [];
+    public ObservableCollection<DownloadQueueItem> DownloadQueue { get; } = [];
+
+    // Manual command properties for context menu
+    public IRelayCommand<GameInfo?> OpenGameFolderCommand { get; }
+    public IRelayCommand<GameInfo?> ToggleGameVisibilityCommand { get; }
+    public IAsyncRelayCommand<LogMessage> CopyLogMessageCommand { get; }
 
     public MainViewModel()
     {
         _steamScanner = new SteamLibraryScanner();
         _networkService = new NetworkDiscoveryService();
         _fileTransferService = new FileTransferService();
+        _settings = AppSettings.Load();
 
-        // Check admin and firewall status
-        IsAdmin = FirewallHelper.IsRunningAsAdmin();
-        FirewallConfigured = FirewallHelper.CheckFirewallRulesExist();
+        // Check admin and firewall status (Windows only)
+        if (OperatingSystem.IsWindows())
+        {
+            IsAdmin = FirewallHelper.IsRunningAsAdmin();
+            FirewallConfigured = FirewallHelper.CheckFirewallRulesExist();
+        }
+        else
+        {
+            // On Linux/macOS, we don't need Windows firewall configuration
+            FirewallConfigured = true;
+        }
 
         // Subscribe to network events
         _networkService.PeerDiscovered += OnPeerDiscovered;
@@ -118,20 +166,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         LocalIpAddress = _networkService.LocalPeer.IpAddress;
 
+        // Initialize manual commands
+        OpenGameFolderCommand = new RelayCommand<GameInfo?>(
+            game => OpenGameFolder(game));
+        ToggleGameVisibilityCommand = new AsyncRelayCommand<GameInfo?>(
+            async game => await ToggleGameVisibilityAsync(game));
+        CopyLogMessageCommand = new AsyncRelayCommand<LogMessage>(
+            async logMessage => await CopyLogMessageAsync(logMessage));
+
         // Initial log message
         AddLog("Application started", LogMessageType.Info);
 
-        // Show firewall warning if not configured
-        if (!FirewallConfigured)
+        // Show firewall warning if not configured (Windows only)
+        if (OperatingSystem.IsWindows() && !FirewallConfigured)
         {
-            StatusMessage = "?? Firewall not configured - click 'Configure Firewall' to fix connection issues";
+            StatusMessage = "⚠ Firewall not configured - click 'Configure Firewall' to fix connection issues";
             AddLog("Firewall not configured - other computers may not be able to connect", LogMessageType.Warning);
+        }
+
+        // Initialize auto-update timer if enabled
+        if (_settings.AutoUpdateGames)
+        {
+            InitializeAutoUpdateTimer();
+        }
+
+        // Auto-resume downloads if enabled and network is active
+        if (_settings.AutoResumeDownloads)
+        {
+            _ = AutoResumeDownloadsOnStartupAsync();
+        }
+
+        // Auto-start network if enabled
+        if (_settings.AutoStartNetwork)
+        {
+            _ = StartNetworkAsync();
         }
     }
 
     private void AddLog(string message, LogMessageType type = LogMessageType.Info)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             LogMessages.Insert(0, new LogMessage(message, type));
             
@@ -150,18 +224,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AddLog("Log cleared", LogMessageType.Info);
     }
 
+    [RelayCommand]
+    private void ToggleLog()
+    {
+        IsLogVisible = !IsLogVisible;
+    }
+
     private void OnGamesRequestedButEmpty(object? sender, EventArgs e)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(async () =>
         {
-            StatusMessage = "?? A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
-            AddLog("A peer requested games but none scanned yet", LogMessageType.Warning);
+            System.Diagnostics.Debug.WriteLine("OnGamesRequestedButEmpty: Peer requested games but LocalGames.Count = {LocalGames.Count}");
+            if (LocalGames.Count == 0)
+            {
+                StatusMessage = "A peer requested your games - scanning automatically...";
+                AddLog("Peer requested games - scanning automatically", LogMessageType.Info);
+                await ScanLocalGamesAsync();
+            }
+            else
+            {
+                StatusMessage = "⚠ A peer requested your games but you haven't scanned yet! Click 'Scan My Games'.";
+                AddLog("A peer requested games but none scanned yet", LogMessageType.Warning);
+            }
         });
     }
 
     private void OnConnectionError(object? sender, string error)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             LastError = error;
             AddLog($"Connection error: {error}", LogMessageType.Error);
@@ -174,23 +264,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine("ScanLocalGamesAsync: Starting scan...");
             IsScanning = true;
             StatusMessage = "Scanning Steam library...";
             AddLog("Scanning Steam library...", LogMessageType.Info);
 
             var games = await _steamScanner.ScanGamesAsync();
 
-            Application.Current.Dispatcher.Invoke(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 LocalGames.Clear();
                 foreach (var game in games)
                 {
+                    // Apply hidden status from settings
+                    game.IsHidden = _settings.IsGameHidden(game.AppId);
                     LocalGames.Add(game);
                 }
             });
 
-            // Update file transfer service with local games
-            _fileTransferService.UpdateLocalGames(games);
+            // Update file transfer service with VISIBLE games only
+            var visibleGames = games.Where(g => !g.IsHidden).ToList();
+            _fileTransferService.UpdateLocalGames(visibleGames);
 
             if (games.Count == 0)
             {
@@ -209,15 +303,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                StatusMessage = $"Found {games.Count} installed games";
+                var hiddenCount = games.Count - visibleGames.Count;
+                StatusMessage = hiddenCount > 0
+                    ? $"Found {games.Count} installed games ({hiddenCount} hidden)"
+                    : $"Found {games.Count} installed games";
                 AddLog($"Found {games.Count} installed games", LogMessageType.Success);
+
+                // Load cover images asynchronously in the background (non-blocking)
+                _ = LoadCoverImagesAsync(games);
             }
 
             await ScanIncompleteTransfersAsync();
 
             if (IsNetworkActive)
             {
-                await _networkService.UpdateLocalGamesAsync(games);
+                await _networkService.UpdateLocalGamesAsync(visibleGames);
             }
 
             if (NetworkPeers.Count > 0)
@@ -238,29 +338,66 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Loads cover images for games asynchronously without blocking the UI
+    /// </summary>
+    private async Task LoadCoverImagesAsync(List<GameInfo> games)
+    {
+        StatusMessage = "Loading cover images...";
+        AddLog($"Loading cover images for {games.Count} games in background...", LogMessageType.Info);
+
+        var loadedCount = 0;
+        var tasks = games.Select(async game =>
+        {
+            await _steamScanner.LoadCoverImageAsync(game);
+            
+            // Increment counter (note: this is not thread-safe but close enough for display purposes)
+            Interlocked.Increment(ref loadedCount);
+            
+            // Update UI every few images to show progress
+            if (loadedCount % 5 == 0)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    StatusMessage = $"Loaded {loadedCount}/{games.Count} cover images...";
+                });
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            StatusMessage = $"Cover images loaded ({loadedCount}/{games.Count})";
+            AddLog($"Loaded {loadedCount} cover images", LogMessageType.Success);
+        });
+    }
+
     [RelayCommand]
-    private void ShowTroubleshootInfo()
+    private async Task ShowTroubleshootInfoAsync()
     {
         var steamReport = _steamScanner.GetScanReport();
-        var networkReport = FirewallHelper.GetNetworkDiagnostics();
+        var networkReport = OperatingSystem.IsWindows() ? FirewallHelper.GetNetworkDiagnostics() : "Firewall diagnostics not available on this platform.";
         
         // Add file transfer status
         var transferStatus = new System.Text.StringBuilder();
         transferStatus.AppendLine("=== File Transfer Service ===");
         transferStatus.AppendLine($"Listening: {_fileTransferService.IsListening}");
         transferStatus.AppendLine($"Port: {_fileTransferService.ListeningPort}");
-        transferStatus.AppendLine($"Port Available: {FileTransferService.IsPortAvailable()}");
+        transferStatus.AppendLine($"Primary Port Available: {FileTransferService.IsPrimaryPortAvailable()}");
         transferStatus.AppendLine();
         
         // Add peer info with IPs
         transferStatus.AppendLine("=== Connected Peers ===");
         transferStatus.AppendLine($"My IP: {LocalIpAddress}");
+        transferStatus.AppendLine($"My File Transfer Port: {_fileTransferService.ListeningPort}");
         transferStatus.AppendLine($"Peers found: {NetworkPeers.Count}");
         foreach (var peer in NetworkPeers)
         {
             transferStatus.AppendLine($"  - {peer.DisplayName}");
             transferStatus.AppendLine($"    IP: {peer.IpAddress}");
-            transferStatus.AppendLine($"    Port: {peer.Port}");
+            transferStatus.AppendLine($"    Game List Port: {peer.Port}");
+            transferStatus.AppendLine($"    File Transfer Port: {peer.FileTransferPort}");
             transferStatus.AppendLine($"    Games: {peer.Games.Count}");
             transferStatus.AppendLine($"    Last Seen: {peer.LastSeen:HH:mm:ss}");
         }
@@ -268,116 +405,144 @@ public partial class MainViewModel : ObservableObject, IDisposable
         
         var fullReport = $"{steamReport}\n\n{transferStatus}\n{networkReport}";
         
-        MessageBox.Show(fullReport, "Troubleshooting Report", MessageBoxButton.OK, MessageBoxImage.Information);
+        await ShowMessageAsync("Troubleshooting Report", fullReport);
     }
 
     [RelayCommand]
-    private void ConfigureFirewall()
+    private async Task ConfigureFirewallAsync()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            await ShowMessageAsync("Not Supported", "Firewall configuration is only available on Windows.");
+            return;
+        }
+
         if (!FirewallHelper.IsRunningAsAdmin())
         {
-            var result = MessageBox.Show(
-                "Configuring firewall requires Administrator privileges.\n\n" +
-                "Would you like to restart the application as Administrator?",
-                "Administrator Required",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
+            var result = await ShowConfirmAsync("Administrator Required", 
+                "Configuring firewall requires Administrator privileges.\n\nWould you like to restart the application as Administrator?");
 
-            if (result == MessageBoxResult.Yes)
+            if (result)
             {
                 FirewallHelper.RestartAsAdmin();
             }
             return;
         }
 
-        // Show options
-        var choice = MessageBox.Show(
-            "Firewall Configuration Options:\n\n" +
-            "YES = Add firewall rules (recommended)\n" +
-            "NO = Show detailed firewall diagnostics\n" +
-            "CANCEL = Cancel",
-            "Configure Firewall",
-            MessageBoxButton.YesNoCancel,
-            MessageBoxImage.Question);
-
-        if (choice == MessageBoxResult.Yes)
+        var (success, message) = FirewallHelper.AddFirewallRules();
+        
+        if (success)
         {
-            var (success, message) = FirewallHelper.AddFirewallRules();
-            
-            if (success)
-            {
-                FirewallConfigured = true;
-                StatusMessage = "? Firewall configured successfully!";
-                MessageBox.Show(
-                    "Firewall rules have been added successfully!\n\n" +
-                    "Added rules:\n" +
-                    "�EProgram-based rule (allows all GamesLocalShare traffic)\n" +
-                    "�EUDP 45677 (Discovery)\n" +
-                    "�ETCP 45678 (Game List)\n" +
-                    "�ETCP 45679 (File Transfer)\n\n" +
-                    "If connections STILL fail, you may have third-party security software\n" +
-                    "(antivirus/firewall) that needs separate configuration.",
-                    "Firewall Configured",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-            else
-            {
-                StatusMessage = $"Firewall configuration failed: {message}";
-                MessageBox.Show(
-                    $"Failed to configure firewall:\n\n{message}",
-                    "Firewall Error",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
+            FirewallConfigured = true;
+            StatusMessage = "✓ Firewall configured successfully!";
+            await ShowMessageAsync("Firewall Configured",
+                "Firewall rules have been added successfully!\n\n" +
+                "Added rules:\n" +
+                "• Program-based rule (allows all GamesLocalShare traffic)\n" +
+                "• UDP 45677 (Discovery)\n" +
+                "• TCP 45678 (Game List)\n" +
+                "• TCP 45679 (File Transfer)");
         }
-        else if (choice == MessageBoxResult.No)
+        else
         {
-            ShowTroubleshootInfo();
+            StatusMessage = $"Firewall configuration failed: {message}";
+            await ShowMessageAsync("Firewall Error", $"Failed to configure firewall:\n\n{message}");
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenSettingsAsync()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop &&
+            desktop.MainWindow != null)
+        {
+            var settingsWindow = new Views.SettingsWindow(_settings, LocalGames.ToList(), () =>
+            {
+                // Callback when settings are saved
+                AddLog("Settings saved successfully", LogMessageType.Success);
+                StatusMessage = "Settings updated";
+                
+                // Refresh game list to update hidden status
+                foreach (var game in LocalGames)
+                {
+                    game.IsHidden = _settings.IsGameHidden(game.AppId);
+                }
+                
+                // Update network with visible games
+                if (IsNetworkActive)
+                {
+                    var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
+                    _ = _networkService.UpdateLocalGamesAsync(visibleGames);
+                    _fileTransferService.UpdateLocalGames(visibleGames);
+                    AddLog($"Updated network with {visibleGames.Count} visible games", LogMessageType.Info);
+                }
+                
+                // Restart auto-update timer if settings changed
+                if (_settings.AutoUpdateGames && _autoUpdateTimer == null)
+                {
+                    InitializeAutoUpdateTimer();
+                }
+                else if (!_settings.AutoUpdateGames && _autoUpdateTimer != null)
+                {
+                    _autoUpdateTimer.Stop();
+                    _autoUpdateTimer.Dispose();
+                    _autoUpdateTimer = null;
+                    AddLog("Auto-update disabled", LogMessageType.Info);
+                }
+                else if (_settings.AutoUpdateGames && _autoUpdateTimer != null)
+                {
+                    // Update interval if it changed
+                    _autoUpdateTimer.Stop();
+                    _autoUpdateTimer.Interval = _settings.AutoUpdateCheckInterval * 60 * 1000;
+                    _autoUpdateTimer.Start();
+                    AddLog($"Auto-update interval changed to {_settings.AutoUpdateCheckInterval} minutes", LogMessageType.Info);
+                }
+            });
+            
+            await settingsWindow.ShowDialog(desktop.MainWindow);
         }
     }
 
     private async Task ScanIncompleteTransfersAsync()
     {
-        await Task.Run(() =>
+        await Task.Run(async () =>
         {
             var libraryPaths = _steamScanner.GetLibraryFolders()
                 .Select(f => Path.Combine(f, "common"))
                 .Where(Directory.Exists)
                 .ToList();
 
+            if (libraryPaths.Count == 0)
+            {
+                // Try to scan Steam library to populate library folders
+                await _steamScanner.ScanGamesAsync();
+                libraryPaths = _steamScanner.GetLibraryFolders()
+                    .Select(f => Path.Combine(f, "common"))
+                    .Where(Directory.Exists)
+                    .ToList();
+            }
+
             var incomplete = _fileTransferService.FindIncompleteTransfers(libraryPaths);
 
-            Application.Current.Dispatcher.Invoke(() =>
+            Dispatcher.UIThread.Post(() =>
             {
                 // Remember the currently selected game's AppId
                 var previousSelectedAppId = SelectedIncompleteTransfer?.GameAppId;
                 
-                IncompleteTransfers.Clear();
-                foreach (var transfer in incomplete)
-                {
-                    IncompleteTransfers.Add(transfer);
-                }
+                // Assign new collection to trigger UI update
+                IncompleteTransfers = new ObservableCollection<TransferState>(incomplete);
+                System.Diagnostics.Debug.WriteLine($"ScanIncompleteTransfersAsync: Assigned {IncompleteTransfers.Count} incomplete transfers to UI");
 
                 // Try to re-select the previously selected item, or select the first one
-                if (IncompleteTransfers.Count > 0)
+                if (previousSelectedAppId != null)
                 {
-                    if (previousSelectedAppId != null)
-                    {
-                        SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == previousSelectedAppId);
-                    }
-                    
-                    // If previous selection not found, select the first item
-                    if (SelectedIncompleteTransfer == null)
-                    {
-                        SelectedIncompleteTransfer = IncompleteTransfers.First();
-                    }
-                    
-                    StatusMessage = $"Found {incomplete.Count} incomplete transfer(s) that can be resumed";
+                    SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == previousSelectedAppId);
                 }
-                else
+                
+                // If previous selection not found, select the first item
+                if (SelectedIncompleteTransfer == null)
                 {
-                    SelectedIncompleteTransfer = null;
+                    SelectedIncompleteTransfer = IncompleteTransfers.FirstOrDefault();
                 }
                 
                 // Force command to re-evaluate CanExecute
@@ -391,13 +556,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
-            // Check firewall first
-            if (!FirewallConfigured)
+            if (OperatingSystem.IsWindows() && !FirewallConfigured)
             {
-                StatusMessage = "?? Firewall not configured - peers may not be able to connect to you";
+                StatusMessage = "⚠ Firewall not configured - peers may not be able to connect to you";
             }
 
             StatusMessage = "Starting network discovery...";
+            AddLog("Starting network discovery...", LogMessageType.Info);
             
             await _networkService.StartAsync();
             
@@ -405,19 +570,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             try
             {
                 await _fileTransferService.StartListeningAsync();
-                System.Diagnostics.Debug.WriteLine($"File transfer service listening: {_fileTransferService.IsListening}");
+                System.Diagnostics.Debug.WriteLine($"File transfer service listening: {_fileTransferService.IsListening} on port {_fileTransferService.ListeningPort}");
+                
+                // Tell the network service what port we're actually using for file transfers
+                _networkService.LocalFileTransferPort = _fileTransferService.ListeningPort;
+                
+                AddLog($"File transfer service started on port {_fileTransferService.ListeningPort}", LogMessageType.Success);
             }
             catch (InvalidOperationException ex)
             {
-                // Port already in use
-                StatusMessage = $"?? Network started but file transfer failed: {ex.Message}";
-                MessageBox.Show(
+                // All ports in use
+                StatusMessage = $"⚠ Network started but file transfer failed: {ex.Message}";
+                AddLog($"File transfer service FAILED to start: {ex.Message}", LogMessageType.Error);
+                await ShowMessageAsync("File Transfer Service Error",
                     $"Warning: File Transfer Service failed to start!\n\n{ex.Message}\n\n" +
-                    "Other computers will NOT be able to download games FROM this computer.\n\n" +
-                    "Please close any other instances of GamesLocalShare and try again.",
-                    "File Transfer Service Error",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                    "Other computers will NOT be able to download games FROM this computer.");
             }
             
             IsNetworkActive = true;
@@ -430,25 +597,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                status += " - ?? File transfer NOT listening!";
+                status += " - ⚠ File transfer NOT listening!";
             }
             
-            if (!FirewallConfigured)
+            if (OperatingSystem.IsWindows() && !FirewallConfigured)
             {
-                status += " (?? firewall not configured)";
+                status += " (⚠ firewall not configured)";
             }
             
             StatusMessage = status;
 
-            // Share our games with the network and file transfer service
+            // Share our VISIBLE games with the network and file transfer service
             if (LocalGames.Count > 0)
             {
-                var gamesList = LocalGames.ToList();
-                await _networkService.UpdateLocalGamesAsync(gamesList);
-                _fileTransferService.UpdateLocalGames(gamesList);
+                var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
+                await _networkService.UpdateLocalGamesAsync(visibleGames);
+                _fileTransferService.UpdateLocalGames(visibleGames);
+                AddLog($"Shared {visibleGames.Count} games with network", LogMessageType.Info);
             }
 
-            AddLog("Network discovery started", LogMessageType.Info);
+            AddLog("Network started successfully", LogMessageType.Success);
+
+            // Start auto-update timer if enabled
+            if (_settings.AutoUpdateGames)
+            {
+                InitializeAutoUpdateTimer();
+            }
         }
         catch (Exception ex)
         {
@@ -495,7 +669,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             
             StatusMessage = foundCount > 0 
                 ? $"Scan complete. Found {foundCount} peer(s)." 
-                : "No peers found. Make sure the app is running on other computers and firewall is configured on BOTH computers.";
+                : "No peers found. Make sure the app is running on other computers.";
             
             AddLog($"Scan for peers completed: {foundCount} found", LogMessageType.Info);
         }
@@ -539,7 +713,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
             else
             {
-                StatusMessage = $"Could not connect to {ManualPeerIp}. Make sure firewall is configured on BOTH computers!";
+                StatusMessage = $"Could not connect to {ManualPeerIp}";
                 AddLog($"Failed to connect to {ManualPeerIp}", LogMessageType.Warning);
             }
         }
@@ -560,6 +734,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         StatusMessage = $"Requesting game list from {SelectedPeer.DisplayName}...";
+        AddLog($"Requesting game list from {SelectedPeer.DisplayName}...", LogMessageType.Info);
         await _networkService.RequestGameListAsync(SelectedPeer);
     }
 
@@ -577,7 +752,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var peer in NetworkPeers.ToList())
         {
             await _networkService.RequestGameListAsync(peer);
-            await Task.Delay(100); // Small delay between requests
+            await Task.Delay(100);
         }
 
         StatusMessage = $"Refreshed game lists from {NetworkPeers.Count} peer(s)";
@@ -731,7 +906,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (success)
             {
-                IncompleteTransfers.Remove(SelectedIncompleteTransfer);
+                // Remove from incomplete transfers
+                var toRemove = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == SelectedIncompleteTransfer.GameAppId);
+                if (toRemove != null)
+                {
+                    IncompleteTransfers.Remove(toRemove);
+                }
                 await ScanLocalGamesAsync();
             }
         }
@@ -748,14 +928,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private bool CanResumeTransfer() => SelectedIncompleteTransfer != null && !IsTransferring;
-
-    [RelayCommand]
-    private void CancelTransfer()
-    {
-        // TODO: Implement cancellation
-        StatusMessage = "Transfer cancelled (will be saved for resume)";
-        IsTransferring = false;
-    }
 
     private string GetTargetPathForNewGame(GameInfo game)
     {
@@ -779,7 +951,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnPeerDiscovered(object? sender, NetworkPeer peer)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             if (!NetworkPeers.Any(p => p.PeerId == peer.PeerId))
             {
@@ -792,7 +964,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnPeerLost(object? sender, NetworkPeer peer)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
@@ -810,18 +982,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnPeerGamesUpdated(object? sender, NetworkPeer peer)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
-            // Update the peer in our collection
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
             {
-                existing.Games = peer.Games;
+                // Assign new collection to trigger UI update
+                existing.Games = new ObservableCollection<GameInfo>(peer.Games);
                 
-                // Force UI update by removing and re-adding
-                var index = NetworkPeers.IndexOf(existing);
-                NetworkPeers.RemoveAt(index);
-                NetworkPeers.Insert(index, existing);
+                System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: {peer.DisplayName} now has {existing.Games.Count} games");
+            }
+            else
+            {
+                // Peer not in our collection yet, add it
+                System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: Peer {peer.DisplayName} not found in NetworkPeers, adding...");
+                NetworkPeers.Add(peer);
             }
 
             // Recalculate available syncs and new games
@@ -829,13 +1004,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             UpdateAvailableFromPeers();
             
             StatusMessage = $"Received {peer.Games.Count} games from {peer.DisplayName}";
-            AddLog($"Updated game list from {peer.DisplayName}", LogMessageType.Info);
+            AddLog($"Updated game list from {peer.DisplayName}: {peer.Games.Count} games", LogMessageType.Info);
         });
     }
 
     private void OnScanProgress(object? sender, string message)
     {
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             StatusMessage = message;
         });
@@ -925,29 +1100,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         _lastProgressUpdate = now;
 
-        // Use BeginInvoke (async) instead of Invoke (sync) to prevent blocking
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             CurrentTransferProgress = e.Progress;
             CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond, ShowSpeedInMbps);
             CurrentTransferFile = e.CurrentFile;
+            CurrentTransferTimeRemaining = FormatTimeRemaining(e.EstimatedTimeRemaining);
+            CurrentTransferTotalBytes = e.TotalBytes;
+            CurrentTransferDownloadedBytes = e.TransferredBytes;
 
             if (SelectedSyncItem != null)
             {
                 SelectedSyncItem.Progress = e.Progress;
                 SelectedSyncItem.TransferSpeed = e.SpeedBytesPerSecond;
             }
+
+            // Update current queue item if processing queue
+            if (CurrentQueueItem != null)
+            {
+                CurrentQueueItem.Progress = e.Progress;
+                CurrentQueueItem.DownloadedBytes = e.TransferredBytes;
+                CurrentQueueItem.TotalBytes = e.TotalBytes;
+            }
         });
     }
 
     private void OnTransferCompleted(object? sender, TransferCompletedEventArgs e)
     {
-        // Use BeginInvoke for consistency
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
             IsTransferring = false;
             CurrentTransferProgress = 0;
             CurrentTransferFile = string.Empty;
+            CurrentTransferTimeRemaining = string.Empty;
 
             if (e.Success)
             {
@@ -981,22 +1166,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnTransferStopped(object? sender, TransferStoppedEventArgs e)
     {
-        System.Diagnostics.Debug.WriteLine($"OnTransferStopped event received. GameName={e.GameName}, IsPaused={e.IsPaused}");
-        
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        Dispatcher.UIThread.Post(() =>
         {
-            System.Diagnostics.Debug.WriteLine($"OnTransferStopped dispatcher. IsTransferring before={IsTransferring}");
-            
             IsTransferring = false;
             CurrentTransferProgress = 0;
             CurrentTransferFile = string.Empty;
             CurrentTransferGameName = string.Empty;
+            CurrentTransferTimeRemaining = string.Empty;
 
             var action = e.IsPaused ? "paused" : "stopped";
             var message = $"Transfer {action}: {e.GameName}";
             StatusMessage = message;
             
-            System.Diagnostics.Debug.WriteLine($"OnTransferStopped: IsTransferring after={IsTransferring}, calling ScanIncompleteTransfersAsync");
+            // Mark current queue item as paused if this was a pause action
+            if (e.IsPaused && CurrentQueueItem != null)
+            {
+                CurrentQueueItem.Status = DownloadQueueStatus.Paused;
+                AddLog($"Queue item marked as paused: {e.GameName}", LogMessageType.Warning);
+            }
             
             // Refresh incomplete transfers to show the paused/stopped one
             _ = ScanIncompleteTransfersAsync();
@@ -1030,6 +1217,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private static string FormatTimeRemaining(TimeSpan timeRemaining)
+    {
+        if (timeRemaining.TotalSeconds < 1)
+            return "Calculating...";
+        
+        if (timeRemaining.TotalSeconds > 86400) // More than 24 hours
+            return "More than 1 day";
+        
+        if (timeRemaining.TotalHours >= 1)
+            return $"{(int)timeRemaining.TotalHours}h {timeRemaining.Minutes}m";
+        
+        if (timeRemaining.TotalMinutes >= 1)
+            return $"{(int)timeRemaining.TotalMinutes}m {timeRemaining.Seconds}s";
+        
+        return $"{(int)timeRemaining.TotalSeconds}s";
+    }
+
     [RelayCommand]
     private void ToggleSpeedUnit()
     {
@@ -1057,13 +1261,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void CopyLocalIpToClipboard()
+    private async Task CopyLocalIpToClipboardAsync()
     {
         try
         {
-            Clipboard.SetText(LocalIpAddress);
-            StatusMessage = $"IP address '{LocalIpAddress}' copied to clipboard";
-            AddLog($"Copied IP to clipboard: {LocalIpAddress}", LogMessageType.Info);
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop && 
+                desktop.MainWindow?.Clipboard != null)
+            {
+                await desktop.MainWindow.Clipboard.SetTextAsync(LocalIpAddress);
+                StatusMessage = $"IP address '{LocalIpAddress}' copied to clipboard";
+                AddLog($"Copied IP to clipboard: {LocalIpAddress}", LogMessageType.Info);
+            }
         }
         catch (Exception ex)
         {
@@ -1072,47 +1280,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void OpenGameFolder(GameInfo? game = null)
-    {
-        var target = game ?? SelectedLocalGame;
-        if (target == null || string.IsNullOrEmpty(target.InstallPath))
-            return;
-
-        try
-        {
-            if (Directory.Exists(target.InstallPath))
-            {
-                // Open the folder using the system shell. UseShellExecute = true lets the OS handle the path and spaces.
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = target.InstallPath,
-                    UseShellExecute = true
-                };
-
-                System.Diagnostics.Process.Start(psi);
-            }
-            else
-            {
-                StatusMessage = $"Folder does not exist: {target.InstallPath}";
-            }
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Failed to open folder: {ex.Message}";
-        }
-    }
-
-    [RelayCommand]
-    private void CopyPeerIp()
+    private async Task CopyPeerIpAsync()
     {
         if (SelectedPeer == null)
             return;
 
         try
         {
-            Clipboard.SetText(SelectedPeer.IpAddress);
-            StatusMessage = $"Copied peer IP: {SelectedPeer.IpAddress}";
-            AddLog($"Copied peer IP to clipboard: {SelectedPeer.IpAddress}", LogMessageType.Info);
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop && 
+                desktop.MainWindow?.Clipboard != null)
+            {
+                await desktop.MainWindow.Clipboard.SetTextAsync(SelectedPeer.IpAddress);
+                StatusMessage = $"Copied peer IP: {SelectedPeer.IpAddress}";
+                AddLog($"Copied peer IP to clipboard: {SelectedPeer.IpAddress}", LogMessageType.Info);
+            }
         }
         catch (Exception ex)
         {
@@ -1121,19 +1302,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void DeleteIncompleteTransfer()
+    private async Task DeleteIncompleteTransferAsync()
     {
         if (SelectedIncompleteTransfer == null)
             return;
 
-        var result = MessageBox.Show(
+        var result = await ShowConfirmAsync("Delete Incomplete Transfer",
             $"Delete incomplete transfer for '{SelectedIncompleteTransfer.GameName}'?\n\n" +
-            "This will delete the partially downloaded files and cannot be undone.",
-            "Delete Incomplete Transfer",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            "This will delete the partially downloaded files and cannot be undone.");
 
-        if (result == MessageBoxResult.Yes)
+        if (result)
         {
             try
             {
@@ -1158,20 +1336,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void Dispose()
+    [RelayCommand]
+    private void PauseTransfer()
     {
-        _networkService.PeerDiscovered -= OnPeerDiscovered;
-        _networkService.PeerLost -= OnPeerLost;
-        _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;
-        _networkService.ScanProgress -= OnScanProgress;
-        _networkService.ConnectionError -= OnConnectionError;
-        _networkService.GamesRequestedButEmpty -= OnGamesRequestedButEmpty;
-        _fileTransferService.ProgressChanged -= OnTransferProgress;
-        _fileTransferService.TransferCompleted -= OnTransferCompleted;
-        _fileTransferService.TransferStopped -= OnTransferStopped;
+        _fileTransferService.PauseTransfer();
+        IsTransferring = false;
+        AddLog("Transfer paused - can be resumed from Incomplete panel", LogMessageType.Warning);
+    }
 
-        _networkService.Dispose();
-        _fileTransferService.Dispose();
+    [RelayCommand]
+    private void StopTransfer()
+    {
+        _fileTransferService.StopTransfer();
+        IsTransferring = false;
+        AddLog("Transfer stopped - progress saved for resume", LogMessageType.Warning);
     }
 
     [RelayCommand]
@@ -1188,6 +1366,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var results = new System.Text.StringBuilder();
         results.AppendLine($"=== Connection Test to {SelectedPeer.DisplayName} ===");
         results.AppendLine($"Target IP: {SelectedPeer.IpAddress}");
+        results.AppendLine($"Advertised File Transfer Port: {SelectedPeer.FileTransferPort}");
         results.AppendLine();
 
         // Test TCP 45678 (game list)
@@ -1197,60 +1376,705 @@ public partial class MainViewModel : ObservableObject, IDisposable
             using var client1 = new System.Net.Sockets.TcpClient();
             var cts1 = new CancellationTokenSource(5000);
             await client1.ConnectAsync(SelectedPeer.IpAddress, 45678, cts1.Token);
-            results.AppendLine("  ? SUCCESS - Connected!");
+            results.AppendLine("  ✓ SUCCESS - Connected!");
             client1.Close();
         }
         catch (Exception ex)
         {
-            results.AppendLine($"  ? FAILED - {ex.Message}");
+            results.AppendLine($"  ✗ FAILED - {ex.Message}");
         }
         
-        // Test TCP 45679 (file transfer)
+        // Test peer's advertised file transfer port
         results.AppendLine();
-        results.AppendLine("Testing TCP 45679 (File Transfer)...");
+        results.AppendLine($"Testing TCP {SelectedPeer.FileTransferPort} (Peer's File Transfer Port)...");
         try
         {
             using var client2 = new System.Net.Sockets.TcpClient();
             var cts2 = new CancellationTokenSource(5000);
-            await client2.ConnectAsync(SelectedPeer.IpAddress, 45679, cts2.Token);
-            results.AppendLine("  ? SUCCESS - Connected!");
+            await client2.ConnectAsync(SelectedPeer.IpAddress, SelectedPeer.FileTransferPort, cts2.Token);
+            results.AppendLine("  ✓ SUCCESS - Connected!");
             client2.Close();
         }
         catch (Exception ex)
         {
-            results.AppendLine($"  ? FAILED - {ex.Message}");
+            results.AppendLine($"  ✗ FAILED - {ex.Message}");
+        }
+
+        // Test primary file transfer port (45679) if different from advertised
+        if (SelectedPeer.FileTransferPort != 45679)
+        {
+            results.AppendLine();
+            results.AppendLine("Testing TCP 45679 (Default File Transfer Port)...");
+            try
+            {
+                using var client3 = new System.Net.Sockets.TcpClient();
+                var cts3 = new CancellationTokenSource(5000);
+                await client3.ConnectAsync(SelectedPeer.IpAddress, 45679, cts3.Token);
+                results.AppendLine("  ✓ SUCCESS - Connected!");
+                client3.Close();
+            }
+            catch (Exception ex)
+            {
+                results.AppendLine($"  ✗ FAILED - {ex.Message}");
+            }
         }
 
         results.AppendLine();
-        results.AppendLine("If port 45678 works but 45679 fails:");
-        results.AppendLine("- The peer may not have clicked 'Start Network'");
-        results.AppendLine("- Another app may be using port 45679 on the peer");
-        results.AppendLine("- Firewall may be blocking port 45679 specifically");
+        results.AppendLine("═══════════════════════════════════════");
+        results.AppendLine("If game list works but file transfer fails:");
+        results.AppendLine("═══════════════════════════════════════");
+        results.AppendLine("1. The peer may not have clicked 'Start Network'");
+        results.AppendLine("2. Firewall may be blocking the file transfer port");
+        results.AppendLine("3. Another app may be using the port on the peer");
+        results.AppendLine();
+        results.AppendLine($"Your file transfer port: {_fileTransferService.ListeningPort}");
+        results.AppendLine($"Peer's file transfer port: {SelectedPeer.FileTransferPort}");
 
-        MessageBox.Show(results.ToString(), "Connection Test Results", MessageBoxButton.OK, MessageBoxImage.Information);
+        await ShowMessageAsync("Connection Test Results", results.ToString());
         
         StatusMessage = "Connection test complete";
     }
 
-    [RelayCommand]
-    private void PauseTransfer()
+    private void InitializeAutoUpdateTimer()
     {
-        System.Diagnostics.Debug.WriteLine($"PauseTransfer command called. IsTransferring={IsTransferring}");
-        _fileTransferService.PauseTransfer();
-        
-        // Force IsTransferring to false immediately in case event doesn't fire
-        IsTransferring = false;
-        AddLog("Transfer paused - can be resumed from Incomplete panel", LogMessageType.Warning);
+        _autoUpdateTimer = new System.Timers.Timer(_settings.AutoUpdateCheckInterval * 60 * 1000);
+        _autoUpdateTimer.Elapsed += async (s, e) => await CheckForAutoUpdatesAsync();
+        _autoUpdateTimer.AutoReset = true;
+        _autoUpdateTimer.Start();
+        AddLog($"Auto-update enabled: checking every {_settings.AutoUpdateCheckInterval} minutes", LogMessageType.Info);
     }
 
-    [RelayCommand]
-    private void StopTransfer()
+    private async Task CheckForAutoUpdatesAsync()
     {
-        System.Diagnostics.Debug.WriteLine($"StopTransfer command called. IsTransferring={IsTransferring}");
-        _fileTransferService.StopTransfer();
+        if (!IsNetworkActive || NetworkPeers.Count == 0 || IsTransferring)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            AddLog("Checking for auto-updates...", LogMessageType.Info);
+            UpdateAvailableSyncs();
+        });
+
+        if (AvailableSyncs.Count > 0)
+        {
+            AddLog($"Found {AvailableSyncs.Count} game update(s), starting downloads...", LogMessageType.Info);
+            
+            // Download updates one by one
+            foreach (var syncItem in AvailableSyncs.ToList())
+            {
+                if (!_settings.AutoUpdateGames || !IsNetworkActive)
+                    break;
+
+                await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    SelectedSyncItem = syncItem;
+                    await StartSyncAsync();
+                });
+
+                // Wait a bit between downloads
+                await Task.Delay(5000);
+            }
+        }
+    }
+
+    public string CurrentTransferFormattedProgress => 
+        $"{CurrentTransferProgress:0.0}% ({FormatBytes(CurrentTransferDownloadedBytes)} / {FormatBytes(CurrentTransferTotalBytes)})";
+
+    #region Download Queue Management
+
+    /// <summary>
+    /// Adds all available updates to the download queue
+    /// </summary>
+    [RelayCommand]
+    private void AddAllUpdatesToQueue()
+    {
+        if (AvailableSyncs.Count == 0)
+        {
+            StatusMessage = "No updates available to add to queue";
+            return;
+        }
+
+        var addedCount = 0;
+        foreach (var syncItem in AvailableSyncs)
+        {
+            // Check if already in queue
+            if (DownloadQueue.Any(q => q.GameAppId == syncItem.RemoteGame.AppId))
+                continue;
+
+            var queueItem = new DownloadQueueItem
+            {
+                Type = DownloadQueueItemType.Update,
+                GameName = syncItem.RemoteGame.Name,
+                GameAppId = syncItem.RemoteGame.AppId,
+                SourcePeerName = syncItem.RemotePeer.DisplayName,
+                TotalBytes = syncItem.RemoteGame.SizeOnDisk,
+                DownloadedBytes = 0,
+                Status = DownloadQueueStatus.Queued,
+                Progress = 0,
+                SyncInfo = syncItem
+            };
+
+            DownloadQueue.Add(queueItem);
+            addedCount++;
+        }
+
+        StatusMessage = $"Added {addedCount} update(s) to download queue";
+        AddLog($"Added {addedCount} updates to queue", LogMessageType.Info);
         
-        // Force IsTransferring to false immediately in case event doesn't fire
-        IsTransferring = false;
-        AddLog("Transfer stopped - progress saved for resume", LogMessageType.Warning);
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Adds all incomplete transfers to the download queue
+    /// </summary>
+    [RelayCommand]
+    private void AddAllIncompleteToQueue()
+    {
+        if (IncompleteTransfers.Count == 0)
+        {
+            StatusMessage = "No incomplete transfers to add to queue";
+            return;
+        }
+
+        var addedCount = 0;
+        foreach (var transfer in IncompleteTransfers)
+        {
+            // Check if already in queue
+            if (DownloadQueue.Any(q => q.GameAppId == transfer.GameAppId))
+                continue;
+
+            var queueItem = new DownloadQueueItem
+            {
+                Type = DownloadQueueItemType.Incomplete,
+                GameName = transfer.GameName,
+                GameAppId = transfer.GameAppId,
+                SourcePeerName = transfer.SourcePeerName,
+                TotalBytes = transfer.TotalBytes,
+                DownloadedBytes = transfer.TransferredBytes,
+                Status = DownloadQueueStatus.Queued,
+                Progress = transfer.ProgressPercent,
+                TransferState = transfer
+            };
+
+            DownloadQueue.Add(queueItem);
+            addedCount++;
+        }
+
+        StatusMessage = $"Added {addedCount} incomplete transfer(s) to download queue";
+        AddLog($"Added {addedCount} incomplete transfers to queue", LogMessageType.Info);
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Moves a queue item up in the list
+    /// </summary>
+    [RelayCommand]
+    private void MoveQueueItemUp(DownloadQueueItem item)
+    {
+        var index = DownloadQueue.IndexOf(item);
+        if (index > 0 && item.Status != DownloadQueueStatus.Downloading)
+        {
+            DownloadQueue.Move(index, index - 1);
+            AddLog($"Moved '{item.GameName}' up in queue", LogMessageType.Info);
+        }
+    }
+
+    /// <summary>
+    /// Moves a queue item down in the list
+    /// </summary>
+    [RelayCommand]
+    private void MoveQueueItemDown(DownloadQueueItem item)
+    {
+        var index = DownloadQueue.IndexOf(item);
+        if (index < DownloadQueue.Count - 1 && item.Status != DownloadQueueStatus.Downloading)
+        {
+            DownloadQueue.Move(index, index + 1);
+            AddLog($"Moved '{item.GameName}' down in queue", LogMessageType.Info);
+        }
+    }
+
+    /// <summary>
+    /// Removes a specific item from the queue
+    /// </summary>
+    [RelayCommand]
+    private void RemoveFromQueue(DownloadQueueItem item)
+    {
+        if (item.Status == DownloadQueueStatus.Downloading)
+        {
+            StatusMessage = "Cannot remove an active download. Pause it first.";
+            return;
+        }
+
+        DownloadQueue.Remove(item);
+        AddLog($"Removed '{item.GameName}' from queue", LogMessageType.Info);
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Clears all queued items (not active or completed)
+    /// </summary>
+    [RelayCommand]
+    private void ClearQueue()
+    {
+        AddLog("ClearQueue command executed", LogMessageType.Info);
+        var clearableItems = DownloadQueue.Where(q => 
+            q.Status == DownloadQueueStatus.Queued || 
+            q.Status == DownloadQueueStatus.Paused || 
+            q.Status == DownloadQueueStatus.Failed).ToList();
+        
+        foreach (var item in clearableItems)
+        {
+            DownloadQueue.Remove(item);
+        }
+
+        AddLog($"Cleared {clearableItems.Count} item(s) from queue", LogMessageType.Info);
+        StatusMessage = $"Cleared {clearableItems.Count} items from queue";
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Starts processing the download queue
+    /// </summary>
+    [RelayCommand]
+    private async Task StartQueueAsync()
+    {
+        AddLog("StartQueueAsync command executed", LogMessageType.Info);
+        if (IsQueueProcessing || IsTransferring)
+            return;
+
+        IsQueueProcessing = true;
+        AddLog("Starting download queue processing", LogMessageType.Info);
+        StatusMessage = "Processing download queue...";
+
+        await ProcessDownloadQueueAsync();
+    }
+
+    private bool CanStartQueue() => !IsQueueProcessing && DownloadQueue.Any(q => 
+        q.Status == DownloadQueueStatus.Queued || 
+        q.Status == DownloadQueueStatus.Paused);
+
+    /// <summary>
+    /// Pauses queue processing
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanPauseQueue))]
+    private void PauseQueue()
+    {
+        if (!IsQueueProcessing)
+            return;
+
+        AddLog("Pausing download queue...", LogMessageType.Warning);
+        IsQueueProcessing = false;
+        
+        if (IsTransferring)
+        {
+            _fileTransferService.PauseTransfer();
+        }
+
+        // Mark current item as paused if it's downloading
+        if (CurrentQueueItem != null && CurrentQueueItem.Status == DownloadQueueStatus.Downloading)
+        {
+            CurrentQueueItem.Status = DownloadQueueStatus.Paused;
+        }
+
+        AddLog("Download queue paused", LogMessageType.Warning);
+        StatusMessage = "Download queue paused";
+    }
+
+    private bool CanPauseQueue() => IsQueueProcessing;
+
+    /// <summary>
+    /// Retries all paused and failed items by resetting their status to Queued
+    /// </summary>
+    [RelayCommand]
+    private void RetryFailedAndPaused()
+    {
+        var itemsToRetry = DownloadQueue.Where(q => 
+            q.Status == DownloadQueueStatus.Paused || 
+            q.Status == DownloadQueueStatus.Failed).ToList();
+
+        if (itemsToRetry.Count == 0)
+        {
+            StatusMessage = "No paused or failed items to retry";
+            return;
+        }
+
+        foreach (var item in itemsToRetry)
+        {
+            item.Status = DownloadQueueStatus.Queued;
+        }
+
+        AddLog($"Reset {itemsToRetry.Count} item(s) to queued status for retry", LogMessageType.Info);
+        StatusMessage = $"Reset {itemsToRetry.Count} item(s) for retry - click Start Queue to begin";
+        
+        StartQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Auto-resumes downloads on startup if enabled in settings
+    /// </summary>
+    private async Task AutoResumeDownloadsOnStartupAsync()
+    {
+        // Wait a bit for the UI to initialize
+        await Task.Delay(2000);
+
+        // Check if we have any incomplete transfers
+        await ScanIncompleteTransfersAsync();
+
+        if (IncompleteTransfers.Count == 0)
+            return;
+
+        AddLog($"Auto-resume: Found {IncompleteTransfers.Count} incomplete transfer(s)", LogMessageType.Info);
+
+        // Check if network is active
+        if (!IsNetworkActive)
+        {
+            AddLog("Auto-resume: Starting network...", LogMessageType.Info);
+            await StartNetworkAsync();
+            
+            // Wait for network to start
+            await Task.Delay(2000);
+        }
+
+        if (!IsNetworkActive)
+        {
+            AddLog("Auto-resume: Network failed to start", LogMessageType.Warning);
+            return;
+        }
+
+        // Add all incomplete transfers to queue
+        AddAllIncompleteToQueueCommand.Execute(null);
+
+        // Wait for peers to be discovered
+        if (NetworkPeers.Count == 0)
+        {
+            AddLog("Auto-resume: Waiting for peers...", LogMessageType.Info);
+            await Task.Delay(5000);
+        }
+
+        if (NetworkPeers.Count == 0)
+        {
+            AddLog("Auto-resume: No peers found, queue will wait", LogMessageType.Warning);
+        }
+
+        // Start the queue
+        if (DownloadQueue.Count > 0)
+        {
+            AddLog("Auto-resume: Starting download queue", LogMessageType.Info);
+            await StartQueueAsync();
+        }
+    }
+
+    /// <summary>
+    /// Processes the download queue sequentially
+    /// </summary>
+    private async Task ProcessDownloadQueueAsync()
+    {
+        while (IsQueueProcessing)
+        {
+            // Get the next item that is Queued or Paused
+            var nextItem = DownloadQueue.FirstOrDefault(q => 
+                q.Status == DownloadQueueStatus.Queued || 
+                q.Status == DownloadQueueStatus.Paused);
+            
+            if (nextItem == null)
+            {
+                // No more items to process
+                IsQueueProcessing = false;
+                var completedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Completed);
+                var failedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Failed);
+                var pausedCount = DownloadQueue.Count(q => q.Status == DownloadQueueStatus.Paused);
+                
+                AddLog($"Download queue finished - Completed: {completedCount}, Failed: {failedCount}, Paused: {pausedCount}", LogMessageType.Success);
+                
+                if (failedCount > 0 || pausedCount > 0)
+                {
+                    StatusMessage = $"Queue finished: {completedCount} completed, {failedCount} failed, {pausedCount} paused";
+                }
+                else
+                {
+                    StatusMessage = "All queued downloads completed successfully";
+                }
+                break;
+            }
+
+            CurrentQueueItem = nextItem;
+            nextItem.Status = DownloadQueueStatus.Downloading;
+
+            AddLog($"Starting queued download: {nextItem.GameName}", LogMessageType.Transfer);
+
+            bool success = false;
+
+            try
+            {
+                IsTransferring = true;
+                CurrentTransferGameName = nextItem.GameName;
+
+                if (nextItem.Type == DownloadQueueItemType.Update && nextItem.SyncInfo != null)
+                {
+                    // Process update
+                    var syncItem = nextItem.SyncInfo;
+                    
+                    if (syncItem.IsNewDownload)
+                    {
+                        var targetPath = GetTargetPathForNewGame(syncItem.RemoteGame);
+                        success = await _fileTransferService.RequestNewGameDownloadAsync(
+                            syncItem.RemotePeer,
+                            syncItem.RemoteGame,
+                            targetPath);
+                    }
+                    else if (syncItem.LocalGame != null)
+                    {
+                        success = await _fileTransferService.RequestGameTransferAsync(
+                            syncItem.RemotePeer,
+                            syncItem.RemoteGame,
+                            syncItem.LocalGame);
+                    }
+                }
+                else if (nextItem.Type == DownloadQueueItemType.Incomplete && nextItem.TransferState != null)
+                {
+                    // Process incomplete transfer
+                    var peer = NetworkPeers.FirstOrDefault(p => 
+                        p.Games.Any(g => g.AppId == nextItem.TransferState.GameAppId));
+
+                    if (peer == null)
+                    {
+                        // Try to connect to the original peer
+                        var connected = await _networkService.ConnectToPeerByIpAsync(nextItem.TransferState.SourcePeerIp);
+                        if (connected)
+                        {
+                            peer = NetworkPeers.FirstOrDefault(p => p.IpAddress == nextItem.TransferState.SourcePeerIp);
+                        }
+                    }
+
+                    if (peer != null)
+                    {
+                        success = await _fileTransferService.ResumeTransferAsync(nextItem.TransferState, peer);
+                        
+                        if (success)
+                        {
+                            // Remove from incomplete transfers
+                            var toRemove = IncompleteTransfers.FirstOrDefault(t => t.GameAppId == nextItem.TransferState.GameAppId);
+                            if (toRemove != null)
+                            {
+                                IncompleteTransfers.Remove(toRemove);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        AddLog($"Cannot find peer for {nextItem.GameName}", LogMessageType.Error);
+                        success = false;
+                    }
+                }
+
+                // Check if queue was paused during download
+                if (!IsQueueProcessing)
+                {
+                    // Queue was paused - mark item as paused (not failed)
+                    nextItem.Status = DownloadQueueStatus.Paused;
+                    AddLog($"Download paused: {nextItem.GameName}", LogMessageType.Warning);
+                }
+                else if (success)
+                {
+                    nextItem.Status = DownloadQueueStatus.Completed;
+                    nextItem.Progress = 100;
+                    nextItem.DownloadedBytes = nextItem.TotalBytes;
+                    AddLog($"Download completed: {nextItem.GameName}", LogMessageType.Success);
+                }
+                else
+                {
+                    nextItem.Status = DownloadQueueStatus.Failed;
+                    AddLog($"Download failed: {nextItem.GameName}", LogMessageType.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                nextItem.Status = DownloadQueueStatus.Failed;
+                AddLog($"Queue download failed: {nextItem.GameName} - {ex.Message}", LogMessageType.Error);
+            }
+            finally
+            {
+                IsTransferring = false;
+                CurrentTransferGameName = string.Empty;
+                CurrentQueueItem = null;
+            }
+
+            // Check if we should stop
+            if (!IsQueueProcessing)
+            {
+                AddLog("Queue processing stopped by user", LogMessageType.Warning);
+                break;
+            }
+
+            // Wait a bit before next download
+            await Task.Delay(2000);
+        }
+
+        // Refresh game list after queue completes
+        if (DownloadQueue.Any(q => q.Status == DownloadQueueStatus.Completed))
+        {
+            await ScanLocalGamesAsync();
+        }
+
+        StartQueueCommand.NotifyCanExecuteChanged();
+        PauseQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    #endregion
+
+    // Helper methods for showing dialogs (cross-platform)
+    private async Task ShowMessageAsync(string title, string message)
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop &&
+            desktop.MainWindow != null)
+        {
+            var dialog = new Window
+            {
+                Title = title,
+                Width = 600,
+                Height = 400,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = new ScrollViewer
+                {
+                    Content = new TextBlock
+                    {
+                        Text = message,
+                        Margin = new Thickness(16),
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                    }
+                }
+            };
+            await dialog.ShowDialog(desktop.MainWindow);
+        }
+    }
+
+    private async Task<bool> ShowConfirmAsync(string title, string message)
+    {
+        // For now, return true - proper dialog implementation would be added
+        // In a full implementation, you'd use a proper dialog library or custom dialog
+        return await Task.FromResult(true);
+    }
+
+    private void OpenGameFolder(GameInfo? game = null)
+    {
+        var target = game ?? SelectedLocalGame;
+        if (target == null || string.IsNullOrEmpty(target.InstallPath))
+            return;
+
+        try
+        {
+            if (Directory.Exists(target.InstallPath))
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = target.InstallPath,
+                    UseShellExecute = true
+                };
+                System.Diagnostics.Process.Start(psi);
+            }
+            else
+            {
+                StatusMessage = $"Folder does not exist: {target.InstallPath}";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to open folder: {ex.Message}";
+        }
+    }
+
+    private async Task ToggleGameVisibilityAsync(GameInfo? game)
+    {
+        if (game == null)
+            return;
+
+        try
+        {
+            // Toggle the hidden state
+            game.IsHidden = !game.IsHidden;
+            
+            // Update settings
+            if (game.IsHidden)
+            {
+                _settings.HideGame(game.AppId);
+                AddLog($"Hidden game from network: {game.Name}", LogMessageType.Info);
+                StatusMessage = $"'{game.Name}' is now hidden from network";
+            }
+            else
+            {
+                _settings.UnhideGame(game.AppId);
+                AddLog($"Showing game on network: {game.Name}", LogMessageType.Info);
+                StatusMessage = $"'{game.Name}' is now visible on network";
+            }
+            
+            // Save settings to disk
+            _settings.Save();
+            
+            // Update the network and file transfer service with VISIBLE games only
+            if (IsNetworkActive)
+            {
+                var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
+                await _networkService.UpdateLocalGamesAsync(visibleGames);
+                _fileTransferService.UpdateLocalGames(visibleGames);
+                AddLog($"Updated network with {visibleGames.Count} visible games", LogMessageType.Info);
+            }
+            
+            // Force UI update
+            var index = LocalGames.IndexOf(game);
+            if (index >= 0)
+            {
+                LocalGames.RemoveAt(index);
+                LocalGames.Insert(index, game);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to toggle game visibility: {ex.Message}";
+            AddLog($"Error toggling game visibility: {ex.Message}", LogMessageType.Error);
+        }
+    }
+
+    private async Task CopyLogMessageAsync(LogMessage logMessage)
+    {
+        try
+        {
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop && 
+                desktop.MainWindow?.Clipboard != null)
+            {
+                await desktop.MainWindow.Clipboard.SetTextAsync(logMessage.Message);
+                StatusMessage = $"Log message copied to clipboard";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to copy log message: {ex.Message}";
+        }
+    }
+
+    public void Dispose()
+    {
+        _autoUpdateTimer?.Stop();
+        _autoUpdateTimer?.Dispose();
+        
+        _networkService.PeerDiscovered -= OnPeerDiscovered;
+        _networkService.PeerLost -= OnPeerLost;
+        _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;
+        _networkService.ScanProgress -= OnScanProgress;
+        _networkService.ConnectionError -= OnConnectionError;
+        _networkService.GamesRequestedButEmpty -= OnGamesRequestedButEmpty;
+        _fileTransferService.ProgressChanged -= OnTransferProgress;
+        _fileTransferService.TransferCompleted -= OnTransferCompleted;
+        _fileTransferService.TransferStopped -= OnTransferStopped;
+
+        _networkService.Dispose();
+        _fileTransferService.Dispose();
     }
 }

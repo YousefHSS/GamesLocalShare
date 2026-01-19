@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Security.Principal;
+using System.Runtime.Versioning;
 
 namespace GamesLocalShare.Services;
 
 /// <summary>
 /// Helper class to check and configure Windows Firewall rules
+/// On non-Windows platforms, these methods return appropriate defaults
 /// </summary>
 public static class FirewallHelper
 {
@@ -20,11 +21,20 @@ public static class FirewallHelper
     /// </summary>
     public static bool IsRunningAsAdmin()
     {
+        if (!OperatingSystem.IsWindows())
+            return false;
+
+        return IsRunningAsAdminWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsRunningAsAdminWindows()
+    {
         try
         {
-            using var identity = WindowsIdentity.GetCurrent();
-            var principal = new WindowsPrincipal(identity);
-            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
         }
         catch
         {
@@ -37,9 +47,17 @@ public static class FirewallHelper
     /// </summary>
     public static bool CheckFirewallRulesExist()
     {
+        if (!OperatingSystem.IsWindows())
+            return true; // On Linux/macOS, we assume firewall is handled differently
+
+        return CheckFirewallRulesExistWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool CheckFirewallRulesExistWindows()
+    {
         try
         {
-            // Check for one of our specific rules (don't use pipe/findstr which can hang)
             var result = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} Program In\"");
             return result.Contains(AppName) && !result.Contains("No rules match");
         }
@@ -50,12 +68,22 @@ public static class FirewallHelper
     }
 
     /// <summary>
-    /// Adds comprehensive firewall rules for the application (requires admin)
-    /// Creates multiple types of rules for maximum compatibility
+    /// Adds comprehensive firewall rules for the application (requires admin, Windows only)
     /// </summary>
     public static (bool Success, string Message) AddFirewallRules()
     {
-        if (!IsRunningAsAdmin())
+        if (!OperatingSystem.IsWindows())
+        {
+            return (false, "Firewall configuration is only supported on Windows");
+        }
+
+        return AddFirewallRulesWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static (bool Success, string Message) AddFirewallRulesWindows()
+    {
+        if (!IsRunningAsAdminWindows())
         {
             return (false, "Administrator privileges required to add firewall rules");
         }
@@ -65,17 +93,11 @@ public static class FirewallHelper
             var results = new List<string>();
             var successCount = 0;
             
-            // First, delete ALL existing GamesLocalShare rules
             DeleteAllExistingRules();
 
-            // Get the path to the current executable
             var exePath = GetExecutablePath();
 
-            // ============================================
-            // METHOD 1: Program-based rules (MOST RELIABLE)
-            // ============================================
-            
-            // Inbound program rule
+            // Program-based rules
             if (AddRule($"{AppName} Program In", $"dir=in action=allow program=\"{exePath}\" enable=yes profile=any"))
             {
                 results.Add("? Program rule (inbound): OK");
@@ -86,7 +108,6 @@ public static class FirewallHelper
                 results.Add("? Program rule (inbound): FAILED");
             }
 
-            // Outbound program rule
             if (AddRule($"{AppName} Program Out", $"dir=out action=allow program=\"{exePath}\" enable=yes profile=any"))
             {
                 results.Add("? Program rule (outbound): OK");
@@ -97,11 +118,7 @@ public static class FirewallHelper
                 results.Add("? Program rule (outbound): FAILED");
             }
 
-            // ============================================
-            // METHOD 2: Port-based rules (BACKUP)
-            // ============================================
-            
-            // UDP Discovery - Inbound
+            // Port-based rules
             if (AddRule($"{AppName} UDP {UdpPort} In", $"dir=in action=allow protocol=UDP localport={UdpPort} profile=any"))
             {
                 results.Add($"? UDP {UdpPort} (inbound): OK");
@@ -112,7 +129,6 @@ public static class FirewallHelper
                 results.Add($"? UDP {UdpPort} (inbound): FAILED");
             }
 
-            // TCP Game List - Inbound
             if (AddRule($"{AppName} TCP {TcpPort1} In", $"dir=in action=allow protocol=TCP localport={TcpPort1} profile=any"))
             {
                 results.Add($"? TCP {TcpPort1} (inbound): OK");
@@ -123,7 +139,6 @@ public static class FirewallHelper
                 results.Add($"? TCP {TcpPort1} (inbound): FAILED");
             }
 
-            // TCP File Transfer - Inbound
             if (AddRule($"{AppName} TCP {TcpPort2} In", $"dir=in action=allow protocol=TCP localport={TcpPort2} profile=any"))
             {
                 results.Add($"? TCP {TcpPort2} (inbound): OK");
@@ -167,6 +182,7 @@ public static class FirewallHelper
         return exePath;
     }
 
+    [SupportedOSPlatform("windows")]
     private static bool AddRule(string ruleName, string ruleParams)
     {
         try
@@ -180,6 +196,7 @@ public static class FirewallHelper
         }
     }
 
+    [SupportedOSPlatform("windows")]
     private static void DeleteAllExistingRules()
     {
         var ruleNames = new[]
@@ -209,11 +226,22 @@ public static class FirewallHelper
     }
 
     /// <summary>
-    /// Removes all firewall rules for the application (requires admin)
+    /// Removes all firewall rules for the application (requires admin, Windows only)
     /// </summary>
     public static (bool Success, string Message) RemoveFirewallRules()
     {
-        if (!IsRunningAsAdmin())
+        if (!OperatingSystem.IsWindows())
+        {
+            return (false, "Firewall configuration is only supported on Windows");
+        }
+
+        return RemoveFirewallRulesWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static (bool Success, string Message) RemoveFirewallRulesWindows()
+    {
+        if (!IsRunningAsAdminWindows())
         {
             return (false, "Administrator privileges required");
         }
@@ -230,9 +258,20 @@ public static class FirewallHelper
     }
 
     /// <summary>
-    /// Restarts the application with administrator privileges
+    /// Restarts the application with administrator privileges (Windows only)
     /// </summary>
     public static void RestartAsAdmin()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("RestartAsAdmin is only supported on Windows");
+        }
+
+        RestartAsAdminWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void RestartAsAdminWindows()
     {
         try
         {
@@ -251,7 +290,7 @@ public static class FirewallHelper
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Failed to restart as admin: {ex.Message}");
+            Debug.WriteLine($"Failed to restart as admin: {ex.Message}");
             throw;
         }
     }
@@ -264,39 +303,58 @@ public static class FirewallHelper
         var report = new System.Text.StringBuilder();
         report.AppendLine("=== Network Diagnostics ===");
         report.AppendLine();
+        report.AppendLine($"Platform: {GetPlatformName()}");
         
-        report.AppendLine($"Running as Admin: {IsRunningAsAdmin()}");
-        report.AppendLine($"Firewall Rules Exist: {CheckFirewallRulesExist()}");
+        if (OperatingSystem.IsWindows())
+        {
+            report.AppendLine($"Running as Admin: {IsRunningAsAdmin()}");
+            report.AppendLine($"Firewall Rules Exist: {CheckFirewallRulesExist()}");
+        }
+        else
+        {
+            report.AppendLine("Firewall: Managed by system (not Windows)");
+        }
+        
         report.AppendLine();
-        
         report.AppendLine("Required Ports:");
         report.AppendLine($"  UDP {UdpPort} - Discovery");
         report.AppendLine($"  TCP {TcpPort1} - Game list");
         report.AppendLine($"  TCP {TcpPort2} - File transfer");
         report.AppendLine();
 
-        // Check specific rules
-        report.AppendLine("Checking firewall rules:");
-        try
+        if (OperatingSystem.IsWindows())
         {
-            var programRule = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} Program In\"");
-            report.AppendLine(programRule.Contains(AppName) && !programRule.Contains("No rules") 
-                ? "  ? Program rule exists" 
-                : "  ? Program rule missing");
-                
-            var tcpRule = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} TCP {TcpPort2} In\"");
-            report.AppendLine(tcpRule.Contains(AppName) && !tcpRule.Contains("No rules") 
-                ? $"  ? TCP {TcpPort2} rule exists" 
-                : $"  ? TCP {TcpPort2} rule missing");
-        }
-        catch (Exception ex)
-        {
-            report.AppendLine($"  Error: {ex.Message}");
+            report.AppendLine("Checking firewall rules:");
+            try
+            {
+                var programRule = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} Program In\"");
+                report.AppendLine(programRule.Contains(AppName) && !programRule.Contains("No rules") 
+                    ? "  ? Program rule exists" 
+                    : "  ? Program rule missing");
+                    
+                var tcpRule = RunNetshCommand($"advfirewall firewall show rule name=\"{AppName} TCP {TcpPort2} In\"");
+                report.AppendLine(tcpRule.Contains(AppName) && !tcpRule.Contains("No rules") 
+                    ? $"  ? TCP {TcpPort2} rule exists" 
+                    : $"  ? TCP {TcpPort2} rule missing");
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine($"  Error: {ex.Message}");
+            }
         }
 
         return report.ToString();
     }
 
+    private static string GetPlatformName()
+    {
+        if (OperatingSystem.IsWindows()) return "Windows";
+        if (OperatingSystem.IsLinux()) return "Linux";
+        if (OperatingSystem.IsMacOS()) return "macOS";
+        return "Unknown";
+    }
+
+    [SupportedOSPlatform("windows")]
     private static string RunNetshCommand(string arguments)
     {
         return RunCommand("netsh", arguments);
@@ -320,7 +378,6 @@ public static class FirewallHelper
             if (process == null)
                 return string.Empty;
 
-            // Use timeout to avoid hanging
             var output = "";
             var error = "";
             

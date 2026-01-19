@@ -1,0 +1,253 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="550" d:DesignHeight="650"
+        x:Class="GamesLocalShare.Views.SettingsWindow"
+        Title="Settings"
+        Width="550" Height="650"
+        MinWidth="500" MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="#1E1E1E"
+        CanResize="False">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="20">
+        
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{DynamicResource AccentBrush}" 
+                CornerRadius="8" Padding="20" Margin="0,0,0,20">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock Text="⚙" FontSize="24" VerticalAlignment="Center" Foreground="White"/>
+                <TextBlock Text="Application Settings" 
+                           FontSize="20" FontWeight="Bold" 
+                           Foreground="White"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Settings Content -->
+        <ScrollViewer Grid.Row="1" Margin="0,0,0,20">
+            <StackPanel Spacing="20">
+                
+                <!-- General Settings Section -->
+                <Border Background="#2D2D30" CornerRadius="8" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="General Settings" 
+                                   FontSize="16" FontWeight="Bold" 
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Margin="0,0,0,8"/>
+                        
+                        <CheckBox x:Name="AutoStartNetworkCheckBox"
+                                  Content="Auto-start network on application startup"
+                                  Foreground="White"
+                                  ToolTip.Tip="Automatically start network discovery when the app launches"/>
+                        
+                        <CheckBox x:Name="StartWithWindowsCheckBox"
+                                  Content="Start application with Windows"
+                                  Foreground="White"
+                                  ToolTip.Tip="Auto-start the application when Windows starts"/>
+                        
+                        <CheckBox x:Name="MinimizeToTrayCheckBox"
+                                  Content="Minimize to system tray instead of closing"
+                                  Foreground="White"
+                                  ToolTip.Tip="When enabled, clicking the X button will minimize to system tray instead of closing the app"/>
+                        
+                    </StackPanel>
+                </Border>
+
+                <!-- Auto-Update Settings Section -->
+                <Border Background="#2D2D30" CornerRadius="8" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="Auto-Update Settings" 
+                                   FontSize="16" FontWeight="Bold" 
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Margin="0,0,0,8"/>
+                        
+                        <CheckBox x:Name="AutoUpdateGamesCheckBox"
+                                  Content="Automatically download game updates from peers"
+                                  Foreground="White"
+                                  ToolTip.Tip="When enabled, the app will automatically download updates for your games when newer versions are found on the network"/>
+                        
+                        <CheckBox x:Name="AutoResumeDownloadsCheckBox"
+                                  Content="Auto-resume incomplete downloads on startup"
+                                  Foreground="White"
+                                  ToolTip.Tip="When enabled, incomplete downloads will automatically be added to the queue and resumed when the app starts"/>
+                        
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Check for updates every:" 
+                                       Foreground="White" 
+                                       FontSize="13"/>
+                            
+                            <Grid ColumnDefinitions="150,*">
+                                <NumericUpDown x:Name="UpdateIntervalNumeric"
+                                             Grid.Column="0"
+                                             Minimum="5" 
+                                             Maximum="1440" 
+                                             Value="30"
+                                             Increment="5"
+                                             FormatString="0"
+                                             Watermark="Minutes"
+                                             ToolTip.Tip="How often to check for game updates (5-1440 minutes)"/>
+                                <TextBlock Grid.Column="1" 
+                                           Text="minutes" 
+                                           Foreground="#9CA3AF" 
+                                           VerticalAlignment="Center"
+                                           Margin="12,0,0,0"/>
+                            </Grid>
+                            
+                            <TextBlock Text="Recommended: 30 minutes for active use, 60+ for background" 
+                                       FontSize="11" 
+                                       Foreground="#6B7280" 
+                                       FontStyle="Italic"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,0"/>
+                        </StackPanel>
+
+                        <Border Background="#3C3C3C" 
+                                CornerRadius="4" 
+                                Padding="12"
+                                BorderBrush="{DynamicResource AccentBrush}"
+                                BorderThickness="1">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="ℹ️ How Auto-Update Works" 
+                                           FontWeight="SemiBold" 
+                                           Foreground="White"
+                                           FontSize="12"/>
+                                <TextBlock TextWrapping="Wrap" 
+                                           Foreground="#9CA3AF"
+                                           FontSize="11">
+                                    When auto-update is enabled, the app will periodically check connected peers for newer versions of your installed games. If found, it will automatically download and install the updates in the background.
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- Hidden Games Section -->
+                <Border Background="#2D2D30" CornerRadius="8" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="Hidden Games" 
+                                   FontSize="16" FontWeight="Bold" 
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Margin="0,0,0,8"/>
+                        
+                        <TextBlock TextWrapping="Wrap" 
+                                   Foreground="#9CA3AF"
+                                   FontSize="12">
+                            Hidden games are not shared with other computers on the network. You can hide/unhide games by right-clicking them in the "My Games" list.
+                        </TextBlock>
+                        
+                        <Grid ColumnDefinitions="Auto,*">
+                            <TextBlock Grid.Column="0"
+                                       Text="Currently hidden:" 
+                                       Foreground="White" 
+                                       FontSize="13"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,12,0"/>
+                            <TextBlock Grid.Column="1"
+                                       x:Name="HiddenGamesCountText"
+                                       Text="0 games" 
+                                       Foreground="{DynamicResource AccentBrush}" 
+                                       FontWeight="Bold"
+                                       FontSize="13"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+                        
+                        <Border Background="#3C3C3C" 
+                                CornerRadius="4" 
+                                Padding="12"
+                                MaxHeight="150">
+                            <ScrollViewer>
+                                <ItemsControl x:Name="HiddenGamesListBox">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" 
+                                                       Foreground="#9CA3AF"
+                                                       FontSize="11"
+                                                       Margin="0,2"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+                        
+                        <Button Content="Show All Hidden Games"
+                                Click="ShowAllHiddenGamesButton_Click"
+                                HorizontalAlignment="Left"
+                                Padding="16,6"
+                                Background="#3C3C3C"
+                                Foreground="White"
+                                ToolTip.Tip="Unhide all hidden games at once"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- About Section -->
+                <Border Background="#2D2D30" CornerRadius="8" Padding="20">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="About" 
+                                   FontSize="16" FontWeight="Bold" 
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Margin="0,0,0,8"/>
+                        
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Games Local Share" 
+                                       FontSize="15" 
+                                       FontWeight="Bold" 
+                                       Foreground="White"/>
+                            <TextBlock Text="Version 1.0.0" 
+                                       FontSize="12" 
+                                       Foreground="#9CA3AF"/>
+                            
+                            <TextBlock Text="Share and sync Steam games over your local network" 
+                                       FontSize="12" 
+                                       Foreground="#9CA3AF"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0"/>
+                            
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                                <TextBlock Text="📁" FontSize="14"/>
+                                <TextBlock Text="Settings Location:" 
+                                           FontSize="11" 
+                                           Foreground="#6B7280"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock x:Name="SettingsPathText"
+                                       Text="%APPDATA%\GamesLocalShare\settings.json" 
+                                       FontSize="10" 
+                                       Foreground="#6B7280"
+                                       TextWrapping="Wrap"
+                                       Margin="24,0,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Action Buttons -->
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto,Auto">
+            <Button Grid.Column="0"
+                    Content="Reset to Defaults" 
+                    Click="ResetButton_Click"
+                    Background="#3C3C3C"
+                    Foreground="White"
+                    Padding="20,10"
+                    ToolTip.Tip="Reset all settings to their default values"/>
+            
+            <Button Grid.Column="2" 
+                    Content="Save" 
+                    Click="SaveButton_Click"
+                    Classes="primary"
+                    Padding="30,10"
+                    Margin="0,0,12,0"
+                    ToolTip.Tip="Save changes and close"/>
+            
+            <Button Grid.Column="3" 
+                    Content="Cancel" 
+                    Click="CancelButton_Click"
+                    Classes="secondary"
+                    Padding="30,10"
+                    ToolTip.Tip="Close without saving"/>
+        </Grid>
+    </Grid>
+</Window>
