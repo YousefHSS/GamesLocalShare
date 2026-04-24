@@ -34,6 +34,7 @@ public class FileTransferService : IDisposable
     private static readonly int[] FallbackPorts = [45680, 45681, 45682, 45683];
     private const int ConnectionTimeoutMs = 10000;
     private const int MaxParallelFiles = 4;
+    private static readonly TimeSpan TimestampComparisonTolerance = TimeSpan.FromSeconds(2);
     
     // Adaptive buffer sizes - smaller for WiFi, larger for wired
     // WiFi typically benefits from smaller buffers due to latency/jitter
@@ -480,6 +481,8 @@ public class FileTransferService : IDisposable
                 else
                 {
                     filesToDownload = await GetFilesToDownloadAsync(localGame.InstallPath, manifest.Files);
+                    var unchangedFiles = manifest.Files.Count - filesToDownload.Count;
+                    System.Diagnostics.Debug.WriteLine($"Incremental sync: {unchangedFiles} unchanged files skipped, {filesToDownload.Count} files need transfer");
                 }
 
                 long totalBytes = filesToDownload.Sum(f => f.Size);
@@ -1057,9 +1060,8 @@ public class FileTransferService : IDisposable
                         RelativePath = relativePath,
                         Size = file.Length,
                         LastModified = file.LastWriteTimeUtc,
-                        // Skip hash computation for manifest building - it's slow for many files
-                        // The receiver will compare by size first, then hash only if sizes match
-                        Hash = string.Empty
+                        // Quick hash enables selective verification when size matches but timestamp differs
+                        Hash = ComputeQuickHash(file.FullName, file.Length)
                     });
                 }
                 catch { }
@@ -1072,6 +1074,7 @@ public class FileTransferService : IDisposable
     private async Task<List<FileTransferInfo>> GetFilesToDownloadAsync(string localPath, List<FileTransferInfo> remoteFiles)
     {
         var filesToDownload = new List<FileTransferInfo>();
+        var hashChecks = 0;
 
         await Task.Run(() =>
         {
@@ -1093,21 +1096,31 @@ public class FileTransferService : IDisposable
                     continue;
                 }
 
-                // If remote hash is empty (skipped for performance), assume file is OK if size matches
-                // This is a reasonable trade-off for games with many small files
-                if (string.IsNullOrEmpty(remoteFile.Hash))
+                var timeDelta = localInfo.LastWriteTimeUtc - remoteFile.LastModified;
+                if (timeDelta.Duration() <= TimestampComparisonTolerance)
                 {
-                    // Size matches, no hash to compare - assume file is OK
                     continue;
                 }
 
-                var localHash = ComputeQuickHash(localFilePath, localInfo.Length);
-                if (localHash != remoteFile.Hash)
+                // Timestamp mismatch policy:
+                // if size matches but timestamps differ, verify by hash when available.
+                if (!string.IsNullOrEmpty(remoteFile.Hash))
                 {
-                    filesToDownload.Add(remoteFile);
+                    hashChecks++;
+                    var localHash = ComputeQuickHash(localFilePath, localInfo.Length);
+                    if (!string.Equals(localHash, remoteFile.Hash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        filesToDownload.Add(remoteFile);
+                    }
+                    continue;
                 }
+
+                // No hash available from remote: conservative fallback to transfer.
+                filesToDownload.Add(remoteFile);
             }
         }).ConfigureAwait(false);
+
+        System.Diagnostics.Debug.WriteLine($"Incremental sync analysis complete: {remoteFiles.Count} files checked, {hashChecks} hash validations, {filesToDownload.Count} files selected for transfer");
 
         return filesToDownload;
     }
