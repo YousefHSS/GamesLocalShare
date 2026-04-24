@@ -5,6 +5,7 @@ export default function PeersPanel() {
   const networkPeers = useAppState((state) => state.networkPeers);
   const availableFromPeers = useAppState((state) => state.availableFromPeers);
   const selectedPeer = useAppState((state) => state.selectedPeer);
+  const selectedPeerGame = useAppState((state) => state.selectedPeerGame);
   const manualPeerIp = useAppState((state) => state.manualPeerIp);
   const isNetworkActive = useAppState((state) => state.isNetworkActive);
 
@@ -53,7 +54,7 @@ export default function PeersPanel() {
       </div>
 
       {/* Peers list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {networkPeers.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-400 text-sm">
             No peers found
@@ -86,14 +87,31 @@ export default function PeersPanel() {
       </div>
 
       {/* New Games from Peers */}
-      <div className="border-t border-dark-item">
+      <div className="border-t border-dark-item flex-shrink-0 h-48 flex flex-col overflow-hidden">
         <div className="bg-accent-purple px-4 py-2 text-sm font-bold text-white">
-          New Games from Peers
+          New Games from Peers ({availableFromPeers.length})
         </div>
-        <div className="p-2 text-xs text-gray-400">
-          {availableFromPeers.length === 0
-            ? 'No new games available'
-            : `${availableFromPeers.length} games available`}
+        <div className="flex-1 overflow-y-auto p-2">
+          {availableFromPeers.length === 0 ? (
+            <div className="text-xs text-gray-400">No new games available</div>
+          ) : (
+            <div className="space-y-1">
+              {availableFromPeers.map((game) => (
+                <div
+                  key={game.appId}
+                  onClick={() => sendCommand('SelectPeerGame', { appId: game.appId })}
+                  className={`p-2 rounded cursor-pointer transition text-xs ${
+                    selectedPeerGame?.appId === game.appId
+                      ? 'bg-accent-blue bg-opacity-20'
+                      : 'bg-dark-item hover:bg-opacity-80'
+                  }`}
+                >
+                  <p className="text-white font-semibold truncate">{game.name}</p>
+                  <p className="text-gray-400">{game.buildId} • {game.formattedSize}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

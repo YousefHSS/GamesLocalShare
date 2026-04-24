@@ -63,7 +63,7 @@ export interface DownloadQueueItem {
   sourcePeerName: string;
   totalBytes: number;
   downloadedBytes: number;
-  status: string;
+  status: string | number;
   progress: number;
   statusText: string;
   statusColor: string;

@@ -5,6 +5,9 @@ export default function QueuePanel() {
   const incompleteTransfers = useAppState((state) => state.incompleteTransfers);
   const downloadQueue = useAppState((state) => state.downloadQueue);
   const isQueueProcessing = useAppState((state) => state.isQueueProcessing);
+  const hasRunnableItems = downloadQueue.some((item) =>
+    item.status === 'Queued' || item.status === 'Paused' || item.status === 0 || item.status === 4
+  );
 
   return (
     <div className="bg-dark-panel rounded flex flex-col h-full overflow-hidden">
@@ -95,7 +98,7 @@ export default function QueuePanel() {
                     </div>
                   </div>
 
-                  {item.status === 'Downloading' && (
+                  {(item.status === 'Downloading' || item.status === 1) && (
                     <div className="w-full bg-dark-panel rounded h-1">
                       <div
                         className="h-full bg-cyan-500"
@@ -120,7 +123,7 @@ export default function QueuePanel() {
         <div className="px-2 py-2 border-t border-dark-item flex-shrink-0 flex gap-2">
           <button
             onClick={() => sendCommand('StartQueue')}
-            disabled={isQueueProcessing}
+            disabled={isQueueProcessing || !hasRunnableItems}
             className="flex-1 bg-cyan-600 px-3 py-1 rounded text-white text-xs hover:bg-opacity-80 disabled:opacity-50"
           >
             Start Queue

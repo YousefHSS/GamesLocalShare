@@ -814,9 +814,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task DownloadNewGameAsync()
+    private void DownloadNewGame()
     {
-        if (SelectedPeerGame == null || IsTransferring)
+        if (SelectedPeerGame == null)
             return;
 
         // Find a peer that has this game
@@ -836,35 +836,52 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        try
+        // Check if it's already in the queue
+        if (DownloadQueue.Any(q => q.GameAppId == SelectedPeerGame.AppId))
         {
-            IsTransferring = true;
-            CurrentTransferGameName = SelectedPeerGame.Name;
-            StatusMessage = $"Downloading {SelectedPeerGame.Name} from {peer.DisplayName}...";
-            AddLog($"Starting download: {SelectedPeerGame.Name} from {peer.DisplayName}", LogMessageType.Transfer);
+            StatusMessage = "Game is already in the download queue";
+            AddLog("Game is already in the download queue", LogMessageType.Warning);
+            return;
+        }
 
-            var targetPath = GetTargetPathForNewGame(SelectedPeerGame);
-
-            var success = await _fileTransferService.RequestNewGameDownloadAsync(
-                peer,
-                SelectedPeerGame,
-                targetPath);
-
-            if (success)
-            {
-                // Refresh local games to include the new one
-                await ScanLocalGamesAsync();
+        // Add to queue
+        var syncInfo = new GameSyncInfo
+        {
+            RemoteGame = SelectedPeerGame,
+            RemotePeer = peer,
+            LocalGame = new GameInfo 
+            { 
+                AppId = SelectedPeerGame.AppId, 
+                Name = SelectedPeerGame.Name, 
+                IsInstalled = false 
             }
-        }
-        catch (Exception ex)
+        };
+
+        var queueItem = new DownloadQueueItem
         {
-            StatusMessage = $"Download error: {ex.Message}";
-            AddLog($"Download error: {ex.Message}", LogMessageType.Error);
-        }
-        finally
+            GameAppId = SelectedPeerGame.AppId,
+            GameName = SelectedPeerGame.Name,
+            Type = DownloadQueueItemType.Update, // ProcessNextQueueItemAsync treats IsNewDownload in SyncInfo as Update
+            TotalBytes = SelectedPeerGame.SizeOnDisk,
+            DownloadedBytes = 0,
+            Status = DownloadQueueStatus.Queued,
+            Progress = 0,
+            SyncInfo = syncInfo
+        };
+
+        DownloadQueue.Add(queueItem);
+
+        StatusMessage = "Added new game to download queue";
+        AddLog($"Added {SelectedPeerGame.Name} to download queue", LogMessageType.Info);
+
+        // Notify commands
+        StartQueueCommand.NotifyCanExecuteChanged();
+        ClearQueueCommand.NotifyCanExecuteChanged();
+
+        // Optionally start the queue if it's not processing
+        if (!IsQueueProcessing && DownloadQueue.Count > 0)
         {
-            IsTransferring = false;
-            CurrentTransferGameName = string.Empty;
+            StartQueueCommand.Execute(null);
         }
     }
 

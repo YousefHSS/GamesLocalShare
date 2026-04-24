@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
+  Square, Trash2, RotateCcw,
 } from 'lucide-react';
 import { useAppState } from './store';
 import { sendCommand } from './bridge';
@@ -187,13 +188,31 @@ export default function App() {
                 {s.networkPeers.length === 0 && <Empty icon={<Users className="w-10 h-10 text-slate-600 mx-auto mb-2" />} title="No peers found" sub="Start network & scan" />}
               </div>
 
-              <div className="bg-gradient-to-r from-purple-600/20 to-purple-700/20 rounded-lg p-3 border border-purple-500/30">
-                <div className="flex items-center justify-between">
+              <div className="bg-gradient-to-r from-purple-600/20 to-purple-700/20 rounded-lg p-3 border border-purple-500/30 flex flex-col max-h-[50%] flex-shrink-0">
+                <div className="flex items-center justify-between mb-2 flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <Plus className="w-4 h-4 text-purple-400" />
                     <span className="text-white text-sm font-medium">New Games from Peers</span>
                   </div>
                   <span className="text-xs text-purple-400 font-semibold">({s.availableFromPeers.length})</span>
+                </div>
+                <div className="flex-1 overflow-auto space-y-1">
+                  {s.availableFromPeers.length === 0 ? (
+                    <div className="text-xs text-slate-400 mt-1 italic">No new games found</div>
+                  ) : (
+                    s.availableFromPeers.map(game => (
+                      <div
+                        key={game.appId}
+                        onClick={() => sendCommand('SelectPeerGame', { appId: game.appId })}
+                        className={`bg-slate-900/50 rounded p-2 border cursor-pointer ${
+                          s.selectedPeerGame?.appId === game.appId ? 'border-purple-500' : 'border-slate-700/50 hover:border-purple-500/50'
+                        }`}
+                      >
+                        <p className="text-white text-xs font-medium truncate">{game.name}</p>
+                        <p className="text-slate-400 text-[10px] mt-0.5">{game.buildId} • {game.formattedSize}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -236,21 +255,40 @@ export default function App() {
             actions={<button onClick={() => sendCommand('AddAllIncompleteToQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">+ Queue All</button>}
           >
             <div className="flex-1 overflow-auto p-4 space-y-2">
-              {s.incompleteTransfers.map((t) => (
-                <div
-                  key={t.gameAppId}
-                  onClick={() => sendCommand('SelectIncompleteTransfer', { appId: t.gameAppId })}
-                  className={`bg-slate-900/50 rounded-lg p-3 border cursor-pointer ${
-                    s.selectedIncompleteTransfer?.gameAppId === t.gameAppId ? 'border-red-500' : 'border-slate-700/50 hover:border-red-500/50'
-                  }`}
-                >
-                  <p className="text-white text-sm font-medium truncate">{t.gameName}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{t.formattedProgress}</p>
-                  <div className="w-full bg-slate-800 rounded h-1 mt-2 overflow-hidden">
-                    <div className="bg-red-500 h-full transition-all" style={{ width: `${t.progressPercent}%` }} />
+              {s.incompleteTransfers.map((t) => {
+                const selected = s.selectedIncompleteTransfer?.gameAppId === t.gameAppId;
+                return (
+                  <div
+                    key={t.gameAppId}
+                    onClick={() => sendCommand('SelectIncompleteTransfer', { appId: t.gameAppId })}
+                    className={`bg-slate-900/50 rounded-lg p-3 border cursor-pointer ${
+                      selected ? 'border-red-500' : 'border-slate-700/50 hover:border-red-500/50'
+                    }`}
+                  >
+                    <p className="text-white text-sm font-medium truncate">{t.gameName}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{t.formattedProgress}</p>
+                    <div className="w-full bg-slate-800 rounded h-1 mt-2 overflow-hidden">
+                      <div className="bg-red-500 h-full transition-all" style={{ width: `${t.progressPercent}%` }} />
+                    </div>
+                    {selected && (
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); sendCommand('ResumeTransfer'); }}
+                          className="flex-1 px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
+                        >
+                          <Play className="w-3 h-3" /> Resume
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete incomplete transfer for ${t.gameName}?`)) sendCommand('DeleteIncompleteTransfer'); }}
+                          className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center justify-center"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {s.incompleteTransfers.length === 0 && <Empty icon={<AlertCircle className="w-12 h-12 text-slate-600 mb-3" />} title="No incomplete downloads" sub="All downloads completed" />}
             </div>
             <div className="p-4 border-t border-slate-700/50 space-y-3">
@@ -261,7 +299,10 @@ export default function App() {
                     <span className="text-white text-sm font-semibold">Download Queue</span>
                     <span className="text-xs text-cyan-100">({s.downloadQueue.length})</span>
                   </div>
-                  <button onClick={() => sendCommand('ClearQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">Clear</button>
+                  <div className="flex gap-1">
+                    <button onClick={() => sendCommand('RetryFailedAndPaused')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors flex items-center gap-1"><RotateCcw className="w-3 h-3" />Retry</button>
+                    <button onClick={() => sendCommand('ClearQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">Clear</button>
+                  </div>
                 </div>
                 {s.downloadQueue.length === 0 ? (
                   <div className="p-6 text-center">
@@ -276,9 +317,13 @@ export default function App() {
                           <p className="text-xs text-white truncate">{q.gameName}</p>
                           <p className="text-[10px]" style={{ color: q.statusColor }}>{q.statusText}</p>
                         </div>
-                        <button onClick={() => sendCommand('RemoveFromQueue', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
-                          <X className="w-3 h-3 text-slate-400" />
-                        </button>
+                        <div className="flex items-center gap-0.5">
+                          <button title="Move up" onClick={() => sendCommand('MoveQueueItemUp', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▲</button>
+                          <button title="Move down" onClick={() => sendCommand('MoveQueueItemDown', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▼</button>
+                          <button title="Remove" onClick={() => sendCommand('RemoveFromQueue', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
+                            <X className="w-3 h-3 text-slate-400" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -297,6 +342,31 @@ export default function App() {
           </Panel>
         </div>
       </div>
+
+      {s.isTransferring && (
+        <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-6 py-2.5">
+          <div className="max-w-7xl mx-auto flex items-center gap-4">
+            <Download className="w-5 h-5 text-blue-400 animate-pulse flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-white truncate">{s.currentTransferGameName || 'Transferring...'}</span>
+                <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
+                  {s.currentTransferFormattedProgress} • {s.currentTransferSpeed} • ETA {s.currentTransferTimeRemaining}
+                </span>
+              </div>
+              <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all" style={{ width: `${s.currentTransferProgress}%` }} />
+              </div>
+              {s.currentTransferFile && <p className="text-[10px] text-slate-400 mt-1 truncate font-mono">{s.currentTransferFile}</p>}
+            </div>
+            <div className="flex gap-1 flex-shrink-0">
+              <button onClick={() => sendCommand('ToggleSpeedUnit')} title="Toggle Mbps/MBps" className="px-2 py-1 bg-slate-700/60 hover:bg-slate-700 rounded text-xs text-slate-200">{s.showSpeedInMbps ? 'Mbps' : 'MB/s'}</button>
+              <button onClick={() => sendCommand('PauseTransfer')} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium flex items-center gap-1"><Pause className="w-3 h-3" />Pause</button>
+              <button onClick={() => { if (confirm('Stop the current transfer?')) sendCommand('StopTransfer'); }} className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center gap-1"><Square className="w-3 h-3" />Stop</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-slate-950 border-t border-slate-800 px-6 py-2.5 flex items-center justify-between">
         <div className="flex items-center gap-4">

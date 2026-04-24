@@ -8,7 +8,7 @@ export default function MyGamesPanel() {
 
   console.log('[DEBUG] MyGamesPanel render, localGames:', localGames);
   console.log('[DEBUG] MyGamesPanel render, localGames count:', localGames.length);
-  console.log('[DEBUG] MyGamesPanel render, first game coverImagePath:', localGames[0]?.coverImagePath);
+  console.log('[DEBUG] MyGamesPanel render, first game:', localGames[0]);
   console.log('[DEBUG] MyGamesPanel render, selectedLocalGame:', selectedLocalGame);
   console.log('[DEBUG] MyGamesPanel render, isScanning:', isScanning);
 
@@ -54,7 +54,7 @@ export default function MyGamesPanel() {
               >
                 <div className="flex gap-2 items-start">
                   <div className="w-12 h-16 bg-dark-item rounded flex-shrink-0 flex overflow-hidden items-center justify-center text-xl">
-                    {game.coverImagePath ? (
+                    {false ? (
                       <img 
                         src={`https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appId}/library_600x900.jpg`} 
                         alt={`${game.name} cover`}
