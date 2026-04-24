@@ -18,7 +18,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     
     <!-- Enable JSON source generators for trimming compatibility -->
-    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,7 +31,10 @@
     <PackageReference Condition="'$(Configuration)' == 'Debug'" Include="Avalonia.Diagnostics" Version="11.3.0" />
     <PackageReference Include="Avalonia.ReactiveUI" Version="11.3.0" />
     <PackageReference Include="Avalonia.Svg.Skia" Version="11.3.0" />
-    
+    <!-- WebView for embedding HTML/React UI -->
+    <PackageReference Include="WebView.Avalonia" Version="11.0.0.1" />
+    <PackageReference Include="WebView.Avalonia.Desktop" Version="11.0.0.1" />
+
     <!-- For JSON configuration parsing (Steam uses VDF but we'll parse it) -->
     <PackageReference Include="Gameloop.Vdf" Version="0.6.2" />
     <!-- For MVVM pattern -->
@@ -40,6 +43,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+    <AvaloniaResource Include="Assets\webui\**" />
   </ItemGroup>
 
   <!-- Ensure any icons placed in the Icons folder are copied to the output directory -->
@@ -53,6 +57,21 @@
   </ItemGroup>
   <ItemGroup>
     <None Include=".github\workflows\release.yml" />
+  </ItemGroup>
+
+  <!-- Build WebUI (React) before building the C# project, then copy dist to Assets/webui -->
+  <Target Name="BuildWebUI" BeforeTargets="BeforeBuild" Condition="Exists('WebUI\package.json')">
+    <Exec Command="npm run build" WorkingDirectory="WebUI" />
+    <ItemGroup>
+      <_WebUIDist Include="WebUI\dist\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_WebUIDist)" DestinationFiles="@(_WebUIDist->'Assets\webui\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <ItemGroup>
+    <Content Include="Assets\webui\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

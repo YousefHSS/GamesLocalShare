@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_figma_figma__get_design_context",
+      "mcp__plugin_figma_figma__get_screenshot",
+      "WebSearch",
+      "WebFetch(domain:www.nuget.org)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet run *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)"
+    ]
+  }
+}

@@ -1,7 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using AvaloniaWebView;
 using GamesLocalShare.Models;
+using GamesLocalShare.Services;
 using GamesLocalShare.ViewModels;
 using System;
 
@@ -14,14 +16,16 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private bool _hasBeenShown;
     private bool _initialMinimizeDone;
-    
+    private InteropBridge? _bridge;
+
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new ViewModels.MainViewModel();
-        
+        var viewModel = new ViewModels.MainViewModel();
+        DataContext = viewModel;
+
         _settings = AppSettings.Load();
-        
+
         // Check if we should start minimized
         var args = Environment.GetCommandLineArgs();
         _startMinimized = Array.Exists(args, arg => arg == "--minimized");
@@ -33,10 +37,31 @@ public partial class MainWindow : Window
         }
     }
 
-    protected override void OnOpened(EventArgs e)
+    protected override async void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
-        
+
+        // Initialize WebView and InteropBridge
+        var webView = this.FindControl<WebView>("MainWebView");
+        if (webView != null && DataContext is MainViewModel viewModel)
+        {
+            _bridge = new InteropBridge(webView, viewModel);
+
+            var webUiPath = Path.Combine(AppContext.BaseDirectory, "Assets", "webui", "index.html");
+            if (File.Exists(webUiPath))
+            {
+                webView.HtmlContent = File.ReadAllText(webUiPath);
+            }
+            else
+            {
+                webView.HtmlContent = "<html><body style='background:#1E1E1E;color:#fff;'><h1>Web UI not found</h1></body></html>";
+            }
+
+            // Initialize the bridge after a short delay to allow WebView to load
+            await Task.Delay(500);
+            await _bridge.InitializeAsync();
+        }
+
         // Only hide to tray once on initial startup, not when restoring
         if (_startMinimized && _settings.MinimizeToTray && !_initialMinimizeDone)
         {
@@ -57,16 +82,19 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        // Dispose bridge
+        _bridge?.Dispose();
+
         // If we're explicitly allowing close (for app shutdown), let it through
         if (_allowClose)
         {
             base.OnClosing(e);
             return;
         }
-        
+
         // Reload settings in case they changed
         var settings = AppSettings.Load();
-        
+
         if (settings.MinimizeToTray && _hasBeenShown)
         {
             // Prevent closing, hide to tray instead
@@ -95,7 +123,7 @@ public partial class MainWindow : Window
         Topmost = true;
         Topmost = false;
     }
-    
+
     /// <summary>
     /// Allows the window to actually close (for app shutdown)
     /// </summary>
@@ -106,22 +134,7 @@ public partial class MainWindow : Window
 
     private void MainGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        // Close log panel if clicking outside of it
-        if (DataContext is MainViewModel vm && vm.IsLogVisible)
-        {
-            var logBorder = this.FindControl<Border>("LogBorder");
-            if (logBorder != null)
-            {
-                var position = e.GetPosition(logBorder);
-                var bounds = logBorder.Bounds;
-                
-                // Check if click is outside the log border
-                if (position.X < 0 || position.Y < 0 || 
-                    position.X > bounds.Width || position.Y > bounds.Height)
-                {
-                    vm.IsLogVisible = false;
-                }
-            }
-        }
+        // This event handler is no longer used since the log overlay is now in the React UI
+        // Kept for potential future use
     }
 }

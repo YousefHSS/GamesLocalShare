@@ -107,6 +107,25 @@ public class GameInfo : INotifyPropertyChanged
             {
                 _coverImage = value;
                 OnPropertyChanged();
+                // Send notification to update property specifically to the JS proxy mechanism if it relies on string properties
+                CoverImagePath = _coverImage != null ? $"loaded_{AppId}" : null;
+            }
+        }
+    }
+    
+    private string? _coverImagePath;
+    /// <summary>
+    /// Optional field used in JS data representation or internal tracking
+    /// </summary>
+    public string? CoverImagePath
+    {
+        get => _coverImagePath;
+        set
+        {
+            if (_coverImagePath != value)
+            {
+                _coverImagePath = value;
+                OnPropertyChanged();
             }
         }
     }

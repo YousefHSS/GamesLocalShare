@@ -406,6 +406,9 @@ public class SteamLibraryScanner
             IsInstalled = true // We've verified the directory exists and has content
         };
 
+        // Fire and forget cover image load
+        _ = LoadCoverImageAsync(game);
+
         return game;
     }
 
@@ -435,7 +438,12 @@ public class SteamLibraryScanner
                 var image = game.CoverImage;
                 game.CoverImage = null;
                 game.CoverImage = image;
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] Cover image loaded for {game.Name} (AppId: {game.AppId}), CoverImagePath: {game.CoverImagePath}");
             });
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] Cover image NOT loaded for {game.Name} (AppId: {game.AppId})");
         }
     }
 
