@@ -121,6 +121,11 @@ public class FileTransferService : IDisposable
     public event EventHandler<TransferStoppedEventArgs>? TransferStopped;
 
     /// <summary>
+    /// Event raised with diagnostic log messages from the transfer service
+    /// </summary>
+    public event EventHandler<string>? LogMessageRaised;
+
+    /// <summary>
     /// Starts listening for incoming file transfer requests
     /// </summary>
     public async Task StartListeningAsync()
@@ -1133,11 +1138,13 @@ public class FileTransferService : IDisposable
             }
         }).ConfigureAwait(false);
 
-        System.Diagnostics.Debug.WriteLine(
+        var summary =
             $"Incremental sync analysis: total={remoteFiles.Count}, hashChecks={hashChecks}, " +
             $"skip[timestamp={skippedTimestamp},hashMatch={skippedHashMatch}], " +
             $"download[missing={dlMissing},sizeDiff={dlSizeDiff},hashDiff={dlHashDiff},noRemoteHash={dlNoRemoteHash}], " +
-            $"total to transfer={filesToDownload.Count}");
+            $"total to transfer={filesToDownload.Count}";
+        System.Diagnostics.Debug.WriteLine(summary);
+        LogMessageRaised?.Invoke(this, summary);
 
         return filesToDownload;
     }

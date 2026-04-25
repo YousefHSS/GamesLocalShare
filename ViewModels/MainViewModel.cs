@@ -163,6 +163,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _fileTransferService.ProgressChanged += OnTransferProgress;
         _fileTransferService.TransferCompleted += OnTransferCompleted;
         _fileTransferService.TransferStopped += OnTransferStopped;
+        _fileTransferService.LogMessageRaised += (_, msg) => AddLog(msg, LogMessageType.Info);
 
         LocalIpAddress = _networkService.LocalPeer.IpAddress;
 
