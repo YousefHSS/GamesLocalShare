@@ -1,15 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
-  Square, Trash2, RotateCcw,
+  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye,
 } from 'lucide-react';
-import { useAppState } from './store';
+import { useAppState, type GameInfo } from './store';
 import { sendCommand } from './bridge';
+
+interface GameContextMenu {
+  x: number;
+  y: number;
+  game: GameInfo;
+}
 
 export default function App() {
   const s = useAppState();
   const [peerIP, setPeerIP] = useState('');
+  const [incompleteTab, setIncompleteTab] = useState<'incomplete' | 'queue'>('incomplete');
+  const [ctxMenu, setCtxMenu] = useState<GameContextMenu | null>(null);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('resize', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('blur', close);
+    };
+  }, [ctxMenu]);
+
+  const openGameMenu = (e: React.MouseEvent, game: GameInfo) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, game });
+  };
 
   const networkActive = s.isNetworkActive;
   const currentStep = s.localGames.length === 0 ? 1 : !networkActive ? 2 : s.networkPeers.length === 0 ? 3 : 4;
@@ -110,9 +137,10 @@ export default function App() {
                 <div
                   key={g.appId}
                   onClick={() => sendCommand('SelectLocalGame', { appId: g.appId })}
+                  onContextMenu={(e) => openGameMenu(e, g)}
                   className={`bg-slate-900/50 rounded-lg p-3 border transition-all group cursor-pointer ${
                     s.selectedLocalGame?.appId === g.appId ? 'border-blue-500' : 'border-slate-700/50 hover:border-blue-500/50'
-                  }`}
+                  } ${g.isHidden ? 'opacity-60' : ''}`}
                 >
                   <div className="flex gap-3">
                     <div className="w-16 h-20 bg-slate-700 rounded overflow-hidden flex-shrink-0 flex items-center justify-center">
@@ -247,13 +275,40 @@ export default function App() {
           </Panel>
 
           <Panel
-            title="Incomplete"
-            count={s.incompleteTransfers.length}
+            title="Transfers"
+            count={s.incompleteTransfers.length + s.downloadQueue.length}
             icon={<AlertCircle className="w-4 h-4 text-white" />}
-            gradient="from-red-600 to-red-700"
+            gradient="from-red-600 to-cyan-700"
             subColor="text-red-100"
-            actions={<button onClick={() => sendCommand('AddAllIncompleteToQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">+ Queue All</button>}
+            actions={incompleteTab === 'incomplete'
+              ? <button onClick={() => sendCommand('AddAllIncompleteToQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">+ Queue All</button>
+              : <>
+                  <button onClick={() => sendCommand('RetryFailedAndPaused')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors flex items-center gap-1"><RotateCcw className="w-3 h-3" />Retry</button>
+                  <button onClick={() => sendCommand('ClearQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">Clear</button>
+                </>
+            }
           >
+            <div className="flex border-b border-slate-700/50 bg-slate-900/40 flex-shrink-0">
+              <button
+                onClick={() => setIncompleteTab('incomplete')}
+                className={`flex-1 px-3 py-2 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                  incompleteTab === 'incomplete' ? 'text-red-300 border-b-2 border-red-500 bg-slate-900/40' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                Incomplete <span className="text-slate-500">({s.incompleteTransfers.length})</span>
+              </button>
+              <button
+                onClick={() => setIncompleteTab('queue')}
+                className={`flex-1 px-3 py-2 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                  incompleteTab === 'queue' ? 'text-cyan-300 border-b-2 border-cyan-500 bg-slate-900/40' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                Queue <span className="text-slate-500">({s.downloadQueue.length})</span>
+              </button>
+            </div>
+            {incompleteTab === 'incomplete' ? (
             <div className="flex-1 overflow-auto p-4 space-y-2">
               {s.incompleteTransfers.map((t) => {
                 const selected = s.selectedIncompleteTransfer?.gameAppId === t.gameAppId;
@@ -291,44 +346,34 @@ export default function App() {
               })}
               {s.incompleteTransfers.length === 0 && <Empty icon={<AlertCircle className="w-12 h-12 text-slate-600 mb-3" />} title="No incomplete downloads" sub="All downloads completed" />}
             </div>
-            <div className="p-4 border-t border-slate-700/50 space-y-3">
-              <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 overflow-hidden">
-                <div className="bg-gradient-to-r from-cyan-600 to-cyan-700 px-3 py-2 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Download className="w-4 h-4 text-white" />
-                    <span className="text-white text-sm font-semibold">Download Queue</span>
-                    <span className="text-xs text-cyan-100">({s.downloadQueue.length})</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button onClick={() => sendCommand('RetryFailedAndPaused')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors flex items-center gap-1"><RotateCcw className="w-3 h-3" />Retry</button>
-                    <button onClick={() => sendCommand('ClearQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">Clear</button>
-                  </div>
+            ) : (
+            <div className="flex-1 overflow-auto">
+              {s.downloadQueue.length === 0 ? (
+                <div className="p-6 text-center">
+                  <Download className="w-12 h-12 text-slate-600 mb-3 mx-auto" />
+                  <p className="text-slate-500 text-sm">Queue is empty</p>
+                  <p className="text-slate-600 text-xs mt-1">Add games to download</p>
                 </div>
-                {s.downloadQueue.length === 0 ? (
-                  <div className="p-6 text-center">
-                    <p className="text-slate-500 text-xs">Queue is empty</p>
-                    <p className="text-slate-600 text-xs mt-1">Add games to download</p>
+              ) : (
+                s.downloadQueue.map((q) => (
+                  <div key={q.gameAppId} className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-white truncate">{q.gameName}</p>
+                      <p className="text-[10px]" style={{ color: q.statusColor }}>{q.statusText}</p>
+                    </div>
+                    <div className="flex items-center gap-0.5">
+                      <button title="Move up" onClick={() => sendCommand('MoveQueueItemUp', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▲</button>
+                      <button title="Move down" onClick={() => sendCommand('MoveQueueItemDown', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▼</button>
+                      <button title="Remove" onClick={() => sendCommand('RemoveFromQueue', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
+                        <X className="w-3 h-3 text-slate-400" />
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <div className="max-h-32 overflow-auto">
-                    {s.downloadQueue.map((q) => (
-                      <div key={q.gameAppId} className="px-3 py-2 border-t border-slate-800 flex items-center justify-between">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs text-white truncate">{q.gameName}</p>
-                          <p className="text-[10px]" style={{ color: q.statusColor }}>{q.statusText}</p>
-                        </div>
-                        <div className="flex items-center gap-0.5">
-                          <button title="Move up" onClick={() => sendCommand('MoveQueueItemUp', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▲</button>
-                          <button title="Move down" onClick={() => sendCommand('MoveQueueItemDown', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▼</button>
-                          <button title="Remove" onClick={() => sendCommand('RemoveFromQueue', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
-                            <X className="w-3 h-3 text-slate-400" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                ))
+              )}
+            </div>
+            )}
+            <div className="p-4 border-t border-slate-700/50 space-y-2">
               <button
                 onClick={() => sendCommand(s.isQueueProcessing ? 'PauseQueue' : 'StartQueue')}
                 className={`w-full py-2.5 ${
@@ -387,6 +432,30 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {ctxMenu && (
+        <div
+          className="fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[200px]"
+          style={{ left: Math.min(ctxMenu.x, window.innerWidth - 220), top: Math.min(ctxMenu.y, window.innerHeight - 120) }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            onClick={() => { sendCommand('OpenGameFolder', { appId: ctxMenu.game.appId }); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 flex items-center gap-2"
+          >
+            <FolderOpen className="w-4 h-4 text-blue-400" />
+            Open game folder
+          </button>
+          <button
+            onClick={() => { sendCommand('ToggleGameVisibility', { appId: ctxMenu.game.appId }); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 flex items-center gap-2"
+          >
+            {ctxMenu.game.isHidden ? <Eye className="w-4 h-4 text-green-400" /> : <EyeOff className="w-4 h-4 text-amber-400" />}
+            {ctxMenu.game.isHidden ? 'Show on network' : 'Hide from network'}
+          </button>
+        </div>
+      )}
 
       {s.isLogVisible && (
         <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden">
