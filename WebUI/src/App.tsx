@@ -22,20 +22,20 @@ export default function App() {
 
   return (
     <div className="h-screen bg-slate-900 flex flex-col select-none text-slate-200">
-      <div className="bg-slate-950 border-b border-slate-800 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
+      <div className="bg-slate-950 border-b border-slate-800 px-3 sm:px-4 py-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
             <Wifi className="w-5 h-5 text-white" />
           </div>
-          <span className="text-slate-200 font-semibold">Games Local Share</span>
-          <span className="text-slate-500 text-sm">- LAN Game Sync</span>
+          <span className="text-slate-200 font-semibold truncate">Games Local Share</span>
+          <span className="text-slate-500 text-sm hidden md:inline">- LAN Game Sync</span>
         </div>
-        <div className="text-xs text-slate-500 font-mono">{s.statusMessage}</div>
+        <div className="text-xs text-slate-500 font-mono truncate hidden sm:block">{s.statusMessage}</div>
       </div>
 
-      <div className="bg-slate-900 border-b border-slate-800 px-6 py-4">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center gap-4">
+      <div className="bg-slate-900 border-b border-slate-800 px-3 sm:px-6 py-3 sm:py-4">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 max-w-7xl mx-auto">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <div className="flex items-center gap-2">
               <div className={stepBadge(1)}>Step 1</div>
               <button
@@ -47,7 +47,7 @@ export default function App() {
                 Scan My Games
               </button>
             </div>
-            <div className="w-8 h-px bg-slate-700" />
+            <div className="w-8 h-px bg-slate-700 hidden sm:block" />
             <div className="flex items-center gap-2">
               <div className={stepBadge(2)}>Step 2</div>
               <button
@@ -60,7 +60,7 @@ export default function App() {
                 {networkActive ? 'Stop Network' : 'Start Network'}
               </button>
             </div>
-            <div className="w-8 h-px bg-slate-700" />
+            <div className="w-8 h-px bg-slate-700 hidden sm:block" />
             <div className="flex items-center gap-2">
               <div className={stepBadge(3)}>Step 3</div>
               <button
@@ -74,7 +74,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 px-4 py-2 bg-slate-800/50 rounded-lg border border-slate-700/50">
+          <div className="flex items-center gap-3 px-4 py-2 bg-slate-800/50 rounded-lg border border-slate-700/50 self-start lg:self-auto">
             <span className="text-slate-400 text-sm">Your IP:</span>
             <button
               onClick={() => sendCommand('CopyLocalIp')}
@@ -93,7 +93,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="px-6 py-3 bg-slate-800/30 border-b border-slate-800">
+      <div className="px-3 sm:px-6 py-3 bg-slate-800/30 border-b border-slate-800">
         <div className="max-w-7xl mx-auto">
           <p className="text-sm text-slate-400">
             <span className="font-semibold text-slate-300">How to use:</span> 1) Scan games | 2) Start network | 3) Find peers | 4) Download updates OR new games from peers |{' '}
@@ -102,8 +102,8 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-7xl mx-auto grid grid-cols-4 gap-4 h-full">
+      <div className="flex-1 overflow-auto p-3 sm:p-6">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 xl:h-full auto-rows-[minmax(0,70vh)] xl:auto-rows-auto">
           <Panel title="My Games" count={s.localGames.length} icon={<Play className="w-4 h-4 text-white" />} gradient="from-blue-600 to-blue-700" subColor="text-blue-100">
             <div className="flex-1 overflow-auto p-4 space-y-3">
               {s.localGames.map((g) => (
@@ -344,8 +344,8 @@ export default function App() {
       </div>
 
       {s.isTransferring && (
-        <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-6 py-2.5">
-          <div className="max-w-7xl mx-auto flex items-center gap-4">
+        <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-3 sm:px-6 py-2.5">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
             <Download className="w-5 h-5 text-blue-400 animate-pulse flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-1">
@@ -368,7 +368,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="bg-slate-950 border-t border-slate-800 px-6 py-2.5 flex items-center justify-between">
+      <div className="bg-slate-950 border-t border-slate-800 px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-4">
           <button onClick={() => sendCommand('OpenSettings')} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group">
             <Settings className="w-4 h-4 text-slate-400 group-hover:text-slate-300" />
@@ -389,7 +389,7 @@ export default function App() {
       </div>
 
       {s.isLogVisible && (
-        <div className="absolute bottom-12 right-6 w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden">
+        <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-900">
             <span className="text-sm font-semibold text-slate-300">Log</span>
             <div className="flex gap-2">
