@@ -1075,23 +1075,31 @@ public class FileTransferService : IDisposable
     {
         var filesToDownload = new List<FileTransferInfo>();
         var hashChecks = 0;
+        var skippedTimestamp = 0;
+        var skippedHashMatch = 0;
+        var dlMissing = 0;
+        var dlSizeDiff = 0;
+        var dlHashDiff = 0;
+        var dlNoRemoteHash = 0;
 
         await Task.Run(() =>
         {
             foreach (var remoteFile in remoteFiles)
             {
                 var localFilePath = Path.Combine(localPath, remoteFile.RelativePath);
-                
+
                 if (!File.Exists(localFilePath))
                 {
+                    dlMissing++;
                     filesToDownload.Add(remoteFile);
                     continue;
                 }
 
                 var localInfo = new FileInfo(localFilePath);
-                
+
                 if (localInfo.Length != remoteFile.Size)
                 {
+                    dlSizeDiff++;
                     filesToDownload.Add(remoteFile);
                     continue;
                 }
@@ -1099,28 +1107,37 @@ public class FileTransferService : IDisposable
                 var timeDelta = localInfo.LastWriteTimeUtc - remoteFile.LastModified;
                 if (timeDelta.Duration() <= TimestampComparisonTolerance)
                 {
+                    skippedTimestamp++;
                     continue;
                 }
 
-                // Timestamp mismatch policy:
-                // if size matches but timestamps differ, verify by hash when available.
                 if (!string.IsNullOrEmpty(remoteFile.Hash))
                 {
                     hashChecks++;
                     var localHash = ComputeQuickHash(localFilePath, localInfo.Length);
-                    if (!string.Equals(localHash, remoteFile.Hash, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(localHash, remoteFile.Hash, StringComparison.OrdinalIgnoreCase))
                     {
+                        skippedHashMatch++;
+                    }
+                    else
+                    {
+                        dlHashDiff++;
                         filesToDownload.Add(remoteFile);
                     }
                     continue;
                 }
 
-                // No hash available from remote: conservative fallback to transfer.
+                // Remote couldn't hash this file (locked, IO error). Conservative: download.
+                dlNoRemoteHash++;
                 filesToDownload.Add(remoteFile);
             }
         }).ConfigureAwait(false);
 
-        System.Diagnostics.Debug.WriteLine($"Incremental sync analysis complete: {remoteFiles.Count} files checked, {hashChecks} hash validations, {filesToDownload.Count} files selected for transfer");
+        System.Diagnostics.Debug.WriteLine(
+            $"Incremental sync analysis: total={remoteFiles.Count}, hashChecks={hashChecks}, " +
+            $"skip[timestamp={skippedTimestamp},hashMatch={skippedHashMatch}], " +
+            $"download[missing={dlMissing},sizeDiff={dlSizeDiff},hashDiff={dlHashDiff},noRemoteHash={dlNoRemoteHash}], " +
+            $"total to transfer={filesToDownload.Count}");
 
         return filesToDownload;
     }
@@ -1129,7 +1146,9 @@ public class FileTransferService : IDisposable
     {
         try
         {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var stream = new FileStream(
+                filePath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
             using var md5 = MD5.Create();
 
             if (fileSize <= 2 * 1024 * 1024)
@@ -1138,23 +1157,43 @@ public class FileTransferService : IDisposable
                 return Convert.ToHexString(hash);
             }
 
-            var buffer = new byte[1024 * 1024];
-            
-            stream.Read(buffer, 0, buffer.Length);
-            md5.TransformBlock(buffer, 0, buffer.Length, buffer, 0);
+            const int SampleSize = 1024 * 1024;
+            var buffer = new byte[SampleSize];
 
-            stream.Seek(-buffer.Length, SeekOrigin.End);
-            stream.Read(buffer, 0, buffer.Length);
-            md5.TransformBlock(buffer, 0, buffer.Length, buffer, 0);
+            ReadFully(stream, buffer, SampleSize);
+            md5.TransformBlock(buffer, 0, SampleSize, buffer, 0);
+
+            var midOffset = (fileSize / 2) - (SampleSize / 2);
+            if (midOffset < SampleSize) midOffset = SampleSize;
+            if (midOffset > fileSize - SampleSize) midOffset = fileSize - SampleSize;
+            stream.Seek(midOffset, SeekOrigin.Begin);
+            ReadFully(stream, buffer, SampleSize);
+            md5.TransformBlock(buffer, 0, SampleSize, buffer, 0);
+
+            stream.Seek(-SampleSize, SeekOrigin.End);
+            ReadFully(stream, buffer, SampleSize);
+            md5.TransformBlock(buffer, 0, SampleSize, buffer, 0);
 
             var sizeBytes = BitConverter.GetBytes(fileSize);
             md5.TransformFinalBlock(sizeBytes, 0, sizeBytes.Length);
 
             return Convert.ToHexString(md5.Hash!);
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"ComputeQuickHash failed for {filePath}: {ex.Message}");
             return string.Empty;
+        }
+    }
+
+    private static void ReadFully(Stream stream, byte[] buffer, int count)
+    {
+        var read = 0;
+        while (read < count)
+        {
+            var n = stream.Read(buffer, read, count - read);
+            if (n == 0) break;
+            read += n;
         }
     }
     
