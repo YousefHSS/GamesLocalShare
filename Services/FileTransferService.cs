@@ -478,6 +478,30 @@ public class FileTransferService : IDisposable
                 
                 if (resumeState != null)
                 {
+                    var corrupted = await VerifyCompletedFilesAsync(localGame.InstallPath, manifest.Files, resumeState);
+                    if (corrupted.Count > 0)
+                    {
+                        var msg = $"Resume integrity check: {corrupted.Count} of {resumeState.CompletedFiles.Count} previously-completed files failed verification and will be re-downloaded";
+                        System.Diagnostics.Debug.WriteLine(msg);
+                        LogMessageRaised?.Invoke(this, msg);
+
+                        long bytesToReclaim = 0;
+                        foreach (var name in corrupted)
+                        {
+                            resumeState.CompletedFiles.Remove(name);
+                            var fInfo = manifest.Files.FirstOrDefault(f => f.RelativePath == name);
+                            if (fInfo != null) bytesToReclaim += fInfo.Size;
+                        }
+                        resumeState.TransferredBytes = Math.Max(0, resumeState.TransferredBytes - bytesToReclaim);
+                        resumeState.Save();
+                    }
+                    else
+                    {
+                        var msg = $"Resume integrity check: all {resumeState.CompletedFiles.Count} previously-completed files verified OK";
+                        System.Diagnostics.Debug.WriteLine(msg);
+                        LogMessageRaised?.Invoke(this, msg);
+                    }
+
                     filesToDownload = manifest.Files
                         .Where(f => !resumeState.CompletedFiles.Contains(f.RelativePath))
                         .ToList();
@@ -1074,6 +1098,52 @@ public class FileTransferService : IDisposable
         }).ConfigureAwait(false);
 
         return manifest;
+    }
+
+    private async Task<List<string>> VerifyCompletedFilesAsync(
+        string localPath, List<FileTransferInfo> remoteFiles, TransferState state)
+    {
+        var corrupted = new List<string>();
+        var manifestByPath = remoteFiles.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var snapshot = state.CompletedFiles.ToList();
+
+        await Task.Run(() =>
+        {
+            foreach (var rel in snapshot)
+            {
+                if (!manifestByPath.TryGetValue(rel, out var remote))
+                {
+                    // File no longer in remote manifest - drop from completed
+                    corrupted.Add(rel);
+                    continue;
+                }
+
+                var local = Path.Combine(localPath, rel);
+                if (!File.Exists(local))
+                {
+                    corrupted.Add(rel);
+                    continue;
+                }
+
+                var info = new FileInfo(local);
+                if (info.Length != remote.Size)
+                {
+                    corrupted.Add(rel);
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(remote.Hash))
+                    continue; // Can't verify; trust size
+
+                var localHash = ComputeQuickHash(local, info.Length);
+                if (!string.Equals(localHash, remote.Hash, StringComparison.OrdinalIgnoreCase))
+                {
+                    corrupted.Add(rel);
+                }
+            }
+        }).ConfigureAwait(false);
+
+        return corrupted;
     }
 
     private async Task<List<FileTransferInfo>> GetFilesToDownloadAsync(string localPath, List<FileTransferInfo> remoteFiles)
