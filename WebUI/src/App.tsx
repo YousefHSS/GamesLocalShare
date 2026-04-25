@@ -228,18 +228,29 @@ export default function App() {
                   {s.availableFromPeers.length === 0 ? (
                     <div className="text-xs text-slate-400 mt-1 italic">No new games found</div>
                   ) : (
-                    s.availableFromPeers.map(game => (
-                      <div
-                        key={game.appId}
-                        onClick={() => sendCommand('SelectPeerGame', { appId: game.appId })}
-                        className={`bg-slate-900/50 rounded p-2 border cursor-pointer ${
-                          s.selectedPeerGame?.appId === game.appId ? 'border-purple-500' : 'border-slate-700/50 hover:border-purple-500/50'
-                        }`}
-                      >
-                        <p className="text-white text-xs font-medium truncate">{game.name}</p>
-                        <p className="text-slate-400 text-[10px] mt-0.5">{game.buildId} • {game.formattedSize}</p>
-                      </div>
-                    ))
+                    s.availableFromPeers.map(game => {
+                      const selected = s.selectedPeerGame?.appId === game.appId;
+                      return (
+                        <div
+                          key={game.appId}
+                          onClick={() => sendCommand('SelectPeerGame', { appId: game.appId })}
+                          className={`bg-slate-900/50 rounded p-2 border cursor-pointer ${
+                            selected ? 'border-purple-500' : 'border-slate-700/50 hover:border-purple-500/50'
+                          }`}
+                        >
+                          <p className="text-white text-xs font-medium truncate">{game.name}</p>
+                          <p className="text-slate-400 text-[10px] mt-0.5">{game.buildId} • {game.formattedSize}</p>
+                          {selected && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); sendCommand('DownloadNewGame'); }}
+                              className="mt-2 w-full py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
+                            >
+                              <Download className="w-3 h-3" /> Download
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -382,7 +393,6 @@ export default function App() {
               >
                 {s.isQueueProcessing ? <><Pause className="w-4 h-4" />Pause Queue</> : <><Play className="w-4 h-4" />Start Queue</>}
               </button>
-              <button onClick={() => sendCommand('DownloadNewGame')} disabled={!s.selectedPeerGame} className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 rounded-lg text-sm font-medium transition-colors">Download New Game</button>
             </div>
           </Panel>
         </div>
