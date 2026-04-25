@@ -471,7 +471,23 @@ export default function App() {
         <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-900">
             <span className="text-sm font-semibold text-slate-300">Log</span>
-            <div className="flex gap-2">
+            <div className="flex gap-3 items-center">
+              <button
+                onClick={async () => {
+                  const text = s.logMessages.map(m => `${m.formattedTime} ${m.message}`).join('\n');
+                  try {
+                    await navigator.clipboard.writeText(text);
+                  } catch {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                  }
+                }}
+                className="text-xs text-slate-400 hover:text-slate-200"
+              >Copy</button>
               <button onClick={() => sendCommand('ClearLog')} className="text-xs text-slate-400 hover:text-slate-200">Clear</button>
               <button onClick={() => sendCommand('ToggleLog')} className="text-slate-400 hover:text-slate-200"><X className="w-4 h-4" /></button>
             </div>
