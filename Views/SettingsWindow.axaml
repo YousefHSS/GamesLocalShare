@@ -123,6 +123,38 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Game Stores Section -->
+                <Border Background="#2D2D30" CornerRadius="8" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="Game Stores"
+                                   FontSize="16" FontWeight="Bold"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Margin="0,0,0,8"/>
+
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Epic Games install folder"
+                                       Foreground="White"
+                                       FontSize="13"/>
+                            <TextBlock TextWrapping="Wrap"
+                                       Foreground="#9CA3AF"
+                                       FontSize="11">
+                                Where transferred Epic Games titles will be installed on this PC. Leave blank to auto-detect from existing Epic installs.
+                            </TextBlock>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox x:Name="EpicInstallRootTextBox"
+                                         Grid.Column="0"
+                                         Watermark="e.g. D:\Epic Games"
+                                         Foreground="White"/>
+                                <Button x:Name="EpicInstallRootBrowseButton"
+                                        Grid.Column="1"
+                                        Content="Browse..."
+                                        Margin="8,0,0,0"
+                                        Padding="12,6"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
                 <!-- Hidden Games Section -->
                 <Border Background="#2D2D30" CornerRadius="8" Padding="20">
                     <StackPanel Spacing="16">

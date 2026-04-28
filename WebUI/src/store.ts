@@ -12,6 +12,7 @@ export interface GameInfo {
   isAvailableFromPeer: boolean;
   isHidden: boolean;
   lastUpdated: string;
+  coverUrl?: string | null;
 }
 
 export interface NetworkPeer {

@@ -14,8 +14,10 @@ namespace GamesLocalShare.Services;
 /// <summary>
 /// Service to scan Steam library folders and detect installed games
 /// </summary>
-public class SteamLibraryScanner
+public class SteamLibraryScanner : IGameLibraryScanner
 {
+    public GamePlatform Platform => GamePlatform.Steam;
+
     private string? _steamPath;
     private readonly List<string> _scanErrors = [];
     private static readonly HttpClient _httpClient = new HttpClient();
@@ -403,7 +405,10 @@ public class SteamLibraryScanner
             SizeOnDisk = sizeOnDisk,
             LastUpdated = lastUpdated,
             Platform = GamePlatform.Steam,
-            IsInstalled = true // We've verified the directory exists and has content
+            IsInstalled = true, // We've verified the directory exists and has content
+            CoverUrl = int.TryParse(appId, out var sid)
+                ? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{sid}/header.jpg"
+                : null,
         };
 
         // Fire and forget cover image load

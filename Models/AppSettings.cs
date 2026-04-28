@@ -64,6 +64,13 @@ public class AppSettings
     public bool AutoResumeDownloads { get; set; }
 
     /// <summary>
+    /// Default install folder for incoming Epic Games transfers (where game
+    /// directories are placed). When null/empty the receiver auto-detects from
+    /// existing Epic installs at transfer time.
+    /// </summary>
+    public string? EpicInstallRoot { get; set; }
+
+    /// <summary>
     /// Loads settings from disk, or returns defaults if file doesn't exist.
     /// Returns a singleton instance to ensure all parts of the app use the same settings.
     /// </summary>
@@ -194,7 +201,8 @@ public class AppSettings
             $"AutoStartNetwork={AutoStartNetwork}",
             $"AutoUpdateCheckInterval={AutoUpdateCheckInterval}",
             $"AutoResumeDownloads={AutoResumeDownloads}",
-            $"HiddenGameIds={string.Join(",", HiddenGameIds)}"
+            $"HiddenGameIds={string.Join(",", HiddenGameIds)}",
+            $"EpicInstallRoot={EpicInstallRoot ?? string.Empty}"
         };
         File.WriteAllLines(SettingsBackupPath, lines);
     }
@@ -237,6 +245,9 @@ public class AppSettings
                     break;
                 case "AutoResumeDownloads":
                     settings.AutoResumeDownloads = bool.TryParse(value, out var ard) && ard;
+                    break;
+                case "EpicInstallRoot":
+                    settings.EpicInstallRoot = string.IsNullOrWhiteSpace(value) ? null : value;
                     break;
                 case "HiddenGameIds":
                     if (!string.IsNullOrEmpty(value))

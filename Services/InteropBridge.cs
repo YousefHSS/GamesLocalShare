@@ -23,7 +23,8 @@ public class InteropBridge : IDisposable
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false
+        WriteIndented = false,
+        Converters = { new JsonStringEnumConverter() }
     };
 
     public InteropBridge(WebView? webView, MainViewModel viewModel)
@@ -108,7 +109,7 @@ public class InteropBridge : IDisposable
     private void OnGamePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         // When a game property changes (like CoverImagePath), push the updated games list
-        if (e.PropertyName == nameof(GameInfo.CoverImagePath) || e.PropertyName == nameof(GameInfo.CoverImage))
+        if (e.PropertyName == nameof(GameInfo.CoverImagePath) || e.PropertyName == nameof(GameInfo.CoverImage) || e.PropertyName == nameof(GameInfo.CoverUrl))
         {
             System.Diagnostics.Debug.WriteLine($"[DEBUG] Game property changed: {e.PropertyName}, pushing updated games list");
             // Ensure we push the update on the UI thread

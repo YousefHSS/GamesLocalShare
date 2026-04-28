@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using GamesLocalShare.Models;
 using GamesLocalShare.Services;
 using System.Collections.Generic;
@@ -23,6 +24,8 @@ public partial class SettingsWindow : Window
     private CheckBox? _minimizeToTrayCheckBox;
     private TextBlock? _hiddenGamesCountText;
     private ItemsControl? _hiddenGamesListBox;
+    private TextBox? _epicInstallRootTextBox;
+    private Button? _epicInstallRootBrowseButton;
 
     public SettingsWindow() : this(AppSettings.Load(), new List<GameInfo>(), () => { })
     {
@@ -51,6 +54,27 @@ public partial class SettingsWindow : Window
         _minimizeToTrayCheckBox = this.FindControl<CheckBox>("MinimizeToTrayCheckBox");
         _hiddenGamesCountText = this.FindControl<TextBlock>("HiddenGamesCountText");
         _hiddenGamesListBox = this.FindControl<ItemsControl>("HiddenGamesListBox");
+        _epicInstallRootTextBox = this.FindControl<TextBox>("EpicInstallRootTextBox");
+        _epicInstallRootBrowseButton = this.FindControl<Button>("EpicInstallRootBrowseButton");
+        if (_epicInstallRootBrowseButton != null)
+            _epicInstallRootBrowseButton.Click += EpicInstallRootBrowse_Click;
+    }
+
+    private async void EpicInstallRootBrowse_Click(object? sender, RoutedEventArgs e)
+    {
+        var sp = StorageProvider;
+        if (sp == null) return;
+
+        var folders = await sp.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Epic Games install folder",
+            AllowMultiple = false
+        });
+
+        if (folders.Count > 0 && _epicInstallRootTextBox != null)
+        {
+            _epicInstallRootTextBox.Text = folders[0].Path.LocalPath;
+        }
     }
 
     private void LoadSettings()
@@ -91,7 +115,10 @@ public partial class SettingsWindow : Window
         
         if (_minimizeToTrayCheckBox != null)
             _minimizeToTrayCheckBox.IsChecked = _settings.MinimizeToTray;
-        
+
+        if (_epicInstallRootTextBox != null)
+            _epicInstallRootTextBox.Text = _settings.EpicInstallRoot ?? string.Empty;
+
         // Load hidden games list
         LoadHiddenGamesList();
     }
@@ -157,7 +184,13 @@ public partial class SettingsWindow : Window
         
         if (_minimizeToTrayCheckBox != null)
             _settings.MinimizeToTray = _minimizeToTrayCheckBox.IsChecked ?? false;
-        
+
+        if (_epicInstallRootTextBox != null)
+        {
+            var v = _epicInstallRootTextBox.Text?.Trim();
+            _settings.EpicInstallRoot = string.IsNullOrEmpty(v) ? null : v;
+        }
+
         // Persist to disk
         _settings.Save();
         
@@ -192,6 +225,9 @@ public partial class SettingsWindow : Window
         
         if (_minimizeToTrayCheckBox != null)
             _minimizeToTrayCheckBox.IsChecked = false;
+
+        if (_epicInstallRootTextBox != null)
+            _epicInstallRootTextBox.Text = string.Empty;
     }
 
     private void ShowAllHiddenGamesButton_Click(object? sender, RoutedEventArgs e)

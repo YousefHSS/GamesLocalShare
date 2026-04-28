@@ -14,6 +14,7 @@ namespace GamesLocalShare.ViewModels;
 public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly SteamLibraryScanner _steamScanner;
+    private readonly List<IGameLibraryScanner> _scanners;
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
     private readonly AppSettings _settings;
@@ -135,6 +136,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _steamScanner = new SteamLibraryScanner();
+        _scanners = new List<IGameLibraryScanner> { _steamScanner, new EpicGamesLibraryScanner() };
         _networkService = new NetworkDiscoveryService();
         _fileTransferService = new FileTransferService();
         _settings = AppSettings.Load();
@@ -270,7 +272,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StatusMessage = "Scanning Steam library...";
             AddLog("Scanning Steam library...", LogMessageType.Info);
 
-            var games = await _steamScanner.ScanGamesAsync();
+            var games = new List<GameInfo>();
+            foreach (var scanner in _scanners)
+            {
+                var scanned = await scanner.ScanGamesAsync();
+                AddLog($"{scanner.Platform}: found {scanned.Count} games" +
+                    (scanner.ScanErrors.Count > 0 ? $" ({scanner.ScanErrors.Count} warnings)" : ""),
+                    scanned.Count > 0 ? LogMessageType.Info : LogMessageType.Warning);
+                foreach (var err in scanner.ScanErrors.Take(5))
+                {
+                    AddLog($"  {scanner.Platform}: {err}", LogMessageType.Warning);
+                }
+                games.AddRange(scanned);
+            }
+            games = games.OrderBy(g => g.Name).ToList();
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -947,9 +962,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private bool CanResumeTransfer() => SelectedIncompleteTransfer != null && !IsTransferring;
 
+    private bool IsEpicGame(string appId)
+    {
+        if (string.IsNullOrEmpty(appId)) return false;
+        bool Match(GameInfo g) => g.AppId == appId && g.Platform == GamePlatform.EpicGames;
+        if (LocalGames.Any(Match)) return true;
+        if (AvailableFromPeers.Any(Match)) return true;
+        foreach (var peer in NetworkPeers)
+        {
+            if (peer.Games != null && peer.Games.Any(Match)) return true;
+        }
+        return false;
+    }
+
     private string GetTargetPathForNewGame(GameInfo game)
     {
-        // Get the first Steam library path
+        var safeName = string.Join("_", game.Name.Split(Path.GetInvalidFileNameChars()));
+
+        if (game.Platform == GamePlatform.EpicGames)
+        {
+            var epicRoot = ResolveEpicInstallRoot();
+            if (string.IsNullOrEmpty(epicRoot))
+            {
+                throw new InvalidOperationException(
+                    "No Epic Games install folder configured and none could be auto-detected. " +
+                    "Set EpicInstallRoot in settings.");
+            }
+            if (!Directory.Exists(epicRoot)) Directory.CreateDirectory(epicRoot);
+            return Path.Combine(epicRoot, safeName);
+        }
+
+        // Default: Steam routing
         var libraryFolders = _steamScanner.GetLibraryFolders();
         if (libraryFolders.Count == 0)
         {
@@ -962,9 +1005,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Directory.CreateDirectory(commonPath);
         }
 
-        // Create a safe folder name from the game name
-        var safeName = string.Join("_", game.Name.Split(Path.GetInvalidFileNameChars()));
         return Path.Combine(commonPath, safeName);
+    }
+
+    /// <summary>
+    /// Returns the user-configured Epic install root, or auto-detects from
+    /// existing Epic installs by picking the most common parent folder.
+    /// </summary>
+    private string? ResolveEpicInstallRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.EpicInstallRoot) && Directory.Exists(_settings.EpicInstallRoot))
+            return _settings.EpicInstallRoot;
+
+        var epic = _scanners.OfType<EpicGamesLibraryScanner>().FirstOrDefault();
+        if (epic == null) return null;
+
+        var folders = epic.GetLibraryFolders();
+        if (folders.Count == 0) return null;
+
+        // Pick the most frequently-used parent folder (already deduplicated, so
+        // just take the first existing one — they're all candidates).
+        return folders.FirstOrDefault(Directory.Exists);
     }
 
     private void OnPeerDiscovered(object? sender, NetworkPeer peer)
@@ -1169,6 +1230,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 
                 StatusMessage = message;
                 AddLog(message, LogMessageType.Success);
+
+                // Epic-specific post-transfer hint: the launcher won't see the
+                // install until the user imports it. There's no reliable way
+                // to register programmatically without writing valid manifest
+                // files, so guide the user instead.
+                if (IsEpicGame(e.GameAppId))
+                {
+                    AddLog($"Epic Games: '{gameName}' was copied to disk but Epic Launcher won't see it yet.",
+                        LogMessageType.Warning);
+                    AddLog("  In Epic Launcher: Library → Install → choose the same folder. EGS will verify the existing files instead of re-downloading.",
+                        LogMessageType.Info);
+                }
             }
             else
             {

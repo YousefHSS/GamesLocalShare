@@ -113,6 +113,25 @@ public class GameInfo : INotifyPropertyChanged
         }
     }
     
+    private string? _coverUrl;
+    /// <summary>
+    /// Direct URL the WebUI can use as an &lt;img src&gt;. Set by scanners.
+    /// For Steam this is the deterministic CDN header URL; for Epic it is
+    /// resolved asynchronously via the storefront catalog.
+    /// </summary>
+    public string? CoverUrl
+    {
+        get => _coverUrl;
+        set
+        {
+            if (_coverUrl != value)
+            {
+                _coverUrl = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     private string? _coverImagePath;
     /// <summary>
     /// Optional field used in JS data representation or internal tracking
