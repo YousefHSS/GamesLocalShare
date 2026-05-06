@@ -183,9 +183,28 @@ export const useAppState = create<AppState>((set) => ({
 }));
 
 // Setup C# → JS global functions
+export interface AppSettingsForm {
+  autoStartNetwork: boolean;
+  autoUpdateGames: boolean;
+  autoResumeDownloads: boolean;
+  autoUpdateCheckInterval: number;
+  startWithWindows: boolean;
+  minimizeToTray: boolean;
+  epicInstallRoot: string;
+}
+
+export interface SettingsPayload {
+  settings: AppSettingsForm;
+  hiddenGames: { appId: string; name: string }[];
+  isWindows: boolean;
+  settingsPath: string;
+}
+
 declare global {
   function __initState(state: AppState): void;
   function __updateState(patch: Partial<AppState>): void;
+  function __openSettings(payload: SettingsPayload): void;
+  function __epicBrowseResult(path: string): void;
 }
 
 (window as any).__initState = (state: AppState) => {

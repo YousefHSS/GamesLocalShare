@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
-  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye,
+  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye, Search,
 } from 'lucide-react';
-import { useAppState, type GameInfo } from './store';
+import { useAppState, type GameInfo, type SettingsPayload } from './store';
 import { sendCommand } from './bridge';
+import SettingsModal from './components/SettingsModal';
 
 interface GameContextMenu {
   x: number;
@@ -45,6 +46,21 @@ export default function App() {
   const [peerIP, setPeerIP] = useState('');
   const [incompleteTab, setIncompleteTab] = useState<'incomplete' | 'queue'>('incomplete');
   const [ctxMenu, setCtxMenu] = useState<GameContextMenu | null>(null);
+  const [localGameFilter, setLocalGameFilter] = useState('');
+  const [peerGameFilter, setPeerGameFilter] = useState('');
+  const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
+
+  useEffect(() => {
+    (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
+    return () => { (window as any).__openSettings = undefined; };
+  }, []);
+
+  const filteredLocalGames = localGameFilter.trim()
+    ? s.localGames.filter(g => g.name.toLowerCase().includes(localGameFilter.toLowerCase()))
+    : s.localGames;
+  const filteredPeerGames = peerGameFilter.trim()
+    ? s.availableFromPeers.filter(g => g.name.toLowerCase().includes(peerGameFilter.toLowerCase()))
+    : s.availableFromPeers;
 
   useEffect(() => {
     if (!ctxMenu) return;
@@ -159,8 +175,25 @@ export default function App() {
       <div className="flex-1 overflow-auto p-3 sm:p-6">
         <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 xl:h-full auto-rows-[minmax(0,70vh)] xl:auto-rows-auto">
           <Panel title="My Games" count={s.localGames.length} icon={<Play className="w-4 h-4 text-white" />} gradient="from-blue-600 to-blue-700" subColor="text-blue-100">
-            <div className="flex-1 overflow-auto p-4 space-y-3">
-              {s.localGames.map((g) => (
+            <div className="px-4 pt-3 pb-1 flex-shrink-0">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={localGameFilter}
+                  onChange={(e) => setLocalGameFilter(e.target.value)}
+                  placeholder="Search my games..."
+                  className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                />
+                {localGameFilter && (
+                  <button onClick={() => setLocalGameFilter('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" title="Clear">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 pt-2 space-y-3">
+              {filteredLocalGames.map((g) => (
                 <div
                   key={g.appId}
                   onClick={() => sendCommand('SelectLocalGame', { appId: g.appId })}
@@ -192,6 +225,9 @@ export default function App() {
                 </div>
               ))}
               {s.localGames.length === 0 && <Empty icon={<FileText className="w-12 h-12 text-slate-600 mb-3" />} title="No games found" sub='Click "Scan My Games"' />}
+              {s.localGames.length > 0 && filteredLocalGames.length === 0 && (
+                <Empty icon={<Search className="w-12 h-12 text-slate-600 mb-3" />} title="No matches" sub={`No games match "${localGameFilter}"`} />
+              )}
             </div>
           </Panel>
 
@@ -253,11 +289,30 @@ export default function App() {
                   </div>
                   <span className="text-xs text-purple-400 font-semibold">({s.availableFromPeers.length})</span>
                 </div>
+                {s.availableFromPeers.length > 0 && (
+                  <div className="relative mb-2 flex-shrink-0">
+                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={peerGameFilter}
+                      onChange={(e) => setPeerGameFilter(e.target.value)}
+                      placeholder="Search new games..."
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded pl-8 pr-7 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+                    />
+                    {peerGameFilter && (
+                      <button onClick={() => setPeerGameFilter('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" title="Clear">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="flex-1 overflow-auto space-y-1">
                   {s.availableFromPeers.length === 0 ? (
                     <div className="text-xs text-slate-400 mt-1 italic">No new games found</div>
+                  ) : filteredPeerGames.length === 0 ? (
+                    <div className="text-xs text-slate-400 mt-1 italic">No matches for "{peerGameFilter}"</div>
                   ) : (
-                    s.availableFromPeers.map(game => {
+                    filteredPeerGames.map(game => {
                       const selected = s.selectedPeerGame?.appId === game.appId;
                       return (
                         <div
@@ -267,7 +322,10 @@ export default function App() {
                             selected ? 'border-purple-500' : 'border-slate-700/50 hover:border-purple-500/50'
                           }`}
                         >
-                          <p className="text-white text-xs font-medium truncate">{game.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <PlatformIcon platform={game.platform} />
+                            <p className="text-white text-xs font-medium truncate">{game.name}</p>
+                          </div>
                           <p className="text-slate-400 text-[10px] mt-0.5">{game.buildId} • {game.formattedSize}</p>
                           {selected && (
                             <button
@@ -395,21 +453,30 @@ export default function App() {
                   <p className="text-slate-600 text-xs mt-1">Add games to download</p>
                 </div>
               ) : (
-                s.downloadQueue.map((q) => (
-                  <div key={q.gameAppId} className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-white truncate">{q.gameName}</p>
-                      <p className="text-[10px]" style={{ color: q.statusColor }}>{q.statusText}</p>
+                s.downloadQueue.map((q) => {
+                  const statusLower = (q.statusText || '').toLowerCase();
+                  const canRetry = statusLower.includes('fail') || statusLower.includes('paus');
+                  return (
+                    <div key={q.gameAppId} className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-white truncate">{q.gameName}</p>
+                        <p className="text-[10px]" style={{ color: q.statusColor }}>{q.statusText}</p>
+                      </div>
+                      <div className="flex items-center gap-0.5">
+                        {canRetry && (
+                          <button title="Retry" onClick={() => sendCommand('RetryQueueItem', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
+                            <RotateCcw className="w-3 h-3 text-cyan-400" />
+                          </button>
+                        )}
+                        <button title="Move up" onClick={() => sendCommand('MoveQueueItemUp', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▲</button>
+                        <button title="Move down" onClick={() => sendCommand('MoveQueueItemDown', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▼</button>
+                        <button title="Remove" onClick={() => sendCommand('RemoveFromQueue', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
+                          <X className="w-3 h-3 text-slate-400" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-0.5">
-                      <button title="Move up" onClick={() => sendCommand('MoveQueueItemUp', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▲</button>
-                      <button title="Move down" onClick={() => sendCommand('MoveQueueItemDown', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded text-slate-400 text-xs">▼</button>
-                      <button title="Remove" onClick={() => sendCommand('RemoveFromQueue', { appId: q.gameAppId })} className="p-1 hover:bg-slate-700 rounded">
-                        <X className="w-3 h-3 text-slate-400" />
-                      </button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             )}
@@ -471,6 +538,10 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {settingsPayload && (
+        <SettingsModal payload={settingsPayload} onClose={() => setSettingsPayload(null)} />
+      )}
 
       {ctxMenu && (
         <div

@@ -467,57 +467,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task OpenSettingsAsync()
+    private void OpenSettings()
     {
-        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop &&
-            desktop.MainWindow != null)
+        // The actual UI is now rendered in the React WebUI. The InteropBridge
+        // intercepts the "OpenSettings" command from JS and pushes the current
+        // settings snapshot via __openSettings(...). This stub exists so any
+        // legacy XAML binding still resolves.
+    }
+
+    /// <summary>
+    /// Applies in-memory settings changes (called after the React modal saves).
+    /// Refreshes hidden flags, updates the network, and reconfigures the auto-update timer.
+    /// </summary>
+    public void ApplySettingsChanges()
+    {
+        AddLog("Settings saved successfully", LogMessageType.Success);
+        StatusMessage = "Settings updated";
+
+        foreach (var game in LocalGames)
         {
-            var settingsWindow = new Views.SettingsWindow(_settings, LocalGames.ToList(), () =>
-            {
-                // Callback when settings are saved
-                AddLog("Settings saved successfully", LogMessageType.Success);
-                StatusMessage = "Settings updated";
-                
-                // Refresh game list to update hidden status
-                foreach (var game in LocalGames)
-                {
-                    game.IsHidden = _settings.IsGameHidden(game.AppId);
-                }
-                
-                // Update network with visible games
-                if (IsNetworkActive)
-                {
-                    var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
-                    _ = _networkService.UpdateLocalGamesAsync(visibleGames);
-                    _fileTransferService.UpdateLocalGames(visibleGames);
-                    AddLog($"Updated network with {visibleGames.Count} visible games", LogMessageType.Info);
-                }
-                
-                // Restart auto-update timer if settings changed
-                if (_settings.AutoUpdateGames && _autoUpdateTimer == null)
-                {
-                    InitializeAutoUpdateTimer();
-                }
-                else if (!_settings.AutoUpdateGames && _autoUpdateTimer != null)
-                {
-                    _autoUpdateTimer.Stop();
-                    _autoUpdateTimer.Dispose();
-                    _autoUpdateTimer = null;
-                    AddLog("Auto-update disabled", LogMessageType.Info);
-                }
-                else if (_settings.AutoUpdateGames && _autoUpdateTimer != null)
-                {
-                    // Update interval if it changed
-                    _autoUpdateTimer.Stop();
-                    _autoUpdateTimer.Interval = _settings.AutoUpdateCheckInterval * 60 * 1000;
-                    _autoUpdateTimer.Start();
-                    AddLog($"Auto-update interval changed to {_settings.AutoUpdateCheckInterval} minutes", LogMessageType.Info);
-                }
-            });
-            
-            await settingsWindow.ShowDialog(desktop.MainWindow);
+            game.IsHidden = _settings.IsGameHidden(game.AppId);
+        }
+
+        if (IsNetworkActive)
+        {
+            var visibleGames = LocalGames.Where(g => !g.IsHidden).ToList();
+            _ = _networkService.UpdateLocalGamesAsync(visibleGames);
+            _fileTransferService.UpdateLocalGames(visibleGames);
+            AddLog($"Updated network with {visibleGames.Count} visible games", LogMessageType.Info);
+        }
+
+        if (_settings.AutoUpdateGames && _autoUpdateTimer == null)
+        {
+            InitializeAutoUpdateTimer();
+        }
+        else if (!_settings.AutoUpdateGames && _autoUpdateTimer != null)
+        {
+            _autoUpdateTimer.Stop();
+            _autoUpdateTimer.Dispose();
+            _autoUpdateTimer = null;
+            AddLog("Auto-update disabled", LogMessageType.Info);
+        }
+        else if (_settings.AutoUpdateGames && _autoUpdateTimer != null)
+        {
+            _autoUpdateTimer.Stop();
+            _autoUpdateTimer.Interval = _settings.AutoUpdateCheckInterval * 60 * 1000;
+            _autoUpdateTimer.Start();
+            AddLog($"Auto-update interval changed to {_settings.AutoUpdateCheckInterval} minutes", LogMessageType.Info);
         }
     }
+
+    /// <summary>
+    /// Exposes the current AppSettings instance to the InteropBridge.
+    /// </summary>
+    public AppSettings Settings => _settings;
 
     private async Task ScanIncompleteTransfersAsync()
     {
@@ -1804,6 +1807,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AddLog($"Reset {itemsToRetry.Count} item(s) to queued status for retry", LogMessageType.Info);
         StatusMessage = $"Reset {itemsToRetry.Count} item(s) for retry - click Start Queue to begin";
         
+        StartQueueCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Retries a single queue item by resetting its status to Queued
+    /// </summary>
+    public void RetryQueueItem(string appId)
+    {
+        var item = DownloadQueue.FirstOrDefault(q => q.GameAppId == appId);
+        if (item == null) return;
+        if (item.Status != DownloadQueueStatus.Failed && item.Status != DownloadQueueStatus.Paused)
+            return;
+
+        item.Status = DownloadQueueStatus.Queued;
+        AddLog($"Reset '{item.GameName}' to queued status for retry", LogMessageType.Info);
+        StatusMessage = $"'{item.GameName}' reset for retry - click Start Queue to begin";
         StartQueueCommand.NotifyCanExecuteChanged();
     }
 

@@ -4,6 +4,9 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using AvaloniaWebView;
 using WebViewCore.Events;
@@ -378,6 +381,15 @@ public class InteropBridge : IDisposable
                     }
                     break;
 
+                case "RetryQueueItem":
+                    if (payload?.TryGetProperty("appId", out var retryAppId) == true)
+                    {
+                        var appId = retryAppId.GetString();
+                        if (!string.IsNullOrEmpty(appId))
+                            _viewModel.RetryQueueItem(appId);
+                    }
+                    break;
+
                 case "RemoveFromQueue":
                     if (payload?.TryGetProperty("appId", out var appIdElem3) == true)
                     {
@@ -450,8 +462,23 @@ public class InteropBridge : IDisposable
 
                 // Settings commands
                 case "OpenSettings":
-                    if (_viewModel.OpenSettingsCommand.CanExecute(null))
-                        _viewModel.OpenSettingsCommand.Execute(null);
+                    await PushSettingsAsync();
+                    break;
+
+                case "SaveSettings":
+                    if (payload.HasValue)
+                        await HandleSaveSettingsAsync(payload.Value);
+                    break;
+
+                case "BrowseEpicFolder":
+                    await HandleBrowseEpicFolderAsync();
+                    break;
+
+                case "UnhideAllGames":
+                    _viewModel.Settings.HiddenGameIds.Clear();
+                    _viewModel.Settings.Save();
+                    _viewModel.ApplySettingsChanges();
+                    await PushSettingsAsync();
                     break;
 
                 case "ToggleHighSpeedMode":
@@ -478,6 +505,91 @@ public class InteropBridge : IDisposable
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Command execution error: {ex}");
+        }
+    }
+
+    private async Task PushSettingsAsync()
+    {
+        var s = _viewModel.Settings;
+        var hiddenGames = _viewModel.LocalGames
+            .Where(g => s.HiddenGameIds.Contains(g.AppId))
+            .Select(g => new { appId = g.AppId, name = g.Name })
+            .OrderBy(x => x.name)
+            .ToList();
+
+        var actualStartupState = OperatingSystem.IsWindows() && StartupHelper.IsStartupEnabled();
+
+        var payload = new
+        {
+            settings = new
+            {
+                autoStartNetwork = s.AutoStartNetwork,
+                autoUpdateGames = s.AutoUpdateGames,
+                autoResumeDownloads = s.AutoResumeDownloads,
+                autoUpdateCheckInterval = s.AutoUpdateCheckInterval,
+                startWithWindows = OperatingSystem.IsWindows() ? actualStartupState : s.StartWithWindows,
+                minimizeToTray = s.MinimizeToTray,
+                epicInstallRoot = s.EpicInstallRoot ?? string.Empty,
+            },
+            hiddenGames,
+            isWindows = OperatingSystem.IsWindows(),
+            settingsPath = AppSettings.GetSettingsFilePath(),
+        };
+
+        var json = JsonSerializer.Serialize(payload, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__openSettings && window.__openSettings({json});");
+    }
+
+    private async Task HandleSaveSettingsAsync(JsonElement payload)
+    {
+        var s = _viewModel.Settings;
+
+        if (payload.TryGetProperty("autoStartNetwork", out var v1)) s.AutoStartNetwork = v1.GetBoolean();
+        if (payload.TryGetProperty("autoUpdateGames", out var v2)) s.AutoUpdateGames = v2.GetBoolean();
+        if (payload.TryGetProperty("autoResumeDownloads", out var v3)) s.AutoResumeDownloads = v3.GetBoolean();
+        if (payload.TryGetProperty("autoUpdateCheckInterval", out var v4) && v4.TryGetInt32(out var interval))
+            s.AutoUpdateCheckInterval = Math.Clamp(interval, 5, 1440);
+        if (payload.TryGetProperty("minimizeToTray", out var v5)) s.MinimizeToTray = v5.GetBoolean();
+
+        if (payload.TryGetProperty("epicInstallRoot", out var v6))
+        {
+            var root = v6.GetString()?.Trim();
+            s.EpicInstallRoot = string.IsNullOrEmpty(root) ? null : root;
+        }
+
+        if (payload.TryGetProperty("startWithWindows", out var v7))
+        {
+            var enable = v7.GetBoolean();
+            s.StartWithWindows = enable;
+            if (OperatingSystem.IsWindows())
+            {
+                StartupHelper.SetStartupEnabled(enable);
+            }
+        }
+
+        s.Save();
+        _viewModel.ApplySettingsChanges();
+        await PushSettingsAsync();
+    }
+
+    private async Task HandleBrowseEpicFolderAsync()
+    {
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
+            desktop.MainWindow == null)
+            return;
+
+        var sp = desktop.MainWindow.StorageProvider;
+        var folders = await sp.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Epic Games install folder",
+            AllowMultiple = false,
+        });
+
+        if (folders.Count > 0)
+        {
+            var path = folders[0].Path.LocalPath;
+            var json = JsonSerializer.Serialize(path, JsonOptions);
+            await ExecuteJavaScriptAsync($"window.__epicBrowseResult && window.__epicBrowseResult({json});");
         }
     }
 
