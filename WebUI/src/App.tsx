@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
-  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye, Search,
+  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye, Search, HardDrive,
 } from 'lucide-react';
 import { useAppState, type GameInfo, type SettingsPayload } from './store';
 import { sendCommand } from './bridge';
 import SettingsModal from './components/SettingsModal';
+import DrivesPanel from './components/DrivesPanel';
 
 interface GameContextMenu {
   x: number;
@@ -49,6 +50,7 @@ export default function App() {
   const [localGameFilter, setLocalGameFilter] = useState('');
   const [peerGameFilter, setPeerGameFilter] = useState('');
   const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
+  const [showDrives, setShowDrives] = useState(false);
 
   useEffect(() => {
     (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
@@ -525,6 +527,12 @@ export default function App() {
             <Settings className="w-4 h-4 text-slate-400 group-hover:text-slate-300" />
             <span className="text-sm text-slate-400 group-hover:text-slate-300">Settings</span>
           </button>
+          <button onClick={() => setShowDrives(v => !v)} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group ${showDrives ? 'bg-slate-800' : ''}`}>
+            <HardDrive className={`w-4 h-4 ${showDrives ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`} />
+            <span className={`text-sm ${showDrives ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`}>
+              Drives{s.drives.length > 0 ? ` (${s.drives.length})` : ''}
+            </span>
+          </button>
           <button onClick={() => sendCommand('ToggleHighSpeedMode')} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group">
             <Wifi className={`w-4 h-4 ${s.highSpeedMode ? 'text-amber-400' : 'text-slate-400'}`} />
             <span className={`text-sm ${s.highSpeedMode ? 'text-amber-400' : 'text-slate-400 group-hover:text-slate-300'}`}>{s.highSpeedMode ? 'High-Speed' : 'WiFi Mode'}</span>
@@ -541,6 +549,23 @@ export default function App() {
 
       {settingsPayload && (
         <SettingsModal payload={settingsPayload} onClose={() => setSettingsPayload(null)} />
+      )}
+
+      {showDrives && (
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowDrives(false); }}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <HardDrive className="w-6 h-6 text-white" />
+                <h2 className="text-lg font-bold text-white">External Drives</h2>
+              </div>
+              <button onClick={() => setShowDrives(false)} className="text-white/80 hover:text-white" title="Close">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <DrivesPanel />
+          </div>
+        </div>
       )}
 
       {ctxMenu && (

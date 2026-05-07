@@ -18,6 +18,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
     private readonly AppSettings _settings;
+    private readonly DriveDetectionService _driveDetectionService;
+    private readonly ExternalFolderScanner _externalScanner;
     private DateTime _lastProgressUpdate = DateTime.MinValue;
     private System.Timers.Timer? _autoUpdateTimer;
     private const int MaxLogMessages = 100;
@@ -123,6 +125,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<NetworkPeer> NetworkPeers { get; } = [];
     public ObservableCollection<GameSyncInfo> AvailableSyncs { get; } = [];
     public ObservableCollection<GameInfo> AvailableFromPeers { get; } = [];
+    public ObservableCollection<DriveCandidate> Drives { get; } = [];
+    public ObservableCollection<CrossLocationGame> CrossLocationGames { get; } = [];
     [ObservableProperty]
     private ObservableCollection<TransferState> _incompleteTransfers = [];
     public ObservableCollection<LogMessage> LogMessages { get; } = [];
@@ -136,10 +140,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MainViewModel()
     {
         _steamScanner = new SteamLibraryScanner();
-        _scanners = new List<IGameLibraryScanner> { _steamScanner, new EpicGamesLibraryScanner() };
+        _settings = AppSettings.Load();
+        _externalScanner = new ExternalFolderScanner(_settings);
+        _scanners = new List<IGameLibraryScanner> { _steamScanner, new EpicGamesLibraryScanner(), _externalScanner };
         _networkService = new NetworkDiscoveryService();
         _fileTransferService = new FileTransferService();
-        _settings = AppSettings.Load();
+
+        // Initialize drive detection
+        _driveDetectionService = new DriveDetectionService();
+        _driveDetectionService.DrivesChanged += OnDrivesChanged;
+        // Populate initial drives
+        foreach (var d in _driveDetectionService.CurrentDrives)
+            Drives.Add(d);
 
         // Check admin and firewall status (Windows only)
         if (OperatingSystem.IsWindows())
@@ -211,7 +223,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             LogMessages.Insert(0, new LogMessage(message, type));
-            
+
             // Keep log size manageable
             while (LogMessages.Count > MaxLogMessages)
             {
@@ -219,6 +231,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         });
     }
+
+    public void AddLogPublic(string message, LogMessageType type = LogMessageType.Info) => AddLog(message, type);
 
     [RelayCommand]
     private void ClearLog()
@@ -2169,11 +2183,270 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void OnDrivesChanged(object? sender, IReadOnlyList<DriveCandidate> drives)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            Drives.Clear();
+            foreach (var d in drives)
+                Drives.Add(d);
+        });
+    }
+
+    [RelayCommand]
+    private async Task ScanExternalLibrariesAsync()
+    {
+        try
+        {
+            IsScanning = true;
+            StatusMessage = "Scanning external libraries...";
+            AddLog("Scanning external libraries...", LogMessageType.Info);
+
+            var games = await _externalScanner.ScanGamesAsync();
+            AddLog($"External: found {games.Count} games" +
+                (_externalScanner.ScanErrors.Count > 0 ? $" ({_externalScanner.ScanErrors.Count} warnings)" : ""),
+                games.Count > 0 ? LogMessageType.Info : LogMessageType.Warning);
+
+            StatusMessage = $"External scan complete: {games.Count} games";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"External scan error: {ex.Message}";
+            AddLog($"External scan error: {ex.Message}", LogMessageType.Error);
+        }
+        finally
+        {
+            IsScanning = false;
+        }
+    }
+
+    public Task AddExternalLibraryAsync(string rootPath, string displayName)
+    {
+        var lib = new ExternalLibrary
+        {
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? System.IO.Path.GetFileName(rootPath.TrimEnd('\\', '/')) : displayName,
+            RootPath = rootPath,
+            DriveSerial = rootPath.Length >= 2 ? rootPath[..2] : string.Empty,
+            IsRemovable = false,
+            ScanSubfolders = true,
+        };
+        _settings.ExternalLibraries.Add(lib);
+        _settings.Save();
+        AddLog($"Added external library: {lib.DisplayName} ({rootPath})", LogMessageType.Info);
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveExternalLibraryAsync(Guid id)
+    {
+        var lib = _settings.ExternalLibraries.FirstOrDefault(l => l.Id == id);
+        if (lib != null)
+        {
+            _settings.ExternalLibraries.Remove(lib);
+            _settings.Save();
+            AddLog($"Removed external library: {lib.DisplayName}", LogMessageType.Info);
+        }
+        return Task.CompletedTask;
+    }
+
+    public async Task<List<CrossLocationGame>> CompareGameLocationsAsync()
+    {
+        var result = new List<CrossLocationGame>();
+
+        var externalGames = await _externalScanner.ScanGamesAsync();
+        var localGamesSnapshot = LocalGames.ToList();
+
+        foreach (var lib in _settings.ExternalLibraries)
+        {
+            var externalForLib = externalGames
+                .Where(g => g.InstallPath.StartsWith(lib.RootPath, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            // Games only on external
+            foreach (var extGame in externalForLib)
+            {
+                var deviceCopy = localGamesSnapshot.FirstOrDefault(g =>
+                    g.AppId == extGame.AppId ||
+                    string.Equals(g.Name, extGame.Name, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(
+                        System.IO.Path.GetFileName(g.InstallPath.TrimEnd('\\', '/', ' ')),
+                        extGame.Name,
+                        StringComparison.OrdinalIgnoreCase));
+
+                CopyDirection dir;
+                if (deviceCopy == null)
+                {
+                    dir = CopyDirection.OnlyOnDrive;
+                }
+                else if (string.Equals(deviceCopy.BuildId, extGame.BuildId, StringComparison.OrdinalIgnoreCase) ||
+                         (string.IsNullOrEmpty(deviceCopy.BuildId) && string.IsNullOrEmpty(extGame.BuildId)))
+                {
+                    dir = CopyDirection.InSync;
+                }
+                else if (deviceCopy.LastUpdated > extGame.LastUpdated)
+                {
+                    dir = CopyDirection.DeviceToDrive;
+                }
+                else
+                {
+                    dir = CopyDirection.DriveToDevice;
+                }
+
+                result.Add(new CrossLocationGame
+                {
+                    DeviceCopy = deviceCopy,
+                    ExternalCopy = extGame,
+                    Library = lib,
+                    Direction = dir,
+                });
+            }
+
+            // Games only on device (not on this external lib)
+            var externalAppIds = externalForLib.Select(g => g.AppId).ToHashSet();
+            var externalNames = externalForLib.Select(g => g.Name.ToLowerInvariant()).ToHashSet();
+            foreach (var localGame in localGamesSnapshot)
+            {
+                if (!externalAppIds.Contains(localGame.AppId) &&
+                    !externalNames.Contains(localGame.Name.ToLowerInvariant()))
+                {
+                    result.Add(new CrossLocationGame
+                    {
+                        DeviceCopy = localGame,
+                        ExternalCopy = null,
+                        Library = lib,
+                        Direction = CopyDirection.OnlyOnDevice,
+                    });
+                }
+            }
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            CrossLocationGames.Clear();
+            foreach (var g in result)
+                CrossLocationGames.Add(g);
+        });
+
+        return result;
+    }
+
+    public async Task StartLocalCopyAsync(string appId, Guid libraryId)
+    {
+        var lib = _settings.ExternalLibraries.FirstOrDefault(l => l.Id == libraryId);
+        if (lib == null)
+        {
+            AddLog($"StartLocalCopy: library {libraryId} not found", LogMessageType.Error);
+            return;
+        }
+
+        var crossGame = CrossLocationGames.FirstOrDefault(g => g.AppId == appId && g.Library?.Id == libraryId);
+        if (crossGame == null)
+        {
+            AddLog($"StartLocalCopy: game {appId} not found in cross-location list", LogMessageType.Error);
+            return;
+        }
+
+        GameInfo? source = null;
+        string destPath = string.Empty;
+
+        if (crossGame.Direction == CopyDirection.DeviceToDrive || crossGame.Direction == CopyDirection.OnlyOnDevice)
+        {
+            source = crossGame.DeviceCopy;
+            if (source == null)
+            {
+                AddLog($"StartLocalCopy: device copy missing for {appId} (direction={crossGame.Direction})", LogMessageType.Error);
+                return;
+            }
+            destPath = System.IO.Path.Combine(lib.RootPath, System.IO.Path.GetFileName(source.InstallPath));
+        }
+        else if (crossGame.Direction == CopyDirection.DriveToDevice || crossGame.Direction == CopyDirection.OnlyOnDrive)
+        {
+            source = crossGame.ExternalCopy;
+            if (source == null)
+            {
+                AddLog($"StartLocalCopy: external copy missing for {appId} (direction={crossGame.Direction})", LogMessageType.Error);
+                return;
+            }
+            var libraryFolders = _steamScanner.GetLibraryFolders();
+            if (libraryFolders.Count == 0)
+            {
+                AddLog("StartLocalCopy: no Steam library folders found", LogMessageType.Error);
+                return;
+            }
+            destPath = System.IO.Path.Combine(libraryFolders[0], "common", System.IO.Path.GetFileName(source.InstallPath));
+        }
+        else
+        {
+            AddLog($"StartLocalCopy: game {appId} direction is {crossGame.Direction}, nothing to copy", LogMessageType.Info);
+            return;
+        }
+
+        try
+        {
+            IsTransferring = true;
+            CurrentTransferGameName = source.Name;
+            StatusMessage = $"Copying {source.Name} locally...";
+            AddLog($"Starting local copy: {source.Name} → {destPath}", LogMessageType.Transfer);
+
+            var engine = new IncrementalSyncEngine();
+            engine.LogMessageRaised += (_, msg) => AddLog(msg, LogMessageType.Info);
+            engine.ProgressChanged += (_, e) =>
+            {
+                var now = DateTime.Now;
+                if ((now - _lastProgressUpdate).TotalMilliseconds >= 100)
+                {
+                    _lastProgressUpdate = now;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        CurrentTransferProgress = e.Progress;
+                        CurrentTransferFile = e.CurrentFile;
+                        CurrentTransferTotalBytes = e.TotalBytes;
+                        CurrentTransferDownloadedBytes = e.TransferredBytes;
+                        CurrentTransferSpeed = FormatSpeed(e.SpeedBytesPerSecond, ShowSpeedInMbps);
+                        CurrentTransferTimeRemaining = FormatTimeRemaining(e.EstimatedTimeRemaining);
+                    });
+                }
+            };
+
+            var transport = new LocalFileTransport();
+            var cts = new CancellationTokenSource();
+            var resumeState = TransferState.Load(destPath);
+            if (resumeState != null)
+                AddLog($"Resuming previous copy of {source.Name} ({resumeState.CompletedFiles.Count} files already done)", LogMessageType.Info);
+            var success = await engine.CopyGameAsync(source.InstallPath, destPath, source, transport, resumeState, cts.Token);
+
+            if (success)
+            {
+                StatusMessage = $"Local copy complete: {source.Name}";
+                AddLog($"Local copy finished: {source.Name}", LogMessageType.Success);
+            }
+            else
+            {
+                StatusMessage = $"Local copy had errors: {source.Name}";
+                AddLog($"Local copy completed with errors: {source.Name}", LogMessageType.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Local copy error: {ex.Message}";
+            AddLog($"Local copy error: {ex.Message}", LogMessageType.Error);
+        }
+        finally
+        {
+            IsTransferring = false;
+            CurrentTransferGameName = string.Empty;
+            CurrentTransferProgress = 0;
+            CurrentTransferFile = string.Empty;
+        }
+    }
+
     public void Dispose()
     {
         _autoUpdateTimer?.Stop();
         _autoUpdateTimer?.Dispose();
-        
+
+        _driveDetectionService.DrivesChanged -= OnDrivesChanged;
+        _driveDetectionService.Dispose();
+
         _networkService.PeerDiscovered -= OnPeerDiscovered;
         _networkService.PeerLost -= OnPeerLost;
         _networkService.PeerGamesUpdated -= OnPeerGamesUpdated;

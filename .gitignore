@@ -363,3 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 /publish-output
 Assets/webui/index.html
+.plan.md

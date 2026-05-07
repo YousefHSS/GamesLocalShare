@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { X, Settings as SettingsIcon, FolderOpen, RotateCcw } from 'lucide-react';
+import { X, Settings as SettingsIcon, FolderOpen, RotateCcw, HardDrive, Trash2 } from 'lucide-react';
+import { useAppState } from '../store';
 import { sendCommand } from '../bridge';
 import type { AppSettingsForm, SettingsPayload } from '../store';
 
@@ -20,17 +21,49 @@ export default function SettingsModal({
   payload: SettingsPayload;
   onClose: () => void;
 }) {
+  const s = useAppState();
   const [form, setForm] = useState<AppSettingsForm>(payload.settings);
+  const [pendingLibraryPath, setPendingLibraryPath] = useState<string | null>(null);
+  const [pendingLibraryName, setPendingLibraryName] = useState('');
 
-  // External epic-folder picker callback
   useEffect(() => {
-    (window as any).__epicBrowseResult = (path: string) => {
+    const handler = (path: string) => {
       setForm(prev => ({ ...prev, epicInstallRoot: path }));
     };
+    const prev = (window as any).__epicBrowseResult;
+    (window as any).__epicBrowseResult = handler;
     return () => {
-      (window as any).__epicBrowseResult = undefined;
+      if ((window as any).__epicBrowseResult === handler) {
+        (window as any).__epicBrowseResult = prev;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    const handler = (path: string) => {
+      setPendingLibraryPath(path);
+      setPendingLibraryName(path.split(/[\\/]/).filter(Boolean).pop() ?? path);
+    };
+    const prev = (window as any).__driveBrowseResult;
+    (window as any).__driveBrowseResult = handler;
+    return () => {
+      if ((window as any).__driveBrowseResult === handler) {
+        (window as any).__driveBrowseResult = prev;
+      }
+    };
+  }, []);
+
+  const confirmAddLibrary = () => {
+    if (!pendingLibraryPath) return;
+    sendCommand('AddExternalLibrary', { rootPath: pendingLibraryPath, displayName: pendingLibraryName });
+    setPendingLibraryPath(null);
+    setPendingLibraryName('');
+  };
+
+  const cancelAddLibrary = () => {
+    setPendingLibraryPath(null);
+    setPendingLibraryName('');
+  };
 
   // Re-sync if payload changes (e.g. after UnhideAllGames pushes a fresh snapshot)
   useEffect(() => {
@@ -148,6 +181,76 @@ export default function SettingsModal({
                 </button>
               </div>
             </div>
+          </Section>
+
+          {/* External Drive Libraries */}
+          <Section title="External Drive Libraries">
+            <p className="text-xs text-slate-400">
+              Add folders on external drives to scan for games. These are shown in the Drives panel.
+            </p>
+
+            {/* Configured libraries */}
+            {s.externalLibraries && s.externalLibraries.length > 0 ? (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                {s.externalLibraries.map(lib => (
+                  <div key={lib.id} className="flex items-center justify-between bg-slate-800/60 border border-slate-700 rounded px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <HardDrive className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                        <span className="text-sm text-white truncate">{lib.displayName}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-mono truncate mt-0.5">{lib.rootPath}</p>
+                    </div>
+                    <button
+                      onClick={() => sendCommand('RemoveExternalLibrary', { id: lib.id })}
+                      className="ml-2 p-1 hover:bg-red-900/40 rounded text-slate-400 hover:text-red-400"
+                      title="Remove library"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 italic">No external libraries configured.</p>
+            )}
+
+            {/* Pending confirmation after browse */}
+            {pendingLibraryPath && (
+              <div className="bg-blue-900/20 border border-blue-700/50 rounded p-3 space-y-2">
+                <p className="text-xs text-blue-300">Selected folder: <span className="font-mono">{pendingLibraryPath}</span></p>
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-300">Display name</label>
+                  <input
+                    type="text"
+                    value={pendingLibraryName}
+                    onChange={e => setPendingLibraryName(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={confirmAddLibrary}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded font-medium"
+                  >
+                    Add Library
+                  </button>
+                  <button
+                    onClick={cancelAddLibrary}
+                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => sendCommand('BrowseDriveFolder')}
+              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-1.5 self-start"
+            >
+              <FolderOpen className="w-3.5 h-3.5" /> Browse & Add Library...
+            </button>
           </Section>
 
           {/* Hidden Games */}

@@ -84,6 +84,34 @@ export interface LogMessage {
   typeIcon: string;
 }
 
+export interface DriveCandidate {
+  driveLetter: string;
+  volumeLabel: string;
+  serial: string;
+  isRemovable: boolean;
+  isAvailable: boolean;
+}
+
+export interface ExternalLibrary {
+  id: string;
+  displayName: string;
+  rootPath: string;
+  driveSerial: string;
+  isRemovable: boolean;
+  scanSubfolders: boolean;
+}
+
+export interface CrossLocationGame {
+  deviceCopy: GameInfo | null;
+  externalCopy: GameInfo | null;
+  library: ExternalLibrary;
+  direction: 'None' | 'InSync' | 'DeviceToDrive' | 'DriveToDevice' | 'OnlyOnDevice' | 'OnlyOnDrive';
+  displayName: string;
+  appId: string;
+  statusText: string;
+  statusColor: string;
+}
+
 export interface AppState {
   // Scalar properties
   statusMessage: string;
@@ -128,6 +156,11 @@ export interface AppState {
   selectedPeerGame: GameInfo | null;
   selectedIncompleteTransfer: TransferState | null;
   currentQueueItem: DownloadQueueItem | null;
+
+  // External drives
+  drives: DriveCandidate[];
+  externalLibraries: ExternalLibrary[];
+  crossLocationGames: CrossLocationGame[];
 
   // Actions
   updateState: (patch: Partial<AppState>) => void;
@@ -174,6 +207,10 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   selectedPeerGame: null,
   selectedIncompleteTransfer: null,
   currentQueueItem: null,
+
+  drives: [],
+  externalLibraries: [],
+  crossLocationGames: [],
 };
 
 export const useAppState = create<AppState>((set) => ({
@@ -196,6 +233,7 @@ export interface AppSettingsForm {
 export interface SettingsPayload {
   settings: AppSettingsForm;
   hiddenGames: { appId: string; name: string }[];
+  externalLibraries: ExternalLibrary[];
   isWindows: boolean;
   settingsPath: string;
 }
@@ -205,6 +243,9 @@ declare global {
   function __updateState(patch: Partial<AppState>): void;
   function __openSettings(payload: SettingsPayload): void;
   function __epicBrowseResult(path: string): void;
+  function __driveBrowseResult(path: string): void;
+  function __driveListResult(drives: DriveCandidate[]): void;
+  function __crossLocationGamesResult(games: CrossLocationGame[]): void;
 }
 
 (window as any).__initState = (state: AppState) => {

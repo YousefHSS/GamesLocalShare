@@ -8,6 +8,8 @@ namespace GamesLocalShare.Models;
 /// JSON serialization context to support trimming/AOT
 /// </summary>
 [JsonSerializable(typeof(AppSettings))]
+[JsonSerializable(typeof(List<ExternalLibrary>))]
+[JsonSerializable(typeof(ExternalLibrary))]
 [JsonSourceGenerationOptions(WriteIndented = true)]
 internal partial class AppSettingsJsonContext : JsonSerializerContext
 {
@@ -69,6 +71,11 @@ public class AppSettings
     /// existing Epic installs at transfer time.
     /// </summary>
     public string? EpicInstallRoot { get; set; }
+
+    /// <summary>
+    /// List of external drive libraries to scan for games
+    /// </summary>
+    public List<ExternalLibrary> ExternalLibraries { get; set; } = [];
 
     /// <summary>
     /// Loads settings from disk, or returns defaults if file doesn't exist.
@@ -204,6 +211,11 @@ public class AppSettings
             $"HiddenGameIds={string.Join(",", HiddenGameIds)}",
             $"EpicInstallRoot={EpicInstallRoot ?? string.Empty}"
         };
+        for (int i = 0; i < ExternalLibraries.Count; i++)
+        {
+            var lib = ExternalLibraries[i];
+            lines.Add($"ExternalLibrary.{i}={lib.Id}|{lib.DisplayName}|{lib.RootPath}|{lib.DriveSerial}|{lib.IsRemovable}|{lib.ScanSubfolders}");
+        }
         File.WriteAllLines(SettingsBackupPath, lines);
     }
 
@@ -253,6 +265,24 @@ public class AppSettings
                     if (!string.IsNullOrEmpty(value))
                     {
                         settings.HiddenGameIds = new HashSet<string>(value.Split(',', StringSplitOptions.RemoveEmptyEntries));
+                    }
+                    break;
+                default:
+                    if (key.StartsWith("ExternalLibrary.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts2 = value.Split('|');
+                        if (parts2.Length >= 6 && Guid.TryParse(parts2[0], out var libId))
+                        {
+                            settings.ExternalLibraries.Add(new ExternalLibrary
+                            {
+                                Id = libId,
+                                DisplayName = parts2[1],
+                                RootPath = parts2[2],
+                                DriveSerial = parts2[3],
+                                IsRemovable = bool.TryParse(parts2[4], out var ir) && ir,
+                                ScanSubfolders = !bool.TryParse(parts2[5], out var ss) || ss,
+                            });
+                        }
                     }
                     break;
             }

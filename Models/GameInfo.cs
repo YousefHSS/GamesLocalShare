@@ -57,6 +57,11 @@ public class GameInfo : INotifyPropertyChanged
     public bool IsAvailableFromPeer { get; set; } = false;
 
     /// <summary>
+    /// Whether this game is located on an external drive/library
+    /// </summary>
+    public bool IsExternal { get; set; } = false;
+
+    /// <summary>
     /// Whether this game is hidden from peers (not shared on network)
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -161,5 +166,6 @@ public enum GamePlatform
 {
     Steam,
     EpicGames,
-    Xbox
+    Xbox,
+    External
 }

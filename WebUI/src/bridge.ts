@@ -54,7 +54,14 @@ export type CommandName =
   | 'ToggleHighSpeedMode'
   | 'ToggleLog'
   | 'ClearLog'
-  | 'ShowTroubleshoot';
+  | 'ShowTroubleshoot'
+  | 'ListDrives'
+  | 'BrowseDriveFolder'
+  | 'AddExternalLibrary'
+  | 'RemoveExternalLibrary'
+  | 'ScanExternalLibraries'
+  | 'CompareGameLocations'
+  | 'StartLocalCopy';
 
 export interface CommandPayload {
   [key: string]: any;

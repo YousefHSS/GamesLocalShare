@@ -16,7 +16,9 @@
       "Bash(curl -s -o /tmp/r2.json -w 'HTTP=%{http_code}\\\\n' -X POST https://graphql.epicgames.com/graphql -H 'Content-Type: application/json' -H 'User-Agent: Mozilla/5.0' -d '{\"query\":\"query\\($k:String,$c:String!,$l:String\\){Catalog{searchStore\\(keywords:$k,country:$c,locale:$l,count:5\\){elements{title keyImages{type url}}}}}\",\"variables\":{\"k\":\"Rocket League\",\"c\":\"US\",\"l\":\"en-US\"}}')",
       "Bash(curl -s -o /tmp/r3.json -w \"HTTP=%{http_code}\\\\n\" \"https://api.egdata.app/search?query=Rocket+League&limit=3\")",
       "Bash(curl -s \"https://api.egdata.app/multisearch/offers?query=Rocket+League\" -w \"\\\\nHTTP=%{http_code}\\\\n\")",
-      "Bash(curl -s \"https://api.egdata.app/offers?title=Rocket+League&limit=3\" -w \"\\\\nHTTP=%{http_code}\\\\n\")"
+      "Bash(curl -s \"https://api.egdata.app/offers?title=Rocket+League&limit=3\" -w \"\\\\nHTTP=%{http_code}\\\\n\")",
+      "Bash(git log *)",
+      "Bash(xargs grep *)"
     ]
   }
 }

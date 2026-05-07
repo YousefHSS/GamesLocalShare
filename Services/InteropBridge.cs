@@ -63,6 +63,8 @@ public class InteropBridge : IDisposable
         SubscribeToCollection(_viewModel.IncompleteTransfers, "incompleteTransfers");
         SubscribeToCollection(_viewModel.DownloadQueue, "downloadQueue");
         SubscribeToCollection(_viewModel.LogMessages, "logMessages");
+        SubscribeToCollection(_viewModel.Drives, "drives");
+        SubscribeToCollection(_viewModel.CrossLocationGames, "crossLocationGames");
 
         // Subscribe to individual game property changes (for cover images)
         SubscribeToGamePropertyChanges();
@@ -206,6 +208,19 @@ public class InteropBridge : IDisposable
             selectedPeerGame = _viewModel.SelectedPeerGame,
             selectedIncompleteTransfer = _viewModel.SelectedIncompleteTransfer,
             currentQueueItem = _viewModel.CurrentQueueItem,
+
+            // External drives
+            drives = _viewModel.Drives.ToList(),
+            crossLocationGames = _viewModel.CrossLocationGames.ToList(),
+            externalLibraries = _viewModel.Settings.ExternalLibraries.Select(lib => new
+            {
+                id = lib.Id.ToString(),
+                displayName = lib.DisplayName,
+                rootPath = lib.RootPath,
+                driveSerial = lib.DriveSerial,
+                isRemovable = lib.IsRemovable,
+                scanSubfolders = lib.ScanSubfolders,
+            }).ToList(),
         };
     }
 
@@ -500,11 +515,79 @@ public class InteropBridge : IDisposable
                     if (_viewModel.ShowTroubleshootInfoCommand.CanExecute(null))
                         _viewModel.ShowTroubleshootInfoCommand.Execute(null);
                     break;
+
+                // External drive / multi-drive commands
+                case "ListDrives":
+                    await HandleListDrivesAsync();
+                    break;
+
+                case "BrowseDriveFolder":
+                    await HandleBrowseDriveFolderAsync();
+                    break;
+
+                case "AddExternalLibrary":
+                    if (payload.HasValue &&
+                        payload.Value.TryGetProperty("rootPath", out var rootPathEl) &&
+                        payload.Value.TryGetProperty("displayName", out var displayNameEl))
+                    {
+                        var rootPath = rootPathEl.GetString() ?? string.Empty;
+                        var displayName = displayNameEl.GetString() ?? string.Empty;
+                        await _viewModel.AddExternalLibraryAsync(rootPath, displayName);
+                        await PushExternalLibrariesAsync();
+                        await HandleCompareGameLocationsAsync();
+                    }
+                    break;
+
+                case "RemoveExternalLibrary":
+                    if (payload.HasValue &&
+                        payload.Value.TryGetProperty("id", out var libIdEl) &&
+                        Guid.TryParse(libIdEl.GetString(), out var libGuid))
+                    {
+                        await _viewModel.RemoveExternalLibraryAsync(libGuid);
+                        await PushExternalLibrariesAsync();
+                    }
+                    break;
+
+                case "ScanExternalLibraries":
+                    if (_viewModel.ScanExternalLibrariesCommand.CanExecute(null))
+                        _viewModel.ScanExternalLibrariesCommand.Execute(null);
+                    break;
+
+                case "CompareGameLocations":
+                    await HandleCompareGameLocationsAsync();
+                    break;
+
+                case "StartLocalCopy":
+                    if (!payload.HasValue)
+                    {
+                        _viewModel.AddLogPublic("StartLocalCopy: missing payload", LogMessageType.Error);
+                    }
+                    else if (!payload.Value.TryGetProperty("appId", out var copyAppIdEl))
+                    {
+                        _viewModel.AddLogPublic("StartLocalCopy: missing appId", LogMessageType.Error);
+                    }
+                    else if (!payload.Value.TryGetProperty("libraryId", out var copyLibIdEl))
+                    {
+                        _viewModel.AddLogPublic("StartLocalCopy: missing libraryId", LogMessageType.Error);
+                    }
+                    else if (!Guid.TryParse(copyLibIdEl.GetString(), out var copyLibGuid))
+                    {
+                        _viewModel.AddLogPublic($"StartLocalCopy: libraryId is not a GUID ({copyLibIdEl.GetString()})", LogMessageType.Error);
+                    }
+                    else
+                    {
+                        var copyAppId = copyAppIdEl.GetString() ?? string.Empty;
+                        _viewModel.AddLogPublic($"StartLocalCopy received: appId={copyAppId}, libraryId={copyLibGuid}", LogMessageType.Info);
+                        await _viewModel.StartLocalCopyAsync(copyAppId, copyLibGuid);
+                    }
+                    break;
             }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Command execution error: {ex}");
+            try { _viewModel.AddLogPublic($"Command '{cmd}' failed: {ex.Message}", LogMessageType.Error); }
+            catch { }
         }
     }
 
@@ -519,6 +602,16 @@ public class InteropBridge : IDisposable
 
         var actualStartupState = OperatingSystem.IsWindows() && StartupHelper.IsStartupEnabled();
 
+        var externalLibraries = s.ExternalLibraries.Select(lib => new
+        {
+            id = lib.Id.ToString(),
+            displayName = lib.DisplayName,
+            rootPath = lib.RootPath,
+            driveSerial = lib.DriveSerial,
+            isRemovable = lib.IsRemovable,
+            scanSubfolders = lib.ScanSubfolders,
+        }).ToList();
+
         var payload = new
         {
             settings = new
@@ -532,6 +625,7 @@ public class InteropBridge : IDisposable
                 epicInstallRoot = s.EpicInstallRoot ?? string.Empty,
             },
             hiddenGames,
+            externalLibraries,
             isWindows = OperatingSystem.IsWindows(),
             settingsPath = AppSettings.GetSettingsFilePath(),
         };
@@ -540,7 +634,91 @@ public class InteropBridge : IDisposable
         await ExecuteJavaScriptAsync($"window.__openSettings && window.__openSettings({json});");
     }
 
-    private async Task HandleSaveSettingsAsync(JsonElement payload)
+    private async Task HandleListDrivesAsync()
+    {
+        var drives = _viewModel.Drives.Select(d => new
+        {
+            driveLetter = d.DriveLetter,
+            volumeLabel = d.VolumeLabel,
+            serial = d.Serial,
+            isRemovable = d.IsRemovable,
+            isAvailable = d.IsAvailable,
+        }).ToList();
+        var json = JsonSerializer.Serialize(drives, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__driveListResult && window.__driveListResult({json});");
+    }
+
+    private async Task HandleBrowseDriveFolderAsync()
+    {
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
+            desktop.MainWindow == null)
+            return;
+
+        var sp = desktop.MainWindow.StorageProvider;
+        var folders = await sp.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select external drive folder",
+            AllowMultiple = false,
+        });
+
+        if (folders.Count > 0)
+        {
+            var path = folders[0].Path.LocalPath;
+            var json = JsonSerializer.Serialize(path, JsonOptions);
+            await ExecuteJavaScriptAsync($"window.__driveBrowseResult && window.__driveBrowseResult({json});");
+        }
+    }
+
+    private async Task PushExternalLibrariesAsync()
+    {
+        var libs = _viewModel.Settings.ExternalLibraries.Select(lib => new
+        {
+            id = lib.Id.ToString(),
+            displayName = lib.DisplayName,
+            rootPath = lib.RootPath,
+            driveSerial = lib.DriveSerial,
+            isRemovable = lib.IsRemovable,
+            scanSubfolders = lib.ScanSubfolders,
+        }).ToList();
+        var json = JsonSerializer.Serialize(new { externalLibraries = libs }, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__updateState && window.__updateState({json});");
+    }
+
+    private async Task HandleCompareGameLocationsAsync()
+    {
+        // Refresh the device's game list first so Compare matches against current
+        // names/build IDs rather than whatever was scanned at startup.
+        if (_viewModel.ScanLocalGamesCommand is CommunityToolkit.Mvvm.Input.IAsyncRelayCommand asyncScan
+            && asyncScan.CanExecute(null))
+        {
+            await asyncScan.ExecuteAsync(null);
+        }
+
+        var crossLocationGames = await _viewModel.CompareGameLocationsAsync();
+        var result = crossLocationGames.Select(g => new
+        {
+            deviceCopy = g.DeviceCopy,
+            externalCopy = g.ExternalCopy,
+            library = g.Library == null ? null : new
+            {
+                id = g.Library.Id.ToString(),
+                displayName = g.Library.DisplayName,
+                rootPath = g.Library.RootPath,
+                driveSerial = g.Library.DriveSerial,
+                isRemovable = g.Library.IsRemovable,
+                scanSubfolders = g.Library.ScanSubfolders,
+            },
+            direction = g.Direction.ToString(),
+            displayName = g.DisplayName,
+            appId = g.AppId,
+            statusText = g.StatusText,
+            statusColor = g.StatusColor,
+        }).ToList();
+        var json = JsonSerializer.Serialize(result, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__crossLocationGamesResult && window.__crossLocationGamesResult({json});");
+    }
+
+    private Task HandleSaveSettingsAsync(JsonElement payload)
     {
         var s = _viewModel.Settings;
 
@@ -569,7 +747,10 @@ public class InteropBridge : IDisposable
 
         s.Save();
         _viewModel.ApplySettingsChanges();
-        await PushSettingsAsync();
+        // Do NOT push settings back here — that invokes window.__openSettings(...)
+        // which reopens the modal in the WebUI. The modal already closes client-side
+        // after Save; OpenSettings will re-fetch fresh state on next open.
+        return Task.CompletedTask;
     }
 
     private async Task HandleBrowseEpicFolderAsync()
