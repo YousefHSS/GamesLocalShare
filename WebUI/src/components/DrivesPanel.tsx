@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle } from 'lucide-react';
 import { useAppState, type CrossLocationGame, type ExternalLibrary, type DriveCandidate } from '../store';
 import { sendCommand } from '../bridge';
+import PlatformIcon from './PlatformIcon';
 
 function statusBadgeClass(color: string): string {
   switch (color) {
@@ -35,6 +36,10 @@ export default function DrivesPanel() {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [pendingName, setPendingName] = useState('');
   const [manualPath, setManualPath] = useState('');
+  // "Device-only" rows (games installed locally but not on the drive) dominate
+  // the list once compared, so they're hidden by default. The user can opt in
+  // when they actually want to see what's missing from a drive.
+  const [showDeviceOnly, setShowDeviceOnly] = useState(false);
 
   // Keep local state in sync with store
   useEffect(() => {
@@ -107,16 +112,38 @@ export default function DrivesPanel() {
     dir === 'DeviceToDrive' || dir === 'DriveToDevice' ||
     dir === 'OnlyOnDevice' || dir === 'OnlyOnDrive';
 
-  // Group cross-location games by library
+  const deviceOnlyCount = useMemo(
+    () => crossGames.filter(g => g.direction === 'OnlyOnDevice').length,
+    [crossGames],
+  );
+
+  const visibleCrossGames = useMemo(
+    () => (showDeviceOnly ? crossGames : crossGames.filter(g => g.direction !== 'OnlyOnDevice')),
+    [crossGames, showDeviceOnly],
+  );
+
+  // Group cross-location games by library, both filtered and unfiltered. The
+  // unfiltered map lets us distinguish "no comparison done yet" from "everything
+  // for this library is hidden because device-only is off".
   const byLibrary = new Map<string, CrossLocationGame[]>();
-  for (const g of crossGames) {
+  for (const g of visibleCrossGames) {
     if (!g.library) continue;
     const key = g.library.id;
     if (!byLibrary.has(key)) byLibrary.set(key, []);
     byLibrary.get(key)!.push(g);
   }
+  const totalByLibrary = new Map<string, number>();
+  for (const g of crossGames) {
+    if (!g.library) continue;
+    totalByLibrary.set(g.library.id, (totalByLibrary.get(g.library.id) ?? 0) + 1);
+  }
 
   const libs = s.externalLibraries ?? [];
+
+  // Pick the platform from whichever copy is present; deviceCopy first since
+  // it's the canonical install on this machine.
+  const platformFor = (g: CrossLocationGame) =>
+    g.deviceCopy?.platform ?? g.externalCopy?.platform;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -144,6 +171,18 @@ export default function DrivesPanel() {
         >
           <HardDrive className="w-3.5 h-3.5" /> Add Library
         </button>
+        <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showDeviceOnly}
+            onChange={e => setShowDeviceOnly(e.target.checked)}
+            className="w-3.5 h-3.5 accent-blue-500"
+          />
+          <span>
+            Show device-only games
+            {deviceOnlyCount > 0 && <span className="text-slate-500"> ({deviceOnlyCount})</span>}
+          </span>
+        </label>
         <div className="flex items-center gap-1 ml-auto">
           <input
             type="text"
@@ -197,6 +236,8 @@ export default function DrivesPanel() {
           libs.map(lib => {
             const connected = isLibraryConnected(lib, s.drives);
             const gamesForLib = byLibrary.get(lib.id) ?? [];
+            const totalForLib = totalByLibrary.get(lib.id) ?? 0;
+            const hiddenDeviceOnly = totalForLib - gamesForLib.length;
 
             return (
               <div key={lib.id} className="bg-slate-800/40 border border-slate-700/50 rounded-lg overflow-hidden">
@@ -219,7 +260,11 @@ export default function DrivesPanel() {
                 {/* Games in this library */}
                 {gamesForLib.length === 0 ? (
                   <div className="px-4 py-3 text-xs text-slate-500 italic">
-                    {connected ? 'Click "Compare Locations" to see games' : 'Drive not connected'}
+                    {hiddenDeviceOnly > 0
+                      ? `${hiddenDeviceOnly} device-only game${hiddenDeviceOnly === 1 ? '' : 's'} hidden — toggle "Show device-only games" to view`
+                      : connected
+                        ? 'Click "Compare Locations" to see games'
+                        : 'Drive not connected'}
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-700/30">
@@ -227,6 +272,7 @@ export default function DrivesPanel() {
                       <div key={game.appId} className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-700/20">
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <DirectionIcon direction={game.direction} />
+                          <PlatformIcon platform={platformFor(game)} />
                           <p className="text-sm text-white truncate">{game.displayName}</p>
                         </div>
                         <div className="flex items-center gap-2 ml-2 flex-shrink-0">

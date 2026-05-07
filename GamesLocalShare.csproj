@@ -46,6 +46,16 @@
     <AvaloniaResource Include="Assets\webui\**" />
   </ItemGroup>
 
+  <!-- Exclude the tests project from the main project's default file globs.
+       Without this, the SDK wildcard pulls test source files into the main app. -->
+  <ItemGroup>
+    <Compile Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+    <None Remove="tests\**" />
+    <Content Remove="tests\**" />
+    <AvaloniaResource Remove="tests\**" />
+  </ItemGroup>
+
   <!-- Ensure any icons placed in the Icons folder are copied to the output directory -->
   <ItemGroup>
     <Content Include="Icons\**\*.*">

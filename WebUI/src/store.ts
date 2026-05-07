@@ -7,7 +7,7 @@ export interface GameInfo {
   sizeOnDisk: number;
   formattedSize: string;
   buildId: string;
-  platform: 'Steam' | 'EpicGames' | 'Xbox';
+  platform: 'Steam' | 'EpicGames' | 'Xbox' | 'External';
   isInstalled: boolean;
   isAvailableFromPeer: boolean;
   isHidden: boolean;

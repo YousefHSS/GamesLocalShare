@@ -18,7 +18,15 @@
       "Bash(curl -s \"https://api.egdata.app/multisearch/offers?query=Rocket+League\" -w \"\\\\nHTTP=%{http_code}\\\\n\")",
       "Bash(curl -s \"https://api.egdata.app/offers?title=Rocket+League&limit=3\" -w \"\\\\nHTTP=%{http_code}\\\\n\")",
       "Bash(git log *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(dotnet --version)",
+      "Bash(npm --version)",
+      "Bash(dotnet sln *)",
+      "Bash(dotnet restore *)",
+      "Bash(dotnet test *)",
+      "Bash(npm test *)",
+      "Bash(npx vitest *)",
+      "Bash(npx playwright *)"
     ]
   }
 }
