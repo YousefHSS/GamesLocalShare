@@ -18,15 +18,26 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
-        
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: WebUI/package-lock.json
+
+    - name: Install WebUI dependencies
+      run: npm ci
+      working-directory: WebUI
+
     - name: Restore dependencies
-      run: dotnet restore
-      
+      run: dotnet restore GamesLocalShare.csproj
+
     - name: Build Release (Framework-Dependent)
-      run: dotnet publish -c Release -r win-x64 --self-contained false -o ./publish-fd
-      
+      run: dotnet publish GamesLocalShare.csproj -c Release -r win-x64 --self-contained false -o ./publish-fd
+
     - name: Build Release (Self-Contained)
-      run: dotnet publish -c Release -r win-x64 --self-contained true -o ./publish-sc
+      run: dotnet publish GamesLocalShare.csproj -c Release -r win-x64 --self-contained true -o ./publish-sc
       
     - name: Create ZIP (Framework-Dependent)
       run: Compress-Archive -Path ./publish-fd/* -DestinationPath GamesLocalShare-win-x64-fd.zip
