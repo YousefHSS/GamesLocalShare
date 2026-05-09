@@ -11,14 +11,14 @@
     <ApplicationIcon>Icons\app.ico</ApplicationIcon>
 	  
     
-    <!-- Publishing options for smaller size -->
-    <PublishTrimmed>true</PublishTrimmed>
+    <!-- Publishing options. Trimming is disabled because BuiltInComInteropSupport (used
+         by the embedded WebView), Avalonia's BindingPlugins.DataValidators reflection,
+         and reflection-based JsonSerializer overloads all break under the linker. The
+         resulting SC publish is ~30 MB larger but actually starts. -->
+    <PublishTrimmed>false</PublishTrimmed>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    
-    <!-- Enable JSON source generators for trimming compatibility -->
-    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>
