@@ -8,6 +8,7 @@ public enum CopyDirection
     DriveToDevice,
     OnlyOnDevice,
     OnlyOnDrive,
+    UnknownVersion,
 }
 
 public class CrossLocationGame
@@ -27,6 +28,7 @@ public class CrossLocationGame
         CopyDirection.DriveToDevice => "Newer on drive → copy to device",
         CopyDirection.OnlyOnDevice => "Only on device",
         CopyDirection.OnlyOnDrive => "Only on drive",
+        CopyDirection.UnknownVersion => "Unknown version on drive — choose direction",
         _ => "Unknown"
     };
 
@@ -34,6 +36,7 @@ public class CrossLocationGame
     {
         CopyDirection.InSync => "green",
         CopyDirection.DeviceToDrive or CopyDirection.DriveToDevice => "yellow",
+        CopyDirection.UnknownVersion => "yellow",
         CopyDirection.OnlyOnDevice or CopyDirection.OnlyOnDrive => "slate",
         _ => "slate"
     };

@@ -577,8 +577,15 @@ public class InteropBridge : IDisposable
                     else
                     {
                         var copyAppId = copyAppIdEl.GetString() ?? string.Empty;
-                        _viewModel.AddLogPublic($"StartLocalCopy received: appId={copyAppId}, libraryId={copyLibGuid}", LogMessageType.Info);
-                        await _viewModel.StartLocalCopyAsync(copyAppId, copyLibGuid);
+                        CopyDirection? overrideDir = null;
+                        if (payload.Value.TryGetProperty("direction", out var dirEl)
+                            && dirEl.ValueKind == JsonValueKind.String
+                            && Enum.TryParse<CopyDirection>(dirEl.GetString(), out var parsedDir))
+                        {
+                            overrideDir = parsedDir;
+                        }
+                        _viewModel.AddLogPublic($"StartLocalCopy received: appId={copyAppId}, libraryId={copyLibGuid}, direction={overrideDir?.ToString() ?? "auto"}", LogMessageType.Info);
+                        await _viewModel.StartLocalCopyAsync(copyAppId, copyLibGuid, overrideDir);
                     }
                     break;
             }

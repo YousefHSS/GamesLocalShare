@@ -396,6 +396,9 @@ public class SteamLibraryScanner : IGameLibraryScanner
             catch { }
         }
 
+        int parsedStateFlags = 0;
+        if (!string.IsNullOrEmpty(stateFlags)) int.TryParse(stateFlags, out parsedStateFlags);
+
         var game = new GameInfo
         {
             AppId = appId,
@@ -406,6 +409,7 @@ public class SteamLibraryScanner : IGameLibraryScanner
             LastUpdated = lastUpdated,
             Platform = GamePlatform.Steam,
             IsInstalled = true, // We've verified the directory exists and has content
+            StateFlags = parsedStateFlags,
             CoverUrl = int.TryParse(appId, out var sid)
                 ? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{sid}/header.jpg"
                 : null,

@@ -2253,7 +2253,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var result = new List<CrossLocationGame>();
 
         var externalGames = await _externalScanner.ScanGamesAsync();
-        var localGamesSnapshot = LocalGames.ToList();
+
+        var externalRoots = _settings.ExternalLibraries.Select(l => l.RootPath).ToList();
+        var localGamesSnapshot = CrossLocationMatcher.FilterDeviceGames(LocalGames, externalRoots);
 
         foreach (var lib in _settings.ExternalLibraries)
         {
@@ -2264,32 +2266,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Games only on external
             foreach (var extGame in externalForLib)
             {
-                var deviceCopy = localGamesSnapshot.FirstOrDefault(g =>
-                    g.AppId == extGame.AppId ||
-                    string.Equals(g.Name, extGame.Name, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(
-                        System.IO.Path.GetFileName(g.InstallPath.TrimEnd('\\', '/', ' ')),
-                        extGame.Name,
-                        StringComparison.OrdinalIgnoreCase));
-
-                CopyDirection dir;
-                if (deviceCopy == null)
-                {
-                    dir = CopyDirection.OnlyOnDrive;
-                }
-                else if (string.Equals(deviceCopy.BuildId, extGame.BuildId, StringComparison.OrdinalIgnoreCase) ||
-                         (string.IsNullOrEmpty(deviceCopy.BuildId) && string.IsNullOrEmpty(extGame.BuildId)))
-                {
-                    dir = CopyDirection.InSync;
-                }
-                else if (deviceCopy.LastUpdated > extGame.LastUpdated)
-                {
-                    dir = CopyDirection.DeviceToDrive;
-                }
-                else
-                {
-                    dir = CopyDirection.DriveToDevice;
-                }
+                var deviceCopy = CrossLocationMatcher.FindDeviceCopy(localGamesSnapshot, extGame);
+                var dir = CrossLocationMatcher.ClassifyDirection(deviceCopy, extGame);
 
                 result.Add(new CrossLocationGame
                 {
@@ -2329,7 +2307,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return result;
     }
 
-    public async Task StartLocalCopyAsync(string appId, Guid libraryId)
+    public async Task StartLocalCopyAsync(string appId, Guid libraryId, CopyDirection? overrideDirection = null)
     {
         var lib = _settings.ExternalLibraries.FirstOrDefault(l => l.Id == libraryId);
         if (lib == null)
@@ -2345,25 +2323,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // The user can resolve UnknownVersion (and force-override any other direction) by
+        // passing an explicit DeviceToDrive / DriveToDevice from the UI.
+        var effectiveDirection = overrideDirection ?? crossGame.Direction;
+        if (overrideDirection.HasValue && overrideDirection.Value != crossGame.Direction)
+        {
+            AddLog($"StartLocalCopy: user override direction {overrideDirection.Value} (auto={crossGame.Direction})", LogMessageType.Info);
+        }
+
         GameInfo? source = null;
         string destPath = string.Empty;
 
-        if (crossGame.Direction == CopyDirection.DeviceToDrive || crossGame.Direction == CopyDirection.OnlyOnDevice)
+        if (effectiveDirection == CopyDirection.DeviceToDrive || effectiveDirection == CopyDirection.OnlyOnDevice)
         {
             source = crossGame.DeviceCopy;
             if (source == null)
             {
-                AddLog($"StartLocalCopy: device copy missing for {appId} (direction={crossGame.Direction})", LogMessageType.Error);
+                AddLog($"StartLocalCopy: device copy missing for {appId} (direction={effectiveDirection})", LogMessageType.Error);
                 return;
             }
             destPath = System.IO.Path.Combine(lib.RootPath, System.IO.Path.GetFileName(source.InstallPath));
         }
-        else if (crossGame.Direction == CopyDirection.DriveToDevice || crossGame.Direction == CopyDirection.OnlyOnDrive)
+        else if (effectiveDirection == CopyDirection.DriveToDevice || effectiveDirection == CopyDirection.OnlyOnDrive)
         {
             source = crossGame.ExternalCopy;
             if (source == null)
             {
-                AddLog($"StartLocalCopy: external copy missing for {appId} (direction={crossGame.Direction})", LogMessageType.Error);
+                AddLog($"StartLocalCopy: external copy missing for {appId} (direction={effectiveDirection})", LogMessageType.Error);
                 return;
             }
             var libraryFolders = _steamScanner.GetLibraryFolders();
@@ -2376,7 +2362,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            AddLog($"StartLocalCopy: game {appId} direction is {crossGame.Direction}, nothing to copy", LogMessageType.Info);
+            AddLog($"StartLocalCopy: game {appId} direction is {effectiveDirection}, nothing to copy. Pass an explicit direction to resolve.", LogMessageType.Info);
             return;
         }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle } from 'lucide-react';
+import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle, Info } from 'lucide-react';
 import { useAppState, type CrossLocationGame, type ExternalLibrary, type DriveCandidate } from '../store';
 import { sendCommand } from '../bridge';
 import PlatformIcon from './PlatformIcon';
@@ -99,12 +99,12 @@ export default function DrivesPanel() {
     sendCommand('BrowseDriveFolder');
   };
 
-  const handleCopy = (game: CrossLocationGame) => {
+  const handleCopy = (game: CrossLocationGame, overrideDirection?: CrossLocationGame['direction']) => {
     if (!game.library) return;
     sendCommand('StartLocalCopy', {
       appId: game.appId,
       libraryId: game.library.id,
-      direction: game.direction,
+      direction: overrideDirection ?? game.direction,
     });
   };
 
@@ -202,6 +202,12 @@ export default function DrivesPanel() {
         </div>
       </div>
 
+      {/* Terminology hint */}
+      <div className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] text-slate-500 border-b border-slate-700/30 flex-shrink-0">
+        <Info className="w-3 h-3 flex-shrink-0" />
+        <span>"Device" means this PC's internal drives (where Steam, Epic, etc. install games). External libraries are listed below.</span>
+      </div>
+
       {/* Pending add-library confirmation */}
       {pendingPath && (
         <div className="px-4 py-3 border-b border-slate-700/50 bg-blue-900/20 space-y-2 flex-shrink-0">
@@ -288,6 +294,26 @@ export default function DrivesPanel() {
                             >
                               <Copy className="w-3.5 h-3.5 text-slate-300" />
                             </button>
+                          )}
+                          {game.direction === 'UnknownVersion' && (
+                            <>
+                              <button
+                                onClick={() => handleCopy(game, 'DeviceToDrive')}
+                                disabled={s.isTransferring}
+                                className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+                                title="Copy device → drive (overwrite drive copy)"
+                              >
+                                <ArrowRight className="w-3.5 h-3.5 text-slate-300" />
+                              </button>
+                              <button
+                                onClick={() => handleCopy(game, 'DriveToDevice')}
+                                disabled={s.isTransferring}
+                                className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+                                title="Copy drive → device (overwrite device copy)"
+                              >
+                                <ArrowLeft className="w-3.5 h-3.5 text-slate-300" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>

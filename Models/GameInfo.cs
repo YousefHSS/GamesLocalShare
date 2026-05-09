@@ -42,6 +42,14 @@ public class GameInfo : INotifyPropertyChanged
     public string BuildId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Steam's StateFlags bitmask from the .acf manifest. 4 means StateInstalled with no
+    /// pending update/download/repair; any other value (e.g. 16=UpdateRequired, 1026=update
+    /// queued, 0=uninstalled) indicates Steam thinks something is in flight or wrong.
+    /// 0 for non-Steam games or when the flag is absent.
+    /// </summary>
+    public int StateFlags { get; set; }
+
+    /// <summary>
     /// The platform this game is from (Steam, Epic, Xbox)
     /// </summary>
     public GamePlatform Platform { get; set; } = GamePlatform.Steam;

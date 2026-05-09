@@ -105,7 +105,7 @@ export interface CrossLocationGame {
   deviceCopy: GameInfo | null;
   externalCopy: GameInfo | null;
   library: ExternalLibrary;
-  direction: 'None' | 'InSync' | 'DeviceToDrive' | 'DriveToDevice' | 'OnlyOnDevice' | 'OnlyOnDrive';
+  direction: 'None' | 'InSync' | 'DeviceToDrive' | 'DriveToDevice' | 'OnlyOnDevice' | 'OnlyOnDrive' | 'UnknownVersion';
   displayName: string;
   appId: string;
   statusText: string;

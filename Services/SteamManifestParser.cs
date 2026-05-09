@@ -63,6 +63,9 @@ public static class SteamManifestParser
                 try { sizeOnDisk = GetDirectorySize(installPath); } catch { }
             }
 
+            int parsedStateFlags = 0;
+            if (!string.IsNullOrEmpty(stateFlags)) int.TryParse(stateFlags, out parsedStateFlags);
+
             return new GameInfo
             {
                 AppId = appId,
@@ -73,6 +76,7 @@ public static class SteamManifestParser
                 LastUpdated = lastUpdated,
                 Platform = GamePlatform.Steam,
                 IsInstalled = true,
+                StateFlags = parsedStateFlags,
                 CoverUrl = int.TryParse(appId, out var sid)
                     ? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{sid}/header.jpg"
                     : null,
