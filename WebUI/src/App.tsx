@@ -168,7 +168,7 @@ export default function App() {
                 )}
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-4 pt-2 space-y-3">
+            <div key={`local-${filteredLocalGames.length}`} className="flex-1 overflow-auto p-4 pt-2 space-y-3 stagger-children">
               {filteredLocalGames.map((g) => (
                 <div
                   key={g.appId}
@@ -233,7 +233,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-auto space-y-2">
+              <div key={`peers-${s.networkPeers.length}`} className="flex-1 overflow-auto space-y-2 stagger-children">
                 {s.networkPeers.map((p) => (
                   <div
                     key={p.peerId}
@@ -282,7 +282,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <div className="flex-1 overflow-auto space-y-1">
+                <div key={`peer-games-${filteredPeerGames.length}`} className="flex-1 overflow-auto space-y-1 stagger-children">
                   {s.availableFromPeers.length === 0 ? (
                     <div className="text-xs text-slate-400 mt-1 italic">No new games found</div>
                   ) : filteredPeerGames.length === 0 ? (
@@ -328,7 +328,7 @@ export default function App() {
             subColor="text-green-100"
             actions={<button onClick={() => sendCommand('AddAllUpdatesToQueue')} className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium text-white transition-colors">+ Queue All</button>}
           >
-            <div className="flex-1 overflow-auto p-4 space-y-2">
+            <div key={`syncs-${s.availableSyncs.length}`} className="flex-1 overflow-auto p-4 space-y-2 stagger-children">
               {s.availableSyncs.map((sy, i) => (
                 <div
                   key={i}
@@ -383,7 +383,7 @@ export default function App() {
               </button>
             </div>
             {incompleteTab === 'incomplete' ? (
-            <div className="flex-1 overflow-auto p-4 space-y-2">
+            <div key={`inc-${s.incompleteTransfers.length}`} className="flex-1 overflow-auto p-4 space-y-2 stagger-children">
               {s.incompleteTransfers.map((t) => {
                 const selected = s.selectedIncompleteTransfer?.gameAppId === t.gameAppId;
                 return (
@@ -471,7 +471,7 @@ export default function App() {
       </div>
 
       {s.isTransferring && (
-        <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-3 sm:px-6 py-2.5">
+        <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-3 sm:px-6 py-2.5 animate-slide-up">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
             <Download className="w-5 h-5 text-blue-400 animate-pulse flex-shrink-0" />
             <div className="flex-1 min-w-0">
@@ -526,8 +526,8 @@ export default function App() {
       )}
 
       {showDrives && (
-        <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowDrives(false); }}>
-          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4 animate-fade-in" onClick={e => { if (e.target === e.currentTarget) setShowDrives(false); }}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-scale-in">
             <div className="bg-gradient-to-r from-blue-600 to-cyan-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
                 <HardDrive className="w-6 h-6 text-white" />
@@ -544,7 +544,7 @@ export default function App() {
 
       {ctxMenu && (
         <div
-          className="fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[200px]"
+          className="fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[200px] animate-pop-in origin-top-left"
           style={{ left: Math.min(ctxMenu.x, window.innerWidth - 220), top: Math.min(ctxMenu.y, window.innerHeight - 120) }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
@@ -567,7 +567,7 @@ export default function App() {
       )}
 
       {s.isLogVisible && (
-        <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden">
+        <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden animate-fade-in-up">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-900">
             <span className="text-sm font-semibold text-slate-300">Log</span>
             <div className="flex gap-3 items-center">

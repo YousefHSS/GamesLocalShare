@@ -26,7 +26,10 @@
       "Bash(dotnet test *)",
       "Bash(npm test *)",
       "Bash(npx vitest *)",
-      "Bash(npx playwright *)"
+      "Bash(npx playwright *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(Set-Location WebUI; npx --no-install tsc --noEmit; \"exit=$LASTEXITCODE\")",
+      "PowerShell(npx --no-install tsc --noEmit; \"exit=$LASTEXITCODE\")"
     ]
   }
 }

@@ -86,10 +86,10 @@ export default function SettingsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-fade-in"
       onClick={onBackdrop}
     >
-      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-scale-in">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -217,7 +217,7 @@ export default function SettingsModal({
 
             {/* Pending confirmation after browse */}
             {pendingLibraryPath && (
-              <div className="bg-blue-900/20 border border-blue-700/50 rounded p-3 space-y-2">
+              <div className="bg-blue-900/20 border border-blue-700/50 rounded p-3 space-y-2 animate-fade-in-up">
                 <p className="text-xs text-blue-300">Selected folder: <span className="font-mono">{pendingLibraryPath}</span></p>
                 <div className="space-y-1">
                   <label className="text-xs text-slate-300">Display name</label>
@@ -305,13 +305,13 @@ export default function SettingsModal({
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded"
+              className="btn-press px-4 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded"
             >
               Cancel
             </button>
             <button
               onClick={save}
-              className="px-5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium"
+              className="btn-press px-5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium"
             >
               Save
             </button>
@@ -324,7 +324,7 @@ export default function SettingsModal({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4 space-y-3">
+    <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-4 space-y-3 animate-fade-in-up">
       <h3 className="text-sm font-bold text-blue-400">{title}</h3>
       {children}
     </div>
