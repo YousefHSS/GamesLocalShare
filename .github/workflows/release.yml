@@ -33,17 +33,21 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore GamesLocalShare.csproj
 
+    # Framework-dependent: disable trimming and single-file packaging. Trimming requires
+    # self-contained, and single-file is unnecessary when the user already has .NET 8.
     - name: Build Release (Framework-Dependent)
-      run: dotnet publish GamesLocalShare.csproj -c Release -r win-x64 --self-contained false -o ./publish-fd
+      run: dotnet publish GamesLocalShare.csproj -c Release -r win-x64 --self-contained false -p:PublishTrimmed=false -p:PublishSingleFile=false -o ./publish-fd
 
+    # Self-contained: let it land at the default bin\Release\net8.0\win-x64\publish path
+    # so installer.iss can pick it up without modification.
     - name: Build Release (Self-Contained)
-      run: dotnet publish GamesLocalShare.csproj -c Release -r win-x64 --self-contained true -o ./publish-sc
+      run: dotnet publish GamesLocalShare.csproj -c Release -r win-x64 --self-contained true
       
     - name: Create ZIP (Framework-Dependent)
       run: Compress-Archive -Path ./publish-fd/* -DestinationPath GamesLocalShare-win-x64-fd.zip
       
     - name: Create ZIP (Self-Contained)
-      run: Compress-Archive -Path ./publish-sc/* -DestinationPath GamesLocalShare-win-x64-sc.zip
+      run: Compress-Archive -Path ./bin/Release/net8.0/win-x64/publish/* -DestinationPath GamesLocalShare-win-x64-sc.zip
       
     - name: Download Inno Setup
       run: |
