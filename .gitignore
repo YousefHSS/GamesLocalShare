@@ -364,3 +364,6 @@ FodyWeavers.xsd
 /publish-output
 Assets/webui/index.html
 .plan.md
+
+# Local tool state (Claude Code, etc.)
+.claude/
