@@ -362,6 +362,8 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /publish-output
+/publish-sc-test
+/publish-fd
 Assets/webui/index.html
 .plan.md
 

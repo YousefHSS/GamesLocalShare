@@ -50,11 +50,6 @@ public partial class MainWindow : Window
             var webUiPath = Path.Combine(AppContext.BaseDirectory, "Assets", "webui", "index.html");
             if (File.Exists(webUiPath))
             {
-                // Navigate to a file:// URL rather than setting HtmlContent. The bundle is
-                // ~230 KB of inlined React+Tailwind, and HtmlContent occasionally fails to
-                // render content that large in WebView2 (NavigateToString quirks). File-URL
-                // navigation is the documented robust path and works identically across
-                // installer / SC zip / dev runs.
                 webView.Url = new Uri(webUiPath);
             }
             else

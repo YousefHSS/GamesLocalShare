@@ -13,10 +13,13 @@
     
     <!-- Publishing options. Trimming is disabled because BuiltInComInteropSupport (used
          by the embedded WebView), Avalonia's BindingPlugins.DataValidators reflection,
-         and reflection-based JsonSerializer overloads all break under the linker. The
-         resulting SC publish is ~30 MB larger but actually starts. -->
+         and reflection-based JsonSerializer overloads all break under the linker.
+         SingleFile is also disabled because WebView2's native loader fails to
+         initialize under single-file packaging — the window renders pure black even
+         though everything else (Avalonia, file I/O, paths) works. Producing a normal
+         directory layout is the only configuration where WebView2 actually renders. -->
     <PublishTrimmed>false</PublishTrimmed>
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
