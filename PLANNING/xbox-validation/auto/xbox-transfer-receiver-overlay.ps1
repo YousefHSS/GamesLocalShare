@@ -152,10 +152,36 @@ Write-Host ("[SYSTEM phase] On disk pre-overlay: {0} files, {1:N1} MB" -f $preDe
 
 if ($preDestFiles.Count -eq 0) {
     Write-Host ""
-    Write-Host "WARNING: destination is empty. Gaming Services may not have started" -ForegroundColor Yellow
-    Write-Host "the download yet. The overlay will create the folder but the Xbox" -ForegroundColor Yellow
-    Write-Host "app likely has no StateRepository row to attach to." -ForegroundColor Yellow
+    Write-Host "ABORTING: $destGame is empty after pause." -ForegroundColor Red
+    Write-Host "" -ForegroundColor Red
+    Write-Host "This means Gaming Services is NOT installing this title under" -ForegroundColor Red
+    Write-Host "$XboxRoot. Two likely reasons:" -ForegroundColor Red
+    Write-Host "  1. The title is plain MSIX (not MSIXVC-encrypted), so it installs" -ForegroundColor Red
+    Write-Host "     into C:\Program Files\WindowsApps\ - the overlay strategy here" -ForegroundColor Red
+    Write-Host "     does not apply. Pick an MSIXVC title (one whose 'Manage > Files'" -ForegroundColor Red
+    Write-Host "     menu in the Xbox app shows an 'Install drive' picker)." -ForegroundColor Red
+    Write-Host "     Suggestions: Pentiment (~7 GB), Hi-Fi Rush (~12 GB), Grounded." -ForegroundColor Red
+    Write-Host "  2. You picked a different drive when installing. Re-run with" -ForegroundColor Red
+    Write-Host "     -XboxRoot pointing at <Drive>:\XboxGames\." -ForegroundColor Red
     Write-Host ""
+    # Probe other drives for an XboxGames\<gameName> folder so we can hint
+    foreach ($d in (Get-PSDrive -PSProvider FileSystem)) {
+        $candidate = Join-Path "$($d.Root)XboxGames" $gameName
+        if (Test-Path -LiteralPath $candidate) {
+            $sz = (Get-ChildItem -LiteralPath $candidate -Recurse -File -Force -ErrorAction SilentlyContinue |
+                   Measure-Object -Sum Length).Sum
+            Write-Host ("    Found candidate at: {0}  ({1:N1} MB)" -f $candidate, ($sz/1MB)) -ForegroundColor Yellow
+        }
+    }
+    # And check WindowsApps to confirm it's a plain MSIX
+    $waCandidate = Get-ChildItem 'C:\Program Files\WindowsApps' -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "*$($pfn.Split('_')[0])*" } |
+        Select-Object -First 3
+    if ($waCandidate) {
+        Write-Host "    The package appears to be plain MSIX:" -ForegroundColor Yellow
+        $waCandidate | ForEach-Object { Write-Host ("      {0}" -f $_.FullName) -ForegroundColor Yellow }
+    }
+    exit 2
 }
 
 # Overlay - critical flags explained:

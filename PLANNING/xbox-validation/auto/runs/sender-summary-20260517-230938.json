@@ -1,0 +1,20 @@
+﻿{
+    "StartedAtUtc":  "2026-05-17T20:26:55.4040471Z",
+    "SenderHost":  "DESKTOP-FHVD1S8",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "GameFolder":  "F:\\Games\\Hollow Knight- Silksong",
+    "GameName":  "Hollow Knight- Silksong",
+    "Destination":  "G:\\stage\\Hollow Knight- Silksong",
+    "PackageFamilyName":  "TeamCherry.HollowKnightSilksong_y4jvztpgccj42",
+    "SourceFileCount":  2286,
+    "SourceBytes":  8274932854,
+    "UnreadableFiles":  [
+                            "F:\\Games\\Hollow Knight- Silksong\\Content\\Hollow Knight Silksong.exe",
+                            "F:\\Games\\Hollow Knight- Silksong\\Content\\UnityCrashHandler64.exe"
+                        ],
+    "SkippedFiles":  2,
+    "FilesCopied":  2284,
+    "BytesCopied":  8272728782,
+    "RobocopyExit":  9,
+    "RobocopyLog":  "F:\\Documents\\GamesLocalShare\\PLANNING\\xbox-validation\\auto\\runs\\sender-robocopy-20260517-230938.log"
+}
