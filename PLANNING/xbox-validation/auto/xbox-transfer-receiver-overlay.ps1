@@ -152,12 +152,52 @@ $summary  = Get-Content -LiteralPath (Join-Path $Source 'transfer-summary.json')
 $gameName = $summary.GameName
 $pfn      = $summary.PackageFamilyName
 $srcBytes = [int64]$summary.SourceBytes
-$destGame = Join-Path $XboxRoot $gameName
 
-Write-Host "[SYSTEM phase] GameName: $gameName"
-Write-Host "[SYSTEM phase] PFN:      $pfn"
-Write-Host ("[SYSTEM phase] Source:   {0}  ({1:N1} MB / {2} files)" -f $Source, ($srcBytes/1MB), $summary.SourceFileCount)
-Write-Host "[SYSTEM phase] Deploy:   $destGame"
+# Sniff the content GUID from a .xvi file in our source, e.g.:
+#   807C7D6A-409F-48BE-8190-30B09BAF7CD4.xvi
+# Gaming Services names the in-progress download folder after this GUID,
+# only renaming it to the friendly title after install completes.
+$contentGuid = $null
+$xviFile = Get-ChildItem -LiteralPath $Source -File -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -eq '.xvi' } | Select-Object -First 1
+if ($xviFile) {
+    $contentGuid = $xviFile.BaseName  # e.g. "807C7D6A-409F-48BE-8190-30B09BAF7CD4"
+}
+
+Write-Host "[SYSTEM phase] GameName:     $gameName"
+Write-Host "[SYSTEM phase] PFN:          $pfn"
+Write-Host "[SYSTEM phase] Content GUID: $contentGuid"
+Write-Host ("[SYSTEM phase] Source:       {0}  ({1:N1} MB / {2} files)" -f $Source, ($srcBytes/1MB), $summary.SourceFileCount)
+
+# Locate the actual destination folder. Gaming Services may have used:
+#   1. <XboxRoot>\<gameName>           (post-rename / older flow)
+#   2. <XboxRoot>\<contentGuid>        (in-progress download, before rename)
+# Search all drives' XboxGames\ for either name.
+function Find-Destination {
+    param([string]$GameName, [string]$ContentGuid)
+    $candidates = @()
+    foreach ($d in (Get-PSDrive -PSProvider FileSystem)) {
+        $xg = Join-Path $d.Root 'XboxGames'
+        if (-not (Test-Path -LiteralPath $xg)) { continue }
+        $byName = Join-Path $xg $GameName
+        if (Test-Path -LiteralPath $byName) { $candidates += $byName }
+        if ($ContentGuid) {
+            $byGuid = Join-Path $xg $ContentGuid
+            if (Test-Path -LiteralPath $byGuid) { $candidates += $byGuid }
+        }
+    }
+    return $candidates
+}
+
+$initialCandidates = Find-Destination -GameName $gameName -ContentGuid $contentGuid
+Write-Host ("[SYSTEM phase] Candidates pre-poll: {0}" -f ($initialCandidates -join '; '))
+
+# Default deploy path; will be overridden if we find a GUID folder
+$destGame = Join-Path $XboxRoot $gameName
+if ($initialCandidates.Count -gt 0) {
+    $destGame = $initialCandidates[0]
+}
+Write-Host "[SYSTEM phase] Deploy:       $destGame"
 
 # Snapshot state BEFORE overlay
 $preState = Get-XboxPackageState -PackageFamilyName $pfn
@@ -177,23 +217,40 @@ function Get-DestStats {
 }
 
 # Poll for file materialization - Gaming Services often takes 30-60s
-# after pressing Install before any bytes hit disk.
-Write-Host "[SYSTEM phase] Polling $destGame for in-progress install..."
+# after pressing Install before any bytes hit disk. Re-search for
+# candidate folders each iteration so we catch the GUID folder even if
+# it appears late.
+Write-Host "[SYSTEM phase] Polling for in-progress install (up to 90s)..."
 $pollStart   = Get-Date
 $pollTimeout = New-TimeSpan -Seconds 90
 $stats = Get-DestStats -Path $destGame
 while ($stats.Files -eq 0 -and ((Get-Date) - $pollStart) -lt $pollTimeout) {
     Start-Sleep -Seconds 3
+    # Re-search every poll - the GUID folder may appear mid-wait.
+    $cands = Find-Destination -GameName $gameName -ContentGuid $contentGuid
+    if ($cands.Count -gt 0 -and $cands[0] -ne $destGame) {
+        Write-Host ("[SYSTEM phase]   discovered candidate: {0}" -f $cands[0]) -ForegroundColor Cyan
+        $destGame = $cands[0]
+    }
     $stats = Get-DestStats -Path $destGame
     $elapsed = [int]((Get-Date) - $pollStart).TotalSeconds
-    Write-Host ("[SYSTEM phase]   t+{0,2}s  files={1}  bytes={2:N0}" -f $elapsed, $stats.Files, $stats.Bytes)
+    Write-Host ("[SYSTEM phase]   t+{0,2}s  dest={1}  files={2}  bytes={3:N0}" -f $elapsed, $destGame, $stats.Files, $stats.Bytes)
 }
 $preDestFiles = @()
 $preDestBytes = $stats.Bytes
 if (Test-Path -LiteralPath $destGame) {
     $preDestFiles = @(Get-ChildItem -LiteralPath $destGame -Recurse -File -Force -ErrorAction SilentlyContinue)
 }
-Write-Host ("[SYSTEM phase] On disk pre-overlay: {0} files, {1:N1} MB" -f $preDestFiles.Count, ($preDestBytes/1MB))
+Write-Host ""
+Write-Host ("[SYSTEM phase] Final destination:    {0}" -f $destGame) -ForegroundColor Green
+Write-Host ("[SYSTEM phase] On disk pre-overlay:  {0} files, {1:N1} MB" -f $preDestFiles.Count, ($preDestBytes/1MB))
+if ($preDestFiles.Count -gt 0 -and $preDestFiles.Count -le 30) {
+    Write-Host "[SYSTEM phase] Pre-overlay contents:"
+    $preDestFiles | Sort-Object Length -Descending | ForEach-Object {
+        $rel = $_.FullName.Substring($destGame.Length).TrimStart('\','/')
+        Write-Host ("    {0,12:N0}  {1}" -f $_.Length, $rel) -ForegroundColor DarkGray
+    }
+}
 
 if ($preDestFiles.Count -eq 0) {
     # Broad scan: look for any XboxGames\* folder modified in the last 15 min
