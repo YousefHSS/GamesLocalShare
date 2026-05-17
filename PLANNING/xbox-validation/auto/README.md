@@ -77,6 +77,48 @@ cd F:\Documents\GamesLocalShare\PLANNING\xbox-validation\auto
 That's it. The receiver script prints the verdict at the end and stores
 the full per-sample log in `auto\runs\`.
 
+## Variant: overlay-on-paused-install
+
+The plain receiver script proved that simply dropping byte-perfect files
+into `C:\XboxGames\<Game>` is **invisible** to the Xbox app, because the
+app tracks installs through the `Microsoft.GamingServices` StateRepository,
+not the file system. Verdict from that test: `NOT_DETECTED`.
+
+`xbox-transfer-receiver-overlay.ps1` works around this by letting the
+Xbox app create the StateRepository row itself, and then overlaying our
+pre-staged bytes onto the partial download before Resume.
+
+Manual steps on PC B (two clicks total):
+
+1. In the Xbox app, click **Install** on the title. Wait ~10 s for the
+   download to start, then click **Pause**.
+2. Run the overlay script. It prompts for Enter to confirm the pause is
+   in place.
+3. When the script tells you, click **Resume** in the Xbox app. The
+   script measures NIC bytes + package state until Resume completes or
+   `ObserveSeconds` elapses.
+
+```powershell
+cd F:\Documents\GamesLocalShare\PLANNING\xbox-validation\auto
+.\xbox-transfer-receiver-overlay.ps1 -Source "E:\stage\Stardew Valley"
+```
+
+Verdict labels added for this mode:
+
+| Verdict                  | NIC rx              | Final state | Meaning                                                       |
+|--------------------------|---------------------|-------------|---------------------------------------------------------------|
+| `H1_FULL_SKIP`           | < 100 MB            | Installed   | Resume accepted our bytes - bandwidth fully saved.            |
+| `H2_DELTA`               | 100 MB - 80% src    | Installed   | Partial savings; Xbox re-pulled some files.                   |
+| `H3_FULL_REDOWNLOAD`     | >= 80% src          | Either      | Worst case; Xbox discarded the overlay.                       |
+| `PARTIAL_PROGRESS`       | between             | Not yet     | Resume in progress at end of window - increase `-ObserveSeconds`. |
+| `STILL_PAUSED_OR_FAILED` | < 50 MB             | Not Inst.   | You probably forgot to click Resume; re-run.                  |
+
+Key difference vs. plain receiver: overlay uses `/COPY:DAT` (no
+`/COPYALL`) so the destination keeps the ACLs Gaming Services set up,
+and `/IS /IT` to force-overwrite Gaming Services' partial bytes with our
+complete bytes. No `/MIR`, so Gaming Services' own state files (if any)
+are preserved.
+
 ## Notes / caveats
 
 - During the receiver's observe window, **do not click anything in the
