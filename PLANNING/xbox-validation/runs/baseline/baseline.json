@@ -1,0 +1,1175 @@
+﻿{
+    "CapturedAtUtc":  "2026-05-17T16:00:13.9833663Z",
+    "Host":  "DESKTOP-FHVD1S8",
+    "GameFolder":  "F:\\Games\\Slay The Spire",
+    "TotalBytes":  547171616,
+    "FileCount":  266,
+    "ContentAclSddl":  "O:BAG:SYD:(A;OICI;0x1200a9;;;SY)(XA;OICI;0x1200a9;;;BU;(WIN://SYSAPPID Contains \"HumbleBundle.SlayTheSpire_q2mcdwmzx4qja\"))(A;OICI;FR;;;BU)(A;OICI;0x1200a9;;;AC)(A;OICIID;FA;;;S-1-5-21-4002976177-2962401402-1312406969-1001)(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;WD)(A;OICIID;FA;;;SY)",
+    "Package":  {
+                    "Name":  "HumbleBundle.SlayTheSpire",
+                    "PackageFullName":  "HumbleBundle.SlayTheSpire_2.4.0.0_x86__q2mcdwmzx4qja",
+                    "PackageFamilyName":  "HumbleBundle.SlayTheSpire_q2mcdwmzx4qja",
+                    "Publisher":  "CN=DB84A704-5BBF-4A49-8066-4E62919E3A6D",
+                    "Architecture":  "X86",
+                    "Version":  "2.4.0.0",
+                    "SignatureKind":  "Store",
+                    "InstallLocation":  "C:\\Program Files\\WindowsApps\\HumbleBundle.SlayTheSpire_2.4.0.0_x86__q2mcdwmzx4qja"
+                },
+    "SmallFileHashes":  [
+                            {
+                                "RelativePath":  "0D49A1E9-DEB2-4DF8-A746-D661D40D4F0C.AE7C4358-ABC2-4990-8402-A66D55579377.xsp",
+                                "SizeBytes":  8272,
+                                "SHA256":  "33953877EA97176E192F9FB3CE7ADA739B3A3131C2183F631C3E0DC23CC6B2FD"
+                            },
+                            {
+                                "RelativePath":  "0D49A1E9-DEB2-4DF8-A746-D661D40D4F0C.smd",
+                                "SizeBytes":  18896,
+                                "SHA256":  "55E153218E5BE6448BB05F0D035DAAC3D76FFE60DE463F20434FA5A83CF10069"
+                            },
+                            {
+                                "RelativePath":  "0D49A1E9-DEB2-4DF8-A746-D661D40D4F0C.xct",
+                                "SizeBytes":  4096,
+                                "SHA256":  "AF74FF32AEDAD9CFAA5BD71B79EFA9553F16209CF8EE1409F4FB126099242EB5"
+                            },
+                            {
+                                "RelativePath":  "0D49A1E9-DEB2-4DF8-A746-D661D40D4F0C.xvi",
+                                "SizeBytes":  4096,
+                                "SHA256":  "FF75491B4C8B97D82CC0977E9C8762DB40A49E350B3B8E0A4623A518F915A2B2"
+                            },
+                            {
+                                "RelativePath":  "0D49A1E9-DEB2-4DF8-A746-D661D40D4F0C.xvs",
+                                "SizeBytes":  12488,
+                                "SHA256":  "4FDAF8E78A55127A426300AE0B6D07CEB3037DFA85CA93FDFB6833C477CA3A52"
+                            },
+                            {
+                                "RelativePath":  "Content\\100x100.png",
+                                "SizeBytes":  23310,
+                                "SHA256":  "B8FD0AE02E57AEC72ED04AA2C095DD45C8FCC940C0ACB8DDE23E848348AE2F52"
+                            },
+                            {
+                                "RelativePath":  "Content\\150x150.png",
+                                "SizeBytes":  48684,
+                                "SHA256":  "48BA33586DA8458A1BFF95D0AE675593633274716D8CF6FCA82F59E35EBD5991"
+                            },
+                            {
+                                "RelativePath":  "Content\\44x44.ico",
+                                "SizeBytes":  32870,
+                                "SHA256":  "AB690AEBB822C85EE9EE243E57FE180AD9ED1A00624598368BE52A2F605B37BA"
+                            },
+                            {
+                                "RelativePath":  "Content\\44x44.png",
+                                "SizeBytes":  4923,
+                                "SHA256":  "EFBF7DD13263FA0D64B63C0544698F8933A8DF2F7D15B1B102629179F4D0BC3D"
+                            },
+                            {
+                                "RelativePath":  "Content\\appxmanifest.xml",
+                                "SizeBytes":  2706,
+                                "SHA256":  "D9A521A46935662B202FB19951ECB98A94C2A7137A8FB49C999F6A3C848F2118"
+                            },
+                            {
+                                "RelativePath":  "Content\\config.json",
+                                "SizeBytes":  177,
+                                "SHA256":  "A05B138BD4535504BB171939DF16760CE65095EEF4EA5FDCA66ADEF3AFE6010A"
+                            },
+                            {
+                                "RelativePath":  "Content\\FileRedirectionFixup32.dll",
+                                "SizeBytes":  276992,
+                                "SHA256":  "287781A0E7A8BE885D6EBD65581B1A09E53895C1F60184F702C5FF4FB9CBC02A"
+                            },
+                            {
+                                "RelativePath":  "Content\\gamelaunchhelper.exe",
+                                "SizeBytes":  99880,
+                                "SHA256":  "F4DAAFADB03855AF8778309A36331298C16810DC6EBD867CA5D904B36F0580D8"
+                            },
+                            {
+                                "RelativePath":  "Content\\layout_a276d907-083e-4541-a3de-1d306486c9c7.xml",
+                                "SizeBytes":  1816,
+                                "SHA256":  "7C7CBB9B557F00788B7C86AC1ED6BA1DA379E951CEF7D4950301A891C465C22B"
+                            },
+                            {
+                                "RelativePath":  "Content\\MicrosoftGame.config",
+                                "SizeBytes":  1777,
+                                "SHA256":  "69FB73CC10E2AE61A2179A424058D68E3261F32245F5DEE2F7F67BE43D646742"
+                            },
+                            {
+                                "RelativePath":  "Content\\PSFconfig.json",
+                                "SizeBytes":  1474,
+                                "SHA256":  "3C4F11A735AB2D11B6C787077719C68066C088A80F8547D5AD20D30FABFA1811"
+                            },
+                            {
+                                "RelativePath":  "Content\\PsfRuntime32.dll",
+                                "SizeBytes":  339456,
+                                "SHA256":  "8FB99F40722E38309A8F66529155EA669C6CF7EA183037BB8EFDCC91DF384FF5"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\COPYRIGHT",
+                                "SizeBytes":  3244,
+                                "SHA256":  "621F7616B5E8538ABBC26667F28C25650A5B239A4F1ECA981F5DD60B8DA9B589"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\LICENSE",
+                                "SizeBytes":  40,
+                                "SHA256":  "23F9A5C12FA839650595A32872B7360B9E030C7213580FB27DD9185538A5828C"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\README.txt",
+                                "SizeBytes":  46,
+                                "SHA256":  "963095CF8DB76FB8071FD19A3110718A42F2AB42B27A3ADFD9EC58981C3E88D2"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\release",
+                                "SizeBytes":  527,
+                                "SHA256":  "7E4AA5DADC406AF35BAA6BD02F00102A633221F91DD3CD9FC8DFB1E063962161"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\THIRDPARTYLICENSEREADME-JAVAFX.txt",
+                                "SizeBytes":  63933,
+                                "SHA256":  "7F841E514BA8D2F30D90C63C8CD93AC516428C9326D571F9F3EFBAE8BD72BA96"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\THIRDPARTYLICENSEREADME.txt",
+                                "SizeBytes":  145180,
+                                "SHA256":  "DC3982C5EE4CB1AEFDA63468C19D8AA60C80CD9FEC7E7209816F78AB29BC9FB0"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\Welcome.html",
+                                "SizeBytes":  955,
+                                "SHA256":  "6F3F130AA22B3CBEAD959E5CF0F7F626B96539EECA56BED60768E91A77823363"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-console-l1-1-0.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "E80E97AE534151F473CF9538CC7677939C43098B78DE7881AD6731D33533FC52"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-datetime-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "59F675DAA7D38C32252AC488EE4EA5472FCA891017A429E8F84C66B56AEA7D99"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-debug-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "94CD053637075439DBAFD70AF27A5B971E706E956EE200835F3D60B14906BFB6"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-errorhandling-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "8A23E01FFB6B0D6B6A8674C427AC31EB4903A4B788B7F250D14574E71CC88E0B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-file-l1-1-0.dll",
+                                "SizeBytes":  21824,
+                                "SHA256":  "835CF5AEAB4E99B6448E5724C056678B42316EE36C48AB56CD263FD74096A2E9"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-file-l1-2-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "30F570E7FCA225CEFD7B9A0B40EC8D2AAD758931753964E02C447DF9281B4129"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-file-l2-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "2D68465625D9230A2D9BD19E801FDCD10BD5AA9611B6F9BA282897415041BA77"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-handle-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "79F4E5EEB6C0B71435CB74C7FDC131C87982E6CC9597C5E474D3856D9DB9D0F9"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-heap-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "2AC83374B0C20B493D615F52CEBA06A9220C4B96DF5DF92D73D2F940E4AEE12A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-interlocked-l1-1-0.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "8835BCBC977C06B037E85576924F0AEA75E00C9747D81851D6A8646E8C19D8A7"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-libraryloader-l1-1-0.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "A0EFAB7054E736250B984EB224950D0830784C0FF84D49DD2C5E6B34A67D2042"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-localization-l1-2-0.dll",
+                                "SizeBytes":  20792,
+                                "SHA256":  "53DE3B7081BF03DC2BEBE56573C621FF1D7EB5FECD18D7D88C5F3956388EB17A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-memory-l1-1-0.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "24C097ADAA5F30092E14423E8F9071EEE72A4C65F0C7D2EEB1221281B84B2E35"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-namedpipe-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "FC697BE2C121FBA56C7AE93E5317AD0ECC1C0B00ABC4E737F6D370EF01604712"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-processenvironment-l1-1-0.dll",
+                                "SizeBytes":  19264,
+                                "SHA256":  "3FDD14144406F7258A40268BB1BEFB83507D001ABAC73EA0BDAA018749849FE4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-processthreads-l1-1-0.dll",
+                                "SizeBytes":  20288,
+                                "SHA256":  "013BF69AEFBC32FDE69221284FFE32FBD598A42046D6BD23A2E8E94054363C4A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-processthreads-l1-1-1.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "26FAF205E7CE1FEA1439122D25C91FF051EB1F4BF0D80ABD8B9AB8E8482214B9"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-profile-l1-1-0.dll",
+                                "SizeBytes":  17728,
+                                "SHA256":  "B20410F6214237DCBBDC1DA6EBD1E03CC6CEE33BD5C217BD4C1DA6D334C5D793"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-rtlsupport-l1-1-0.dll",
+                                "SizeBytes":  17728,
+                                "SHA256":  "BD2EDF7090299D85EA219C44FBDBA831A84261F1305F08358DBAAC2A0E500507"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-string-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "475CAA8E54DC93B933FCDCC6AFD9E35F75DC6D48D5F0C6FFAE8C885764901D93"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-synch-l1-1-0.dll",
+                                "SizeBytes":  20288,
+                                "SHA256":  "2B6C0B3A1395411977E25DB7CAA2B84EDD65C21E174C269499CF228FE36EB489"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-synch-l1-2-0.dll",
+                                "SizeBytes":  18744,
+                                "SHA256":  "C72EC11B28990C61917D94E0F9AB7ACD9823D3073217AEE76C3FDDDB21C87476"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-sysinfo-l1-1-0.dll",
+                                "SizeBytes":  19264,
+                                "SHA256":  "BA5366936B00980D7AF18523A2881E030BC95DBB278AEA21BCFD041F33DA3176"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-timezone-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "F3423D639BC1EC08EA956972CD9DA00CD9F9D8DDC22C783246D0CD08F0524934"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-core-util-l1-1-0.dll",
+                                "SizeBytes":  18240,
+                                "SHA256":  "78B28E036975C623615FC78041391A521854DDC8BCE63A4B6A99CA423F285F8E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-conio-l1-1-0.dll",
+                                "SizeBytes":  19264,
+                                "SHA256":  "C9E0A88DFFDAE42CA07767711BD7B8BA830DE2A5E9F233332399DF1C3294B165"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-convert-l1-1-0.dll",
+                                "SizeBytes":  22336,
+                                "SHA256":  "9D0499795E8943319F0E4F457A794308CC4EDB5C74BF046F5DD37700E3E841F2"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-environment-l1-1-0.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "C5CB9B055CAC1A0246BEA41ED367673EB4124F7F2C035199A27CEB3C28FFD490"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-filesystem-l1-1-0.dll",
+                                "SizeBytes":  20288,
+                                "SHA256":  "9D747B8C54FC7226A2455102B0ADEEFB53ABA1B65C992BDFB9EDD6D7FEFA1169"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-heap-l1-1-0.dll",
+                                "SizeBytes":  19264,
+                                "SHA256":  "0E4F6C9A1E532A37A0701BC9AC67B86D5AF3D7FAA1D799196C93CCBD1D32E396"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-locale-l1-1-0.dll",
+                                "SizeBytes":  18752,
+                                "SHA256":  "8CF7B2E3B8BF206EF93A8D446CAA445E9D79080B7F01102B12F34483BCCD7A39"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-math-l1-1-0.dll",
+                                "SizeBytes":  28984,
+                                "SHA256":  "15100C9758342DCB47E51346831132337142DDF3C586607D1300581A54E3B64D"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-multibyte-l1-1-0.dll",
+                                "SizeBytes":  26432,
+                                "SHA256":  "641B2B2174159A164A304550E7C7A79250364FA8864FA1C66BBD178D9E6F10BE"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-private-l1-1-0.dll",
+                                "SizeBytes":  73024,
+                                "SHA256":  "D4D9059BFA135447A3FED23064D73A09FB9643FA225C782A77237E31A4DDF6A4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-process-l1-1-0.dll",
+                                "SizeBytes":  19264,
+                                "SHA256":  "9813EBB3F7103DBE9DB40D4C00CD5DA6045CE315542E7DE14F061E101644786A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-runtime-l1-1-0.dll",
+                                "SizeBytes":  22848,
+                                "SHA256":  "756F21A051C771471C790F9BEDD859964C5723B92E7C9F857FEDCF359389533A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-stdio-l1-1-0.dll",
+                                "SizeBytes":  24384,
+                                "SHA256":  "1E609CACDF71C71C55868D4E2460C4082F5BBB1299C1DF110E6971CD460A80A1"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-string-l1-1-0.dll",
+                                "SizeBytes":  24384,
+                                "SHA256":  "FB78D2CDD71F4A9762E9ED3621A3CE0CA9A5DA6807D52610D640D534469B5A29"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-time-l1-1-0.dll",
+                                "SizeBytes":  20800,
+                                "SHA256":  "94C34991BECCB8981E1A14671F8441182191761205A2FEC622089162667DB4C2"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\api-ms-win-crt-utility-l1-1-0.dll",
+                                "SizeBytes":  18744,
+                                "SHA256":  "0D03BD0A77AEA1475E13D5A265B79CC56B731D99480F123C33A53592466E4683"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\awt.dll",
+                                "SizeBytes":  1181248,
+                                "SHA256":  "0F387F937C7D38E41CF9318ED4797A6074A473A6A67675A2740E8FE8F9C0643E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\bci.dll",
+                                "SizeBytes":  15424,
+                                "SHA256":  "25F2963C2ABE7C17D62F16BE055BE5401ACDB85DD1705336E64BF225DBC10FAA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\concrt140.dll",
+                                "SizeBytes":  243016,
+                                "SHA256":  "3436EDE160F6613D24BC48D3A29C41A90BE9E1091A056F2227000FCA5E40516A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\dcpr.dll",
+                                "SizeBytes":  142912,
+                                "SHA256":  "F6C8AB6D0E45E87D84BB6949970654629E3DA008E769E504F0A725E8C53AFCBD"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\decora_sse.dll",
+                                "SizeBytes":  65088,
+                                "SHA256":  "F225C394DECBEBDC491FBF84E17A2F328C71D565147191E028FFAE2E97EFF829"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\deploy.dll",
+                                "SizeBytes":  454208,
+                                "SHA256":  "AC78FB0143C2F1BDF657743F372B2F5E0044F6EC8ED87ED06122C72DA28A1E89"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\dt_shmem.dll",
+                                "SizeBytes":  25152,
+                                "SHA256":  "5502F056E2D7CF5929EDB4174C5E49C87FA94AC97CC58C869AFD7921DC2E1A6E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\dt_socket.dll",
+                                "SizeBytes":  21568,
+                                "SHA256":  "9EB4163759D9648CC7D25307437015014FAE836C93A15651537635385B40C3CB"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\eula.dll",
+                                "SizeBytes":  109120,
+                                "SHA256":  "BD80958CB9476689784EE995C68C16B5DC5B9B26ED8AA4AA41F6F088E5C4F5AB"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\fontmanager.dll",
+                                "SizeBytes":  223296,
+                                "SHA256":  "771BE6D3F44DBE664F9533E7CE00961B4C03A97718BF39629C6FA7B565AE7D6A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\fxplugins.dll",
+                                "SizeBytes":  153664,
+                                "SHA256":  "D3818AFE52754462E9AD60FDFFBB34E90927D108FDB2D0BF887AF0E3B232BF01"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\glass.dll",
+                                "SizeBytes":  216128,
+                                "SHA256":  "D79B5BA11D5D59FF3412A8E45F18C73D0B2F4618B891E1CB0D3EA9BEF4543EDF"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\glib-lite.dll",
+                                "SizeBytes":  403520,
+                                "SHA256":  "5E5B30334670E20FCF439B8D600B8D722172D22DB3B4F1BBE6BDBA13C4139212"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\gstreamer-lite.dll",
+                                "SizeBytes":  517184,
+                                "SHA256":  "F78DDC15870A864D67CC9F1080703E408FFF15B4C1B99A99CD8C0630E7F225D6"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\hprof.dll",
+                                "SizeBytes":  132160,
+                                "SHA256":  "0829BAF90A67B384060E6C7A98CF870BE17F1578E3F307A313621B65FB2E4BBF"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\instrument.dll",
+                                "SizeBytes":  116288,
+                                "SHA256":  "1FAC675168E3BAB4537CCF12B932F2845FD256CE34D88A492821343DBD33EC25"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\j2pcsc.dll",
+                                "SizeBytes":  16448,
+                                "SHA256":  "142E061FB058B020CD6A291F7E0901E50FA13FA1AE6B557C1DB42E3D670896ED"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\j2pkcs11.dll",
+                                "SizeBytes":  51264,
+                                "SHA256":  "D6C4DA0D73BE17EEBCB3781AED6792D7A68657B47122260E51DAB4215239DD7A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jaas_nt.dll",
+                                "SizeBytes":  19520,
+                                "SHA256":  "C6E394C440BBC49F5AA8BE84CF0C997E33248082D4888FAA553A4607D23127AE"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\java.dll",
+                                "SizeBytes":  127040,
+                                "SHA256":  "11FA12317E933045E9A37ECC05A1A8EB75DAA239610E512C3DD9D0DBA92D032A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\JavaAccessBridge-32.dll",
+                                "SizeBytes":  128064,
+                                "SHA256":  "A3A5A9EBC1A14322551381636B453AEE9D8F4866F95930E2152AED3A6C1E4A68"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\JavaAccessBridge.dll",
+                                "SizeBytes":  127552,
+                                "SHA256":  "3ED42A7E332BF7AD8FA34C9A06AF66AA5C1B21906625EFC44059BF3EF8B7FC51"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\javacpl.cpl",
+                                "SizeBytes":  160256,
+                                "SHA256":  "1E92C033D4006648675066F38178B77E08C48F47DC4540E5BE4AB3C4EE6F6739"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\javafx_font.dll",
+                                "SizeBytes":  57920,
+                                "SHA256":  "C3954F2821B34DDA70B300F8A7834D9E95CDA2BADA8A419D33769FB6C641B69B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\javafx_font_t2k.dll",
+                                "SizeBytes":  447552,
+                                "SHA256":  "AD2643D2AA023CAACC56E2162B656082874184905B84D4AB12627E7E54B9FA5D"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\javafx_iio.dll",
+                                "SizeBytes":  128064,
+                                "SHA256":  "82CF4ACD3CA4547D55107B9AE248E87BB19A4BAF7D7E0FCE8008BDBA218801DB"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\java_crw_demo.dll",
+                                "SizeBytes":  23616,
+                                "SHA256":  "336422974F1B13505DEEB700EA8C15B578327238D49C40E9FC9A3ECD7FF330DA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jawt.dll",
+                                "SizeBytes":  13888,
+                                "SHA256":  "B902DEF8662C2E97568AC04B2363CA094F146D400CE0715C92B7FCFBD298D350"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\JAWTAccessBridge-32.dll",
+                                "SizeBytes":  14912,
+                                "SHA256":  "DA974A0791549881E73A1440EAA2A123326D9AE8B692D06DCD6DA149D6F9F46D"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\JAWTAccessBridge.dll",
+                                "SizeBytes":  14912,
+                                "SHA256":  "82E2EAF8FED60A55F97ABB86C2EE00EC8EE54B6C819BEB5245DE1F54F8DF3548"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jdwp.dll",
+                                "SizeBytes":  164416,
+                                "SHA256":  "1098B9B4A17F30237EFC9374071E3E247C5D35EC3EE1D9B78C9A9FEFD904A2C4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jfr.dll",
+                                "SizeBytes":  22592,
+                                "SHA256":  "C857DD097B40F952DDB0044E30B4E88E1B573CB274735CB05327CCCAC954AB17"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jfxmedia.dll",
+                                "SizeBytes":  114752,
+                                "SHA256":  "FA5C0C7FB4EDA859D3B33B46DFE7B45695CFCF114BDCDDED25603B82D0762D5E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jli.dll",
+                                "SizeBytes":  159296,
+                                "SHA256":  "3E5A9599D2EF66DCF327367F818E40602D1166F174CA3FE65011B85A52AAC901"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jp2iexp.dll",
+                                "SizeBytes":  207936,
+                                "SHA256":  "5A24C4957FBEDF84496B1FE9FCBC3814A17000025587C582D76D19B622E209C7"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jp2native.dll",
+                                "SizeBytes":  19008,
+                                "SHA256":  "4CC488ADA88233997DDBA8BC3362544DE0C1A0ED7C89B6476BCAAC7B28E0793E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jp2ssv.dll",
+                                "SizeBytes":  187968,
+                                "SHA256":  "7B3B35D74EB83430C54950D05FA24B1710382C4E677D9A35F906EA0EC8A2EF98"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jpeg.dll",
+                                "SizeBytes":  146496,
+                                "SHA256":  "4F612E209EDEBCC8A0DB1E0A8363D27DA6EDB6AA389C9A813236B9054782CFA8"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jsdt.dll",
+                                "SizeBytes":  16448,
+                                "SHA256":  "43999A0024921D6B0E37C2E28245C680F2E35DE8AE829E68DE0F54C726642FBC"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jsound.dll",
+                                "SizeBytes":  30784,
+                                "SHA256":  "1B9DCDCB7227E2B2FBA8821985C33EED9B9216FE557DFD414E746E036C3E06B5"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\jsoundds.dll",
+                                "SizeBytes":  27712,
+                                "SHA256":  "BBF78DD551C2DE94900297A67397C06A5CA17B6868B8C9CEC61EF932A6FFABF1"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\kcms.dll",
+                                "SizeBytes":  178240,
+                                "SHA256":  "3E16EBE6ED6BED4FEF63C97993CB9E54017C854FEAF5E59B603810023DD221CB"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\lcms.dll",
+                                "SizeBytes":  186432,
+                                "SHA256":  "E3D61FB50020EFEE1EBB554CC780AA0075F7E3D4908F0A322FD6938C92BD8295"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\management.dll",
+                                "SizeBytes":  33344,
+                                "SHA256":  "418D084B893753EFEA55B81D873621259AB4B11EDDD128DE285A61B56A7F43B8"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\mlib_image.dll",
+                                "SizeBytes":  574528,
+                                "SHA256":  "2E2936AB683710651660173757156984A12133BCB53C335BA48A41882869B5B7"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\msvcp140.dll",
+                                "SizeBytes":  438080,
+                                "SHA256":  "916EAA54E02AB03F8065A487AED6C7960FCD70556AAD0B27DE547FFF9D603D47"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\msvcr100.dll",
+                                "SizeBytes":  773968,
+                                "SHA256":  "60C06E0FA4449314DA3A0A87C1A9D9577DF99226F943637E06F61188E5862EFA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\net.dll",
+                                "SizeBytes":  80960,
+                                "SHA256":  "61B3840CCB70F61F0DEFD4EDA96AC28DB220B26C0CEB1109F10BA44D7F888741"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\nio.dll",
+                                "SizeBytes":  51264,
+                                "SHA256":  "90EAD1BA7B73D1081BFDC5EF1E5B4B03A8BA25B63AEB6596E534FA45539D7121"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\npt.dll",
+                                "SizeBytes":  17472,
+                                "SHA256":  "DCA8E3D2A79F38DD5F92C9F05230FD58F310A751DAEAAB19EFFFCD3C40E09E7E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\prism_common.dll",
+                                "SizeBytes":  53824,
+                                "SHA256":  "899E6783B6A3CF3554C6B7D8B94E800389792CAD9D93EAB8927625F7E9E1A69E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\prism_d3d.dll",
+                                "SizeBytes":  115776,
+                                "SHA256":  "DA5932D08F19DC7854C1D1022A9D28A798B62CDE19E77C17D0041BAABF396064"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\prism_sw.dll",
+                                "SizeBytes":  87616,
+                                "SHA256":  "61354672D97C8EAD140722FFC57673F70ABA8D64AB82F9EDD9DEE226F4EA7FB1"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\resource.dll",
+                                "SizeBytes":  14912,
+                                "SHA256":  "29E5890E6F4FA2AC14378B1833076DF938A11C2561869FB23FD781B61A48B4E8"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\splashscreen.dll",
+                                "SizeBytes":  173120,
+                                "SHA256":  "56086EDB2453B511168E3AD826B654151FAA935BAEB64CF8D33B3068F7F95FAE"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\ssv.dll",
+                                "SizeBytes":  473664,
+                                "SHA256":  "3D438235ABB8F41F4F0C8E63AF014024B390E795E3594C9205809685060495A1"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\sunec.dll",
+                                "SizeBytes":  124480,
+                                "SHA256":  "0C47E385D3FD8DB6B2E312277060856BA654AF2D387607FA9024402F80D2AE97"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\sunmscapi.dll",
+                                "SizeBytes":  25664,
+                                "SHA256":  "F2AAFFDC61488C0EF3BDB57E1C34441EE05689D4D39537F4E93216AA63695924"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\t2k.dll",
+                                "SizeBytes":  195136,
+                                "SHA256":  "41FFBCF9947602B148A6238D7AAA2825D449199716E121A70F403D0E7870C691"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\ucrtbase.dll",
+                                "SizeBytes":  1147712,
+                                "SHA256":  "0AE2D103D87250F64EF5091D4807523038954ABA0E119B121EED7F0A23B00B52"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\unpack.dll",
+                                "SizeBytes":  65600,
+                                "SHA256":  "1FE967324753DF47F847043A42906C141915F7E496D90DB5BB0943D643B9ED11"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\vcruntime140.dll",
+                                "SizeBytes":  83792,
+                                "SHA256":  "CDC006FC80C4437D009B8C72008A443A9EE5BCE383D8B3DC16AEEC0E081CFE32"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\verify.dll",
+                                "SizeBytes":  39488,
+                                "SHA256":  "81F16C1D1F4C4F53BE6AC0F6AE18E8B75B9CB0539B90C524992F4C65186636BC"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\w2k_lsa_auth.dll",
+                                "SizeBytes":  21568,
+                                "SHA256":  "A269F0A6C08BE2EEECEB7CB2CB82358D636A18CD32C24BD8BD1A846E8B0B39BB"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\WindowsAccessBridge-32.dll",
+                                "SizeBytes":  97856,
+                                "SHA256":  "3AF14BE1A70CBD9F9688D6E0DF64F9D7780CEBF07E04ED781E0CF4EECAC18149"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\WindowsAccessBridge.dll",
+                                "SizeBytes":  95808,
+                                "SHA256":  "354CFC57393C39A46CA53D152A11FB75E65F69DCC9810AC9C110DF130B967DCF"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\wsdetect.dll",
+                                "SizeBytes":  163904,
+                                "SHA256":  "DB3F6ED0F4E5AEB10887F58BB2CB09DEB625ED80D64FBBD8077C88419191FDE7"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\zip.dll",
+                                "SizeBytes":  70720,
+                                "SHA256":  "B4925AF3A393AB5207A8B4F780B187BE470365C8E24BA716595574F5F035E81C"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\client\\Xusage.txt",
+                                "SizeBytes":  1423,
+                                "SHA256":  "37CF4E6CDC4357CEBB0EC8108D5CB0AD42611F675B926C819AE03B74CE990A08"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\dtplugin\\deployJava1.dll",
+                                "SizeBytes":  826944,
+                                "SHA256":  "245E609B1A917DB4E09454B2B351E52790DD82038E77AF857DD974C6ED54F68D"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\dtplugin\\npdeployJava1.dll",
+                                "SizeBytes":  908864,
+                                "SHA256":  "FFFC064EEFD6156164EBCB13E6A4099703FDACFC7BEBCDA2A518C6D2AFB48C7B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\plugin2\\msvcr100.dll",
+                                "SizeBytes":  773968,
+                                "SHA256":  "60C06E0FA4449314DA3A0A87C1A9D9577DF99226F943637E06F61188E5862EFA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\bin\\plugin2\\npjp2.dll",
+                                "SizeBytes":  172608,
+                                "SHA256":  "F874FB068FA563E7C358A6304F74A8C83126F1C9EA4CBF42A59D93C4E582E8CD"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\accessibility.properties",
+                                "SizeBytes":  149,
+                                "SHA256":  "68EF2F3C6D7636E39C6626ED1BD700E3A6B796C25A9E5FECA4533ABFACD61CDF"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\calendars.properties",
+                                "SizeBytes":  1378,
+                                "SHA256":  "D93FB6D3451D1B82256B0E31AAE7850152FA5DF76F116A9D669AA4ACE6BB68B4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\classlist",
+                                "SizeBytes":  84355,
+                                "SHA256":  "01FE24232D0DBEFE339F88C44A3FD3D99FF0E17AE03926CCF90B835332F5F89C"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\content-types.properties",
+                                "SizeBytes":  5548,
+                                "SHA256":  "46F47B3883C7244A819AE1161113FE9D2375F881B75C9B3012D7A6B3497E030A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\currency.data",
+                                "SizeBytes":  4122,
+                                "SHA256":  "22458853DA2415F7775652A7F57BB6665F83A9AE9FB8BD3CF05E29AAC24C8441"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\flavormap.properties",
+                                "SizeBytes":  3928,
+                                "SHA256":  "C2748E07B59398CC40CACCCD47FC98A70C562F84067E9272383B45A8DF72A692"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fontconfig.bfc",
+                                "SizeBytes":  3770,
+                                "SHA256":  "0F2265F0113A757C15D51FA53409D630478378FD0856EF547780B40AC6C87156"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fontconfig.properties.src",
+                                "SizeBytes":  10568,
+                                "SHA256":  "115B2049DE908E5D9BAD5BDE2ED035E85A7ADE35BF323BFD3D491A8C218146F1"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\hijrah-config-umalqura.properties",
+                                "SizeBytes":  13962,
+                                "SHA256":  "69BECFE0D45B62BBDBCF6FE111A8A3A041FB749B6CF38E8A2F670607E17C9EE2"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\javafx.properties",
+                                "SizeBytes":  56,
+                                "SHA256":  "D58158CEC965B3F9FEBCE1385A370DBC47ED620A38F8BE2BD8388B993CEADF00"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\javaws.jar",
+                                "SizeBytes":  477426,
+                                "SHA256":  "2FB230ACCF743015AB8E165544CD6DB9FEA53F3D1BA56B21FB26C1167F187226"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jce.jar",
+                                "SizeBytes":  116988,
+                                "SHA256":  "BC0230E4A4FFD0167387DD9561BBFF3456339FCFF1F46A638568D58C62ABA02E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jfr.jar",
+                                "SizeBytes":  560581,
+                                "SHA256":  "FD86B704D360F7413A0381D154B99534628A8D179596EF00D6FECA8F9A6D631A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jfxswt.jar",
+                                "SizeBytes":  33932,
+                                "SHA256":  "EF5E6B3F0AE22083CE9FC38B39186CF880E68E89F13CA88947E40283AD928A1F"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jsse.jar",
+                                "SizeBytes":  648816,
+                                "SHA256":  "1C84AC9CE60C9500CD67E5D49C8471312BBB2441DBA65B92E5648D867ECC949F"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jvm.hprof.txt",
+                                "SizeBytes":  4226,
+                                "SHA256":  "B055BF25B07E5AC70E99B897FB8152F288769065B5B84387362BB9CC2E6C9D38"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\logging.properties",
+                                "SizeBytes":  2455,
+                                "SHA256":  "CE1688FE641099954572EA856953035B5188E2CA228705001368250337B9B232"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\management-agent.jar",
+                                "SizeBytes":  381,
+                                "SHA256":  "B536F87233915C9EAC5296F583EAC731AE80EABD4A6A4D8333F5ACAC10DC6B07"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\meta-index",
+                                "SizeBytes":  2126,
+                                "SHA256":  "4AF21954CDF398D1EAE795B6886CA2581DAC9F2F1D41C98C6ED9B5DBC3E3C1D4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\net.properties",
+                                "SizeBytes":  4464,
+                                "SHA256":  "16C93910B2785E7CBDDA90D5479AA9687148C2141AC0ADBD0277FDE284F6BBB3"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\plugin.jar",
+                                "SizeBytes":  1010934,
+                                "SHA256":  "9A71D65C3E3FE58D6548EE06255DA379277463A537390A527AA40BDE373708D9"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\psfont.properties.ja",
+                                "SizeBytes":  2796,
+                                "SHA256":  "0C790DE696536165913685785EA8CBE1AC64ACF09E2C8D92D802083A6DA09393"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\psfontj2d.properties",
+                                "SizeBytes":  10393,
+                                "SHA256":  "7D51936FA3FD5812AE51F9F5657E0E70487DCA810B985607B6C5D6603F5E6C98"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\sound.properties",
+                                "SizeBytes":  1210,
+                                "SHA256":  "299C2360B6155EB28990EC49CD21753F97E43442FE8FAB03E04F3E213DF43A66"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\tzdb.dat",
+                                "SizeBytes":  105500,
+                                "SHA256":  "A46A8BF58BC55784FA07E23F01AD46C9CB161A02B6A7CD8E035BB718C92E758B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\tzmappings",
+                                "SizeBytes":  8400,
+                                "SHA256":  "D936EE24810B747C54192B4B5A279F21179FE3CEB42D113D025A368EBB7CB5A7"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\cmm\\CIEXYZ.pf",
+                                "SizeBytes":  51236,
+                                "SHA256":  "207D748A76C10E5FA10EC7D0494E31AB72F2BACAB591371F2E9653961321FE9C"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\cmm\\GRAY.pf",
+                                "SizeBytes":  632,
+                                "SHA256":  "081CAAC386D968ADD4C2D722776E259380DCF78A306E14CC790B040AB876D424"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\cmm\\LINEAR_RGB.pf",
+                                "SizeBytes":  1044,
+                                "SHA256":  "712036AA1951427D42E3E190E714F420CA8C2DD97EF01FCD0675EE54B920DB46"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\cmm\\PYCC.pf",
+                                "SizeBytes":  274474,
+                                "SHA256":  "48122294B5C08C69B7FE1DB28904969DCB6EDC9AA5076E3F8768BF48B76204D0"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\cmm\\sRGB.pf",
+                                "SizeBytes":  3144,
+                                "SHA256":  "2B3AA1645779A9E634744FAF9B01E9102B0C9B88FD6DECED7934DF86B949AF7E"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\ffjcext.zip",
+                                "SizeBytes":  14156,
+                                "SHA256":  "D8B448BD9AA644BA3A51F09E7C019457F9A86B4BDFDE6A11090F6D6624896690"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages.properties",
+                                "SizeBytes":  2860,
+                                "SHA256":  "926CCADAEC649F621590D1AA5E915481016564E7AB28390C8D68BDAAF4785F1F"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_de.properties",
+                                "SizeBytes":  3306,
+                                "SHA256":  "C9399A33BB9C75345130B99D1D7CE886D9148F1936543587848C47B8540DA640"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_es.properties",
+                                "SizeBytes":  3600,
+                                "SHA256":  "BE987D93E23AB7318DB095727DEDD8461BA6D98B9409EF8FC7F5C79FA9666B84"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_fr.properties",
+                                "SizeBytes":  3409,
+                                "SHA256":  "8DEEEC35ED29348F5755801F42675E3BF3FA7AD4B1E414ACCA283C4DA40E4D77"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_it.properties",
+                                "SizeBytes":  3223,
+                                "SHA256":  "550954F1F80FE0E73D74EB10AD529B454D5EBC626EB94A6B294D7D2ACF06F372"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_ja.properties",
+                                "SizeBytes":  6349,
+                                "SHA256":  "8D499C1CB14D58E968A823E11D5B114408C010B053B3B38CFEF7EBF9FB49096F"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_ko.properties",
+                                "SizeBytes":  5712,
+                                "SHA256":  "D9C95C31B4C1092F32BDCF40D5232B31CC09FB5B68564067C1C2A5F59D3869FA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_pt_BR.properties",
+                                "SizeBytes":  3285,
+                                "SHA256":  "4140663A49040FF191C07D2D04588402263EC2E1679A9A1A79B790A137EE7FB8"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_sv.properties",
+                                "SizeBytes":  3409,
+                                "SHA256":  "5CCEE63720FCAC2A136CF1FA90CBAC05040F89FFE8C082C2D067247BFCD76B87"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_zh_CN.properties",
+                                "SizeBytes":  4072,
+                                "SHA256":  "A1752A0175F490F61E0AAD46DC6887C19711F078309062D5260E164AC844F61A"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_zh_HK.properties",
+                                "SizeBytes":  3752,
+                                "SHA256":  "FF4A3A92BC92CB08D2C32C435810440FD264EDD63E56EFA39430E0240C835620"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\messages_zh_TW.properties",
+                                "SizeBytes":  3752,
+                                "SHA256":  "FF4A3A92BC92CB08D2C32C435810440FD264EDD63E56EFA39430E0240C835620"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\splash.gif",
+                                "SizeBytes":  8590,
+                                "SHA256":  "113B01304EBBF3CC729A5CA3452DDA2093BD8B3DDC2BA29E5E1C1605661F90BE"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\splash@2x.gif",
+                                "SizeBytes":  15276,
+                                "SHA256":  "9DD5CCD6BDFDAAD38F7D05A14661108E629FDD207FC7776268B566F7941E1435"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\splash_11-lic.gif",
+                                "SizeBytes":  7805,
+                                "SHA256":  "C5578AC349105DE51C1E9109D22C7843AAB525C951E312700C73D5FD427281B9"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\deploy\\splash_11@2x-lic.gif",
+                                "SizeBytes":  12250,
+                                "SHA256":  "FC39D09D187739E580E47569556DE0D19AF28B53DF5372C7E0538FD26EDB7988"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\access-bridge-32.jar",
+                                "SizeBytes":  188021,
+                                "SHA256":  "54664175246C3ECCD02BD73D32F72F7D3FE7C12792B9D5AEADC43C4B864A5905"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\access-bridge.jar",
+                                "SizeBytes":  188012,
+                                "SHA256":  "F4043BD8B69162977E717782F169F5736FAA05C8782C5E4BCD0CA96D0D723107"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\dnsns.jar",
+                                "SizeBytes":  8286,
+                                "SHA256":  "FF6A1494C032B6C0BABB3092FCB2FB2B9804A20DE06BA3424A359278B5B5D999"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\jaccess.jar",
+                                "SizeBytes":  44516,
+                                "SHA256":  "6F3BC02534717C2EF86BAE7A79F351732546B895AD359C64AF0DDD92A8131FE9"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\localedata.jar",
+                                "SizeBytes":  1179093,
+                                "SHA256":  "EB6002CE00CB85E99320683B42047B65B9536C3B03957ECA38D548E79E802C26"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\meta-index",
+                                "SizeBytes":  1511,
+                                "SHA256":  "C557F0C9053301703798E01DC0F65E290B0AE69075FB49FCC0E68C14B21D87F4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\nashorn.jar",
+                                "SizeBytes":  2022735,
+                                "SHA256":  "9735D6C890F86F91C29205E03D1EB19F63AEBF8E8FF44857C7A94C2668EA0E89"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\sunec.jar",
+                                "SizeBytes":  41672,
+                                "SHA256":  "6F51B006FFCFDD1A29A3DAA0A53A2B485CBBE111866F9CA4AD93DC3E9F57B5B6"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\sunjce_provider.jar",
+                                "SizeBytes":  274148,
+                                "SHA256":  "568C7D1409345D9EE2C164BA64B7946AA3A561589B045D9A252F6246CCFF40BB"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\sunmscapi.jar",
+                                "SizeBytes":  33148,
+                                "SHA256":  "2BDF4D0968FAF28DD7BF7084B397B9BA1DEBF574A0333A7A981E59116906ACF4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\sunpkcs11.jar",
+                                "SizeBytes":  248726,
+                                "SHA256":  "409AC4E8F8D13C8CC6BBF415BF8219F2578630141E0AD4569C3259EBA0DB2B38"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\ext\\zipfs.jar",
+                                "SizeBytes":  68924,
+                                "SHA256":  "B73AA17EB7823DF5F1EC35001720E45DC3D27AE43A5B0E92BC7CD8033B068F64"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaBrightDemiBold.ttf",
+                                "SizeBytes":  75144,
+                                "SHA256":  "72CEE3E6DF72AD577AF49C59DCA2D0541060F95A881845950595E5614C486244"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaBrightDemiItalic.ttf",
+                                "SizeBytes":  75124,
+                                "SHA256":  "895C5262CDB6297C13725515F849ED70609DBD7C49974A382E8BBFE4A3D75F8C"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaBrightItalic.ttf",
+                                "SizeBytes":  80856,
+                                "SHA256":  "D68819A70B60FF68CA945EF5AD358C31829E43EC25024A99D17174C626575E06"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaBrightRegular.ttf",
+                                "SizeBytes":  344908,
+                                "SHA256":  "0FAAACA3C730857D3E50FBA1BBAD4CA2330ADD217B35E22B7E67F02809FAC923"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaSansDemiBold.ttf",
+                                "SizeBytes":  317896,
+                                "SHA256":  "53773357D739F89BC10087AB2A829BA057649784A9ACBFFEE18A488B2DCCB9EE"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaSansRegular.ttf",
+                                "SizeBytes":  698236,
+                                "SHA256":  "F8D877B0B64600E736DFE436753E8E11ACB022E59B5D7723D7D221D81DC2FCDE"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaTypewriterBold.ttf",
+                                "SizeBytes":  234068,
+                                "SHA256":  "FC908259013B90F1CBC597A510C6DD7855BF9E7830ABE3FC3612AB4092EDCDE2"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\fonts\\LucidaTypewriterRegular.ttf",
+                                "SizeBytes":  242700,
+                                "SHA256":  "D9D0AAB0354C3856DF81AFAC49BDC586E930A77428CB499007DDE99ED31152FF"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\i386\\jvm.cfg",
+                                "SizeBytes":  623,
+                                "SHA256":  "9E86B24FF2B19D814BBAEDD92DF9F0E1AE86BF11A86A92989C9F91F959B736E1"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\cursors.properties",
+                                "SizeBytes":  1280,
+                                "SHA256":  "7B8B63F78E2F732BD58BF8F16144C4802C513A52970C18DC0BDB789DD04078E4"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\invalid32x32.gif",
+                                "SizeBytes":  153,
+                                "SHA256":  "1A1D3079D49583837662B84E11D8C0870698511D9110E710EB8E7EB20DF7AE3B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\win32_CopyDrop32x32.gif",
+                                "SizeBytes":  165,
+                                "SHA256":  "13C783ACD580DF27207DABCCB10B3F0C14674560A23943AC7233DF7F72D4E49D"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\win32_CopyNoDrop32x32.gif",
+                                "SizeBytes":  153,
+                                "SHA256":  "1A1D3079D49583837662B84E11D8C0870698511D9110E710EB8E7EB20DF7AE3B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\win32_LinkDrop32x32.gif",
+                                "SizeBytes":  168,
+                                "SHA256":  "485CBE5C5144CFCD13CC6D701CDAB96E4A6F8660CBC70A0A58F1B7916BE64198"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\win32_LinkNoDrop32x32.gif",
+                                "SizeBytes":  153,
+                                "SHA256":  "1A1D3079D49583837662B84E11D8C0870698511D9110E710EB8E7EB20DF7AE3B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\win32_MoveDrop32x32.gif",
+                                "SizeBytes":  147,
+                                "SHA256":  "12CFCE05229DBA939CE13375D65CA7D303CE87851AE15539C02F11D1DC824338"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\images\\cursors\\win32_MoveNoDrop32x32.gif",
+                                "SizeBytes":  153,
+                                "SHA256":  "1A1D3079D49583837662B84E11D8C0870698511D9110E710EB8E7EB20DF7AE3B"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jfr\\default.jfc",
+                                "SizeBytes":  20109,
+                                "SHA256":  "0C8CD372C548E4DDCBB0FA8CD6FCA09D65EC312D784F495BE19BAF1BF06C57F3"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\jfr\\profile.jfc",
+                                "SizeBytes":  20065,
+                                "SHA256":  "F70E4C858A96603DE6C042EA796300C232953AAB17579FF4E7A47FE9FFE17C26"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\management\\jmxremote.access",
+                                "SizeBytes":  3998,
+                                "SHA256":  "439158EB513525FEDA19E0E4153CCF36A08FE6A39C0C6CEEB9FCEE86899DD33C"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\management\\jmxremote.password.template",
+                                "SizeBytes":  2856,
+                                "SHA256":  "3D83E336C9A24D09A16063EA1355885E07F7A176A37543463596B5DB8D82F8FA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\management\\management.properties",
+                                "SizeBytes":  14630,
+                                "SHA256":  "3A923735D9C2062064CD8FD30FF8CCA84D0BC0AB5A8FAB80FDAD3155C0E3A380"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\management\\snmp.acl.template",
+                                "SizeBytes":  3376,
+                                "SHA256":  "F1DC97DA5A5D220ED5D5B71110CE8200B16CAC50622B33790BB03E329C751CED"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\blacklist",
+                                "SizeBytes":  4054,
+                                "SHA256":  "6C73C877B36D4ABD086CB691959B180513AC5ABC0C87FE9070D2D5426D3DBF71"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\blacklisted.certs",
+                                "SizeBytes":  1253,
+                                "SHA256":  "DDD297102146AC7F6607B35C0E0B565975739A7841DA5E5A6207B6F4EBB2D822"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\cacerts",
+                                "SizeBytes":  113367,
+                                "SHA256":  "5FD3D13A7D3B496BAAC0490B6D1C4F2C5228F102661F00AE02D49C418846E0FA"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\java.policy",
+                                "SizeBytes":  2466,
+                                "SHA256":  "B8582889B0DF36065093C642ED0F9FA2A94CC0DC6FDE366980CFD818EC957250"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\java.security",
+                                "SizeBytes":  39332,
+                                "SHA256":  "AAE769B8AB14DED4EC2D0F5340924F6A066780D7505E13A286F3F9F2150898A2"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\javaws.policy",
+                                "SizeBytes":  98,
+                                "SHA256":  "B7A87D1F3F4B7BA1D19D0460FA4B63BD1093AFC514D67FE3C356247236326425"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\trusted.libraries",
+                                "SizeBytes":  0,
+                                "SHA256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\policy\\limited\\local_policy.jar",
+                                "SizeBytes":  3527,
+                                "SHA256":  "B8BECC3EF2E7FF7D2165DD1A4E13B9C59FD626F20A26AF9A32277C1F4B5D5BC7"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\policy\\limited\\US_export_policy.jar",
+                                "SizeBytes":  3026,
+                                "SHA256":  "90012F900CF749A0E52A0775966EF575D390AD46388C49D512838983A554A870"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\policy\\unlimited\\local_policy.jar",
+                                "SizeBytes":  3035,
+                                "SHA256":  "4924CBE86A60D93351C8955B924B714FFDEEA776B2621D84E3BAD99749C56DF3"
+                            },
+                            {
+                                "RelativePath":  "Content\\jre\\lib\\security\\policy\\unlimited\\US_export_policy.jar",
+                                "SizeBytes":  3023,
+                                "SHA256":  "FADF649815E8DD4295980EC4C81A76E25FEA3CECC8067DE333A075BBCDAF8FB9"
+                            }
+                        ]
+}

@@ -1,0 +1,12 @@
+﻿{
+    "StartedAtUtc":  "2026-05-16T21:59:54.5416819Z",
+    "Host":  "DESKTOP-FHVD1S8",
+    "Source":  "F:\\Games\\Slay The Spire",
+    "Destination":  "G:\\stage\\Slay The Spire",
+    "Mirror":  true,
+    "RobocopyExit":  8,
+    "Success":  false,
+    "DestBytes":  545545184,
+    "DestFileCount":  242,
+    "LogPath":  "F:\\Documents\\GamesLocalShare\\PLANNING\\xbox-validation\\runs\\stage-20260517-005952.log"
+}
