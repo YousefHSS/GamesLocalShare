@@ -35,12 +35,16 @@
 .EXAMPLE
     .\xbox-transfer-receiver.ps1 -Source "E:\stage\A Short Hike"
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='User')]
 param(
-    [Parameter(Mandatory)] [string] $Source,
+    [Parameter(Mandatory, ParameterSetName='User')]
+    [string] $Source,
+    [Parameter(ParameterSetName='User')]
     [string] $XboxRoot       = 'C:\XboxGames',
+    [Parameter(ParameterSetName='User')]
     [int]    $ObserveSeconds = 180,
-    [switch] $InternalSystemPhase
+    [Parameter(Mandatory, ParameterSetName='System')]
+    [string] $SystemArgsFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,9 +56,18 @@ $toolsDir   = Join-Path $PSScriptRoot 'tools'
 New-Item -ItemType Directory -Path $runsDir  -Force | Out-Null
 New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 
-$Source = (Resolve-Path -LiteralPath $Source).Path
+if ($PSCmdlet.ParameterSetName -eq 'System') {
+    $argsObj        = Read-SystemArgs -Path $SystemArgsFile
+    $Source         = [string]$argsObj.Source
+    $XboxRoot       = [string]$argsObj.XboxRoot
+    $ObserveSeconds = [int]$argsObj.ObserveSeconds
+    $verdictStamp   = [string]$argsObj.VerdictStamp
+} else {
+    $Source   = (Resolve-Path -LiteralPath $Source).Path
+    $XboxRoot = $XboxRoot.TrimEnd('\','/')
+}
 
-if (-not $InternalSystemPhase) {
+if ($PSCmdlet.ParameterSetName -eq 'User') {
     Assert-Elevated -ScriptPath $scriptPath -ScriptArgs @(
         '-Source', "`"$Source`"",
         '-XboxRoot', "`"$XboxRoot`"",
@@ -76,14 +89,15 @@ if (-not $InternalSystemPhase) {
     $psexec = Ensure-PsExec -ToolsDir $toolsDir
     $stamp  = (Get-Date).ToString('yyyyMMdd-HHmmss')
     $sysLog = Join-Path $runsDir "receiver-system-$stamp.log"
+    $verdictPath = Join-Path $runsDir "receiver-verdict-$stamp.json"
 
     $code = Invoke-AsSystem -ScriptPath $scriptPath `
-        -ScriptArgs @(
-            '-Source', "`"$Source`"",
-            '-XboxRoot', "`"$XboxRoot`"",
-            '-ObserveSeconds', "$ObserveSeconds",
-            '-InternalSystemPhase'
-        ) `
+        -Params @{
+            Source         = $Source
+            XboxRoot       = $XboxRoot
+            ObserveSeconds = $ObserveSeconds
+            VerdictStamp   = $stamp
+        } `
         -LogPath $sysLog `
         -PsExecPath $psexec
 
@@ -91,21 +105,17 @@ if (-not $InternalSystemPhase) {
     Write-Host "SYSTEM phase exited with code $code" -ForegroundColor Cyan
     Write-Host "Full log: $sysLog"
 
-    # Surface the verdict
-    $verdictGlob = Join-Path $runsDir 'receiver-verdict-*.json'
-    $latest = Get-ChildItem -Path $verdictGlob -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($latest) {
+    if (Test-Path -LiteralPath $verdictPath) {
         Write-Host ""
         Write-Host "=== VERDICT ===" -ForegroundColor Green
-        $v = Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json
+        $v = Get-Content -LiteralPath $verdictPath -Raw | ConvertFrom-Json
         Write-Host ("  Hypothesis:        {0}" -f $v.Hypothesis) -ForegroundColor Yellow
         Write-Host ("  PFN registered:    {0}" -f $v.PackageRegistered)
         Write-Host ("  NIC rx during obs: {0:N1} MB" -f $v.ObservedReceivedMB)
         Write-Host ("  Source bytes:      {0:N1} MB" -f ($v.SourceBytes/1MB))
-        Write-Host ("  Verdict file:      {0}" -f $latest.FullName)
+        Write-Host ("  Verdict file:      {0}" -f $verdictPath)
     } else {
-        Write-Host "No verdict file produced - check the SYSTEM log." -ForegroundColor Red
+        Write-Host "No verdict file produced - check SYSTEM log: $sysLog" -ForegroundColor Red
     }
     exit $code
 }
@@ -141,7 +151,8 @@ Write-Host ("[SYSTEM phase] Pre-deploy package state: Installed={0}" -f $preStat
 Stop-XboxApp
 
 # Robocopy from -Source to $destGame
-$stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+if (-not $verdictStamp) { $verdictStamp = (Get-Date).ToString('yyyyMMdd-HHmmss') }
+$stamp = $verdictStamp
 $rcLog = Join-Path $runsDir "receiver-robocopy-$stamp.log"
 $rcArgs = @(
     "`"$Source`"", "`"$destGame`"", '/E','/COPYALL','/B','/DCOPY:DAT',

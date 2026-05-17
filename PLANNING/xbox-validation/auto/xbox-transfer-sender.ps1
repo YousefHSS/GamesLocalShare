@@ -27,11 +27,14 @@
 .EXAMPLE
     .\xbox-transfer-sender.ps1 -GameFolder "F:\Games\A Short Hike" -Destination "E:\stage"
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='User')]
 param(
-    [Parameter(Mandatory)] [string] $GameFolder,
-    [Parameter(Mandatory)] [string] $Destination,
-    [switch] $InternalSystemPhase   # set by Invoke-AsSystem when we re-enter
+    [Parameter(Mandatory, ParameterSetName='User')]
+    [string] $GameFolder,
+    [Parameter(Mandatory, ParameterSetName='User')]
+    [string] $Destination,
+    [Parameter(Mandatory, ParameterSetName='System')]
+    [string] $SystemArgsFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,7 +46,15 @@ $toolsDir   = Join-Path $PSScriptRoot 'tools'
 New-Item -ItemType Directory -Path $runsDir  -Force | Out-Null
 New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 
-# Normalize paths
+# Resolve params from JSON manifest if we're the SYSTEM child.
+if ($PSCmdlet.ParameterSetName -eq 'System') {
+    $argsObj     = Read-SystemArgs -Path $SystemArgsFile
+    $GameFolder  = [string]$argsObj.GameFolder
+    $Destination = [string]$argsObj.Destination
+}
+
+# Normalize paths (strip trailing slashes to avoid quoting issues - even
+# though we no longer interpolate, keep the inputs clean).
 $GameFolder  = (Resolve-Path -LiteralPath $GameFolder).Path
 $gameName    = Split-Path -Path $GameFolder -Leaf
 $destRoot    = $Destination.TrimEnd('\','/')
@@ -52,10 +63,10 @@ $destGame    = Join-Path $destRoot $gameName
 # ---------------------------------------------------------------------------
 # Phase 0: ensure elevation, then re-launch as SYSTEM
 # ---------------------------------------------------------------------------
-if (-not $InternalSystemPhase) {
+if ($PSCmdlet.ParameterSetName -eq 'User') {
     Assert-Elevated -ScriptPath $scriptPath -ScriptArgs @(
         '-GameFolder', "`"$GameFolder`"",
-        '-Destination', "`"$Destination`""
+        '-Destination', "`"$destRoot`""
     )
 
     Write-Host ""
@@ -69,11 +80,10 @@ if (-not $InternalSystemPhase) {
     $sysLog = Join-Path $runsDir "sender-system-$stamp.log"
 
     $code = Invoke-AsSystem -ScriptPath $scriptPath `
-        -ScriptArgs @(
-            '-GameFolder', "`"$GameFolder`"",
-            '-Destination', "`"$Destination`"",
-            '-InternalSystemPhase'
-        ) `
+        -Params @{
+            GameFolder  = $GameFolder
+            Destination = $destRoot
+        } `
         -LogPath $sysLog `
         -PsExecPath $psexec
 

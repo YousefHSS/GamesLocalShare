@@ -29,11 +29,32 @@ function Test-IsSystem {
 
 function Assert-Elevated {
     param([string]$ScriptPath, [string[]]$ScriptArgs)
-    if (Test-IsElevated) { return }
+    if (Test-IsElevated) {
+        # Recursion guard: if we ended up here as SYSTEM without the
+        # InternalSystemPhase / SystemArgsFile path being recognised, the
+        # arg-passing got corrupted somehow. Bail out hard rather than
+        # spawning another SYSTEM child.
+        if (Test-IsSystem) {
+            Write-Host "FATAL: running as NT AUTHORITY\SYSTEM in the parent branch." -ForegroundColor Red
+            Write-Host "       This means the -SystemArgsFile parameter was lost. Aborting" -ForegroundColor Red
+            Write-Host "       to prevent infinite SYSTEM relaunch recursion." -ForegroundColor Red
+            exit 99
+        }
+        return
+    }
     Write-Host "Not elevated - relaunching as Administrator..." -ForegroundColor Yellow
     $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File', "`"$ScriptPath`"") + $ScriptArgs
     Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs | Out-Null
     exit 0
+}
+
+function Read-SystemArgs {
+    param([Parameter(Mandatory)][string] $Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "SystemArgsFile not found: $Path"
+    }
+    $raw = Get-Content -LiteralPath $Path -Raw
+    return ($raw | ConvertFrom-Json)
 }
 
 function Ensure-PsExec {
@@ -60,20 +81,35 @@ function Ensure-PsExec {
 function Invoke-AsSystem {
     <#
         Re-launch the calling script as NT AUTHORITY\SYSTEM via PsExec.
-        Output is captured to a log file; this function tails the log until
-        the SYSTEM child process exits and returns the child's exit code.
+
+        Args are written to a JSON manifest and passed as a single
+        -SystemArgsFile parameter. This sidesteps every command-line
+        quoting pitfall (trailing backslashes, embedded quotes, spaces,
+        etc.) that bit us on earlier iterations.
+
+        Output is captured to a log file; this function tails the log
+        until the SYSTEM child process exits and returns the child's
+        exit code.
     #>
     param(
-        [Parameter(Mandatory)] [string]   $ScriptPath,
-        [Parameter(Mandatory)] [string[]] $ScriptArgs,
-        [Parameter(Mandatory)] [string]   $LogPath,
-        [Parameter(Mandatory)] [string]   $PsExecPath
+        [Parameter(Mandatory)] [string]    $ScriptPath,
+        [Parameter(Mandatory)] [hashtable] $Params,
+        [Parameter(Mandatory)] [string]    $LogPath,
+        [Parameter(Mandatory)] [string]    $PsExecPath
     )
 
     if (Test-Path -LiteralPath $LogPath) { Remove-Item -LiteralPath $LogPath -Force }
     New-Item -ItemType File -Path $LogPath -Force | Out-Null
 
-    $psArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File', "`"$ScriptPath`"") + $ScriptArgs
+    # Write params to a JSON manifest next to the log.
+    $manifestPath = [System.IO.Path]::ChangeExtension($LogPath, '.args.json')
+    $Params | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+    $psArgs = @(
+        '-NoProfile','-ExecutionPolicy','Bypass',
+        '-File', "`"$ScriptPath`"",
+        '-SystemArgsFile', "`"$manifestPath`""
+    )
     $psExecArgs = @('-accepteula','-nobanner','-s','-h','powershell.exe') + $psArgs
 
     Write-Host "Launching SYSTEM child:" -ForegroundColor Cyan

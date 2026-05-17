@@ -31,12 +31,16 @@
 .EXAMPLE
     .\xbox-transfer-receiver-overlay.ps1 -Source "E:\stage\Stardew Valley"
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='User')]
 param(
-    [Parameter(Mandatory)] [string] $Source,
+    [Parameter(Mandatory, ParameterSetName='User')]
+    [string] $Source,
+    [Parameter(ParameterSetName='User')]
     [string] $XboxRoot       = 'C:\XboxGames',
+    [Parameter(ParameterSetName='User')]
     [int]    $ObserveSeconds = 300,
-    [switch] $InternalSystemPhase
+    [Parameter(Mandatory, ParameterSetName='System')]
+    [string] $SystemArgsFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,9 +52,19 @@ $toolsDir   = Join-Path $PSScriptRoot 'tools'
 New-Item -ItemType Directory -Path $runsDir  -Force | Out-Null
 New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 
-$Source = (Resolve-Path -LiteralPath $Source).Path
+# If we're the SYSTEM child, load params from the JSON manifest and
+# fall through to the SYSTEM phase.
+if ($PSCmdlet.ParameterSetName -eq 'System') {
+    $argsObj        = Read-SystemArgs -Path $SystemArgsFile
+    $Source         = [string]$argsObj.Source
+    $XboxRoot       = [string]$argsObj.XboxRoot
+    $ObserveSeconds = [int]$argsObj.ObserveSeconds
+    $verdictStamp   = [string]$argsObj.VerdictStamp
+} else {
+    # Sanitise inputs in the user/parent branch.
+    $Source   = (Resolve-Path -LiteralPath $Source).Path
+    $XboxRoot = $XboxRoot.TrimEnd('\','/')
 
-if (-not $InternalSystemPhase) {
     Assert-Elevated -ScriptPath $scriptPath -ScriptArgs @(
         '-Source', "`"$Source`"",
         '-XboxRoot', "`"$XboxRoot`"",
@@ -84,25 +98,23 @@ if (-not $InternalSystemPhase) {
     $psexec = Ensure-PsExec -ToolsDir $toolsDir
     $stamp  = (Get-Date).ToString('yyyyMMdd-HHmmss')
     $sysLog = Join-Path $runsDir "receiver-overlay-system-$stamp.log"
+    $verdictPath = Join-Path $runsDir "receiver-overlay-verdict-$stamp.json"
 
     $code = Invoke-AsSystem -ScriptPath $scriptPath `
-        -ScriptArgs @(
-            '-Source', "`"$Source`"",
-            '-XboxRoot', "`"$XboxRoot`"",
-            '-ObserveSeconds', "$ObserveSeconds",
-            '-InternalSystemPhase'
-        ) `
+        -Params @{
+            Source         = $Source
+            XboxRoot       = $XboxRoot
+            ObserveSeconds = $ObserveSeconds
+            VerdictStamp   = $stamp
+        } `
         -LogPath $sysLog `
         -PsExecPath $psexec
 
     Write-Host ""
     Write-Host "SYSTEM phase exited with code $code" -ForegroundColor Cyan
 
-    $verdictGlob = Join-Path $runsDir 'receiver-overlay-verdict-*.json'
-    $latest = Get-ChildItem -Path $verdictGlob -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($latest) {
-        $v = Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json
+    if (Test-Path -LiteralPath $verdictPath) {
+        $v = Get-Content -LiteralPath $verdictPath -Raw | ConvertFrom-Json
         Write-Host ""
         Write-Host "=== VERDICT ===" -ForegroundColor Green
         Write-Host ("  Hypothesis:        {0}" -f $v.Hypothesis) -ForegroundColor Yellow
@@ -111,9 +123,21 @@ if (-not $InternalSystemPhase) {
         Write-Host ("  Final state:       Installed={0}  Status={1}" -f $v.FinalState.Installed, $v.FinalState.Status)
         Write-Host ("  NIC rx during obs: {0:N1} MB" -f $v.ObservedReceivedMB)
         Write-Host ("  Source bytes:      {0:N1} MB" -f ($v.SourceBytes/1MB))
-        Write-Host ("  Verdict file:      {0}" -f $latest.FullName)
+        Write-Host ("  Verdict file:      {0}" -f $verdictPath)
     } else {
-        Write-Host "No verdict file produced - check SYSTEM log: $sysLog" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "No verdict file produced for this run." -ForegroundColor Red
+        Write-Host "  Expected: $verdictPath" -ForegroundColor Red
+        Write-Host "  SYSTEM log: $sysLog" -ForegroundColor Red
+        if (Test-Path "$sysLog.err") {
+            $errSize = (Get-Item "$sysLog.err").Length
+            if ($errSize -gt 0) {
+                Write-Host "  Stderr ($errSize bytes):" -ForegroundColor Red
+                Get-Content -LiteralPath "$sysLog.err" -Tail 20 | ForEach-Object {
+                    Write-Host "    $_" -ForegroundColor DarkRed
+                }
+            }
+        }
     }
     exit $code
 }
@@ -192,7 +216,8 @@ if ($preDestFiles.Count -eq 0) {
 #   /R:1 /W:2 minimal retry
 #   NO /MIR   - preserve any state files Gaming Services may have placed
 #   /XF       exclude our own metadata file from the overlay
-$stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+if (-not $verdictStamp) { $verdictStamp = (Get-Date).ToString('yyyyMMdd-HHmmss') }
+$stamp = $verdictStamp
 $rcLog = Join-Path $runsDir "receiver-overlay-robocopy-$stamp.log"
 $rcArgs = @(
     "`"$Source`"", "`"$destGame`"", '/E','/COPY:DAT','/DCOPY:DAT',
