@@ -1,0 +1,20 @@
+﻿{
+    "StartedAtUtc":  "2026-05-17T19:13:59.6346529Z",
+    "SenderHost":  "DESKTOP-FHVD1S8",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "GameFolder":  "C:\\XboxGames\\Stardew Valley",
+    "GameName":  "Stardew Valley",
+    "Destination":  "G:\\stage\\Stardew Valley",
+    "PackageFamilyName":  "ConcernedApe.StardewValleyPC_0c8vynj4cqe4e",
+    "SourceFileCount":  3835,
+    "SourceBytes":  719596413,
+    "UnreadableFiles":  [
+                            "C:\\XboxGames\\Stardew Valley\\Content\\createdump.exe",
+                            "C:\\XboxGames\\Stardew Valley\\Content\\Stardew Valley.exe"
+                        ],
+    "SkippedFiles":  2,
+    "FilesCopied":  3833,
+    "BytesCopied":  719379997,
+    "RobocopyExit":  9,
+    "RobocopyLog":  "F:\\Documents\\GamesLocalShare\\PLANNING\\xbox-validation\\auto\\runs\\sender-robocopy-20260517-221141.log"
+}
