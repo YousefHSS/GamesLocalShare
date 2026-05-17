@@ -1,0 +1,14 @@
+﻿{
+    "StartedAtUtc":  "2026-05-17T16:40:29.5834843Z",
+    "Host":  "GELERZ",
+    "Source":  "E:\\stage\\Slay The Spire",
+    "Destination":  "C:\\XboxGames\\Slay The Spire",
+    "Mirror":  false,
+    "AllowExisting":  false,
+    "RobocopyExit":  1,
+    "Success":  true,
+    "DestBytes":  545545184,
+    "DestFileCount":  242,
+    "ContentAclSddl":  "O:BAG:SYD:(A;OICI;0x1200a9;;;SY)(XA;OICI;0x1200a9;;;BU;(WIN://SYSAPPID Contains \"HumbleBundle.SlayTheSpire_q2mcdwmzx4qja\"))(A;OICI;FR;;;BU)(XA;OICI;0x1200a9;;;BU;(WIN://SYSAPPID Contains \"HumbleBundle.SlayTheSpire_q2mcdwmzx4qja\"))(A;OICI;FR;;;BU)(A;OICI;0x1200a9;;;AC)(A;OICIID;FA;;;S-1-5-21-4002976177-2962401402-1312406969-1001)(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;WD)(A;OICIID;FA;;;SY)",
+    "LogPath":  "C:\\laragon\\www\\GamesLocalShare\\PLANNING\\xbox-validation\\runs\\deploy-20260517-194002.log"
+}

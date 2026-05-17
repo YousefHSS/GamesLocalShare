@@ -1,0 +1,105 @@
+﻿{
+    "StartedAtUtc":  "2026-05-17T18:12:15.3823797Z",
+    "Host":  "GELERZ",
+    "GameFolder":  "C:\\XboxGames\\Slay The Spire",
+    "PackageFamilyName":  "\u003cfrom baseline.json on PC A\u003e",
+    "InterfaceAlias":  "Wi-Fi",
+    "Steps":  [
+                  [
+                      "",
+                      {
+                          "Step":  "passive",
+                          "Description":  "Open the Xbox app and navigate to the game\u0027s library entry. Do NOT click Install or Repair. Just observe whether it shows up as Installed / has a Play button.",
+                          "StartedAtUtc":  "2026-05-17T16:41:47.0130536Z",
+                          "EndedAtUtc":  "2026-05-17T16:42:57.9336140Z",
+                          "ElapsedSeconds":  70.9,
+                          "ReceivedBytes":  10580008,
+                          "ReceivedMB":  10.09,
+                          "SentBytes":  1521364,
+                          "DiskDeltaBytes":  0,
+                          "BeforePackage":  {
+                                                "Installed":  false
+                                            },
+                          "AfterPackage":  {
+                                               "Installed":  false
+                                           },
+                          "ActionOutput":  "Xbox app launched (passive observation only).",
+                          "ActionError":  null,
+                          "PlayableAfter":  false,
+                          "Notes":  "i opened the xbox app but the game is not treated as installed on the device"
+                      }
+                  ],
+                  [
+                      "",
+                      {
+                          "Step":  "repair",
+                          "Description":  "In the Xbox app, open the game\u0027s options menu and choose \u0027Manage\u0027 \u003e \u0027Files\u0027 \u003e \u0027Verify and Repair\u0027 (wording varies). Let it run to completion.",
+                          "StartedAtUtc":  "2026-05-17T16:43:32.8394837Z",
+                          "EndedAtUtc":  "2026-05-17T18:07:36.5311254Z",
+                          "ElapsedSeconds":  5043.7,
+                          "ReceivedBytes":  7213440685,
+                          "ReceivedMB":  6879.27,
+                          "SentBytes":  384679901,
+                          "DiskDeltaBytes":  0,
+                          "BeforePackage":  {
+                                                "Installed":  false
+                                            },
+                          "AfterPackage":  {
+                                               "Installed":  false
+                                           },
+                          "ActionOutput":  "Operator-driven Xbox-app Repair.",
+                          "ActionError":  null,
+                          "PlayableAfter":  false,
+                          "Notes":  "it is not even detected"
+                      }
+                  ],
+                  [
+                      "",
+                      {
+                          "Step":  "register",
+                          "Description":  "Run Add-AppxPackage -Register against the deployed AppxManifest.xml\nManifest: C:\\XboxGames\\Slay The Spire\\Content\\AppxManifest.xml",
+                          "StartedAtUtc":  "2026-05-17T18:07:49.3986579Z",
+                          "EndedAtUtc":  "2026-05-17T18:08:20.8052762Z",
+                          "ElapsedSeconds":  31.4,
+                          "ReceivedBytes":  2375137,
+                          "ReceivedMB":  2.27,
+                          "SentBytes":  239404,
+                          "DiskDeltaBytes":  0,
+                          "BeforePackage":  {
+                                                "Installed":  false
+                                            },
+                          "AfterPackage":  {
+                                               "Installed":  false
+                                           },
+                          "ActionOutput":  null,
+                          "ActionError":  "Deployment failed with HRESULT: 0x80073CF9, Install failed. Please contact your software vendor. (Exception from HRESULT: 0x80073CF9)\nRejecting a request to register from AppxManifest.xml because the manifest is not in the package root.\n\nNOTE: For additional information, look for [ActivityId] b720d567-e61a-0002-1bb0-24b71ae6dc01 in the Event Log or use the command line Get-AppPackageLog -ActivityID b720d567-e61a-0002-1bb0-24b71ae6dc01\n",
+                          "PlayableAfter":  false,
+                          "Notes":  "Still not detected as installed"
+                      }
+                  ],
+                  [
+                      "",
+                      {
+                          "Step":  "install-fallback",
+                          "Description":  "In the Xbox app, click the \u0027Install\u0027 button on the game. Measure the actual bytes downloaded (compare against the baseline total size). If it pulls the full payload, that\u0027s the H3 worst-case.",
+                          "StartedAtUtc":  "2026-05-17T18:08:34.2301889Z",
+                          "EndedAtUtc":  "2026-05-17T18:11:49.4208244Z",
+                          "ElapsedSeconds":  195.2,
+                          "ReceivedBytes":  -7349272267,
+                          "ReceivedMB":  -7008.81,
+                          "SentBytes":  -395795679,
+                          "DiskDeltaBytes":  1110,
+                          "BeforePackage":  {
+                                                "Installed":  false
+                                            },
+                          "AfterPackage":  {
+                                               "Installed":  false
+                                           },
+                          "ActionOutput":  "Operator-driven Xbox-app Install.",
+                          "ActionError":  null,
+                          "PlayableAfter":  false,
+                          "Notes":  "It is stuck on preparing and 0%"
+                      }
+                  ]
+              ]
+}
