@@ -166,15 +166,73 @@ if ($preState.InstallLocation) {
     Write-Host ("[SYSTEM phase]              InstallLocation={0}" -f $preState.InstallLocation)
 }
 
+function Get-DestStats {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return @{ Files = 0; Bytes = 0 } }
+    $f = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+    return @{
+        Files = $f.Count
+        Bytes = ($f | Measure-Object -Sum Length).Sum
+    }
+}
+
+# Poll for file materialization - Gaming Services often takes 30-60s
+# after pressing Install before any bytes hit disk.
+Write-Host "[SYSTEM phase] Polling $destGame for in-progress install..."
+$pollStart   = Get-Date
+$pollTimeout = New-TimeSpan -Seconds 90
+$stats = Get-DestStats -Path $destGame
+while ($stats.Files -eq 0 -and ((Get-Date) - $pollStart) -lt $pollTimeout) {
+    Start-Sleep -Seconds 3
+    $stats = Get-DestStats -Path $destGame
+    $elapsed = [int]((Get-Date) - $pollStart).TotalSeconds
+    Write-Host ("[SYSTEM phase]   t+{0,2}s  files={1}  bytes={2:N0}" -f $elapsed, $stats.Files, $stats.Bytes)
+}
 $preDestFiles = @()
-$preDestBytes = 0
+$preDestBytes = $stats.Bytes
 if (Test-Path -LiteralPath $destGame) {
     $preDestFiles = @(Get-ChildItem -LiteralPath $destGame -Recurse -File -Force -ErrorAction SilentlyContinue)
-    $preDestBytes = ($preDestFiles | Measure-Object -Sum Length).Sum
 }
 Write-Host ("[SYSTEM phase] On disk pre-overlay: {0} files, {1:N1} MB" -f $preDestFiles.Count, ($preDestBytes/1MB))
 
 if ($preDestFiles.Count -eq 0) {
+    # Broad scan: look for any XboxGames\* folder modified in the last 15 min
+    Write-Host ""
+    Write-Host "[SYSTEM phase] Scanning all drives for recent XboxGames installs..." -ForegroundColor Yellow
+    $cutoff = (Get-Date).AddMinutes(-15)
+    $hits = @()
+    foreach ($d in (Get-PSDrive -PSProvider FileSystem)) {
+        $xg = Join-Path $d.Root 'XboxGames'
+        if (-not (Test-Path -LiteralPath $xg)) { continue }
+        Get-ChildItem -LiteralPath $xg -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $folder = $_.FullName
+            $lastWrite = $_.LastWriteTime
+            $files = @(Get-ChildItem -LiteralPath $folder -Recurse -File -Force -ErrorAction SilentlyContinue)
+            $recentFile = $files | Where-Object { $_.LastWriteTime -gt $cutoff } | Select-Object -First 1
+            $size = ($files | Measure-Object -Sum Length).Sum
+            if ($lastWrite -gt $cutoff -or $recentFile) {
+                $hits += [pscustomobject]@{
+                    Path        = $folder
+                    LastWrite   = $lastWrite
+                    Files       = $files.Count
+                    BytesGB     = [math]::Round($size/1GB, 2)
+                    HasRecentFile = [bool]$recentFile
+                }
+            }
+        }
+    }
+    if ($hits.Count -gt 0) {
+        Write-Host "[SYSTEM phase] Found these recent XboxGames folders:" -ForegroundColor Yellow
+        $hits | ForEach-Object {
+            Write-Host ("    {0}    LastWrite={1:HH:mm:ss}    Files={2}    {3:N2} GB    Recent={4}" -f `
+                $_.Path, $_.LastWrite, $_.Files, $_.BytesGB, $_.HasRecentFile) -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "    If one of those is your Silksong install, re-run with:" -ForegroundColor Yellow
+        Write-Host ("    -XboxRoot '<that drive>:\XboxGames'  (and possibly --GameName matching the actual folder name)") -ForegroundColor Yellow
+    } else {
+        Write-Host "[SYSTEM phase] No recent XboxGames\* folders found on any drive." -ForegroundColor Yellow
+    }
     Write-Host ""
     Write-Host "ABORTING: $destGame is empty after pause." -ForegroundColor Red
     Write-Host "" -ForegroundColor Red
