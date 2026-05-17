@@ -1,0 +1,118 @@
+﻿{
+    "StartedAtUtc":  "2026-05-17T19:23:12.5189337Z",
+    "ReceiverHost":  "GELERZ",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Source":  "E:\\stage\\Stardew Valley",
+    "Deploy":  "C:\\XboxGames\\Stardew Valley",
+    "GameName":  "Stardew Valley",
+    "PackageFamilyName":  "ConcernedApe.StardewValleyPC_0c8vynj4cqe4e",
+    "SourceBytes":  719596413,
+    "SourceFileCount":  3835,
+    "DeployedBytes":  719379997,
+    "DeployedFileCount":  3833,
+    "RobocopyExit":  1,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  611816838,
+                     "SentBytes":  23400764,
+                     "Time":  "\/Date(1779045608730)\/"
+                 },
+    "ObserveSeconds":  180,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  0.04,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  0.44,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  0.47,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  0.51,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  75,
+                        "ReceivedMB":  0.53,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  90,
+                        "ReceivedMB":  0.58,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  105,
+                        "ReceivedMB":  0.61,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  120,
+                        "ReceivedMB":  0.69,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  135,
+                        "ReceivedMB":  5.97,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  150,
+                        "ReceivedMB":  7.95,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  165,
+                        "ReceivedMB":  7.98,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  180,
+                        "ReceivedMB":  8.08,
+                        "PackageInstalled":  false,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalDelta":  {
+                       "ReceivedBytes":  8471115,
+                       "SentBytes":  1219671,
+                       "ReceivedMB":  8.08,
+                       "CounterWrapped":  false
+                   },
+    "PackageRegistered":  false,
+    "PackageInstallLoc":  null,
+    "PackageStatus":  null,
+    "ObservedReceivedMB":  8.08,
+    "Hypothesis":  "NOT_DETECTED"
+}
