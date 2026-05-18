@@ -389,8 +389,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var loadedCount = 0;
         var tasks = games.Select(async game =>
         {
-            await _steamScanner.LoadCoverImageAsync(game);
-            
+            var scanner = _scanners.FirstOrDefault(s => s.Platform == game.Platform);
+            if (scanner != null)
+            {
+                await scanner.LoadCoverImageAsync(game);
+            }
+
             // Increment counter (note: this is not thread-safe but close enough for display purposes)
             Interlocked.Increment(ref loadedCount);
             

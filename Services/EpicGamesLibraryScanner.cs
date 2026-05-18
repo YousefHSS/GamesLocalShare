@@ -11,7 +11,7 @@ namespace GamesLocalShare.Services;
 public class EpicGamesLibraryScanner : IGameLibraryScanner
 {
     private readonly List<string> _scanErrors = [];
-    private readonly EpicCoverArtService _coverArt = new();
+    private readonly TitleCoverArtService _coverArt = new();
 
     public GamePlatform Platform => GamePlatform.EpicGames;
 

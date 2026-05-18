@@ -1,10 +1,14 @@
 import { useAppState } from '../../store';
+import { useState } from 'react';
 import { sendCommand } from '../../bridge';
+import { useAppState } from '../../store';
+import XboxTransferModal from '../XboxTransferModal';
 
 export default function MyGamesPanel() {
   const localGames = useAppState((state) => state.localGames);
   const selectedLocalGame = useAppState((state) => state.selectedLocalGame);
   const isScanning = useAppState((state) => state.isScanning);
+  const [showTransferModal, setShowTransferModal] = useState(false);
 
   console.log('[DEBUG] MyGamesPanel render, localGames:', localGames);
   console.log('[DEBUG] MyGamesPanel render, localGames count:', localGames.length);
@@ -54,25 +58,19 @@ export default function MyGamesPanel() {
               >
                 <div className="flex gap-2 items-start">
                   <div className="w-12 h-16 bg-dark-item rounded flex-shrink-0 flex overflow-hidden items-center justify-center text-xl">
-                    {false ? (
+                    {game.coverUrl ? (
                       <img 
-                        src={`https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appId}/library_600x900.jpg`} 
+                        src={game.coverUrl} 
                         alt={`${game.name} cover`}
                         className="w-full h-full object-cover"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
-                          // Fallback to header format if library cover fails
-                          if (target.src.includes('library_600x900')) {
-                            target.src = `https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appId}/header.jpg`;
-                          } else {
-                            // If all fails, remove image to show fallback icon
-                            target.style.display = 'none';
-                            const parent = target.parentElement;
-                            if (parent) {
-                              const icon = document.createElement('span');
-                              icon.innerText = '🎮';
-                              parent.appendChild(icon);
-                            }
+                          target.style.display = 'none';
+                          const parent = target.parentElement;
+                          if (parent) {
+                            const icon = document.createElement('span');
+                            icon.innerText = '🎮';
+                            parent.appendChild(icon);
                           }
                         }}
                       />
@@ -93,12 +91,21 @@ export default function MyGamesPanel() {
                       <span>{game.formattedSize}</span>
                     </div>
                   </div>
+                  {selectedLocalGame?.appId === game.appId && (
+                    <button
+                      className="ml-auto bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs transition"
+                      onClick={(e) => { e.stopPropagation(); setShowTransferModal(true); }}
+                    >
+                      Transfer to Xbox
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+      {showTransferModal && <XboxTransferModal onClose={() => setShowTransferModal(false)} />}
     </div>
   );
 }

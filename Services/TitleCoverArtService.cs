@@ -12,7 +12,7 @@ namespace GamesLocalShare.Services;
 /// storefront GraphQL endpoint (anonymous). Results are cached on disk so we
 /// only hit the network once per title.
 /// </summary>
-public class EpicCoverArtService
+public class TitleCoverArtService
 {
     private static readonly HttpClient _http = CreateClient();
 
@@ -27,7 +27,7 @@ public class EpicCoverArtService
 
     private static readonly string CacheDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "GamesLocalShare", "EpicCovers");
+        "GamesLocalShare", "TitleCovers");
 
     // Epic's own storefront GraphQL is behind Cloudflare and rejects anonymous
     // requests (HTTP 403). egdata.app mirrors the public Epic catalog and is
@@ -96,6 +96,40 @@ public class EpicCoverArtService
 
     private static async Task<string?> ResolveImageUrlAsync(string title)
     {
+        // 1. Try Steam storefront first as it has standardized library images
+        var steamEndpoint = $"https://store.steampowered.com/api/storesearch/?term={Uri.EscapeDataString(title)}&l=english&cc=US";
+        try
+        {
+            using var steamResp = await _http.GetAsync(steamEndpoint);
+            if (steamResp.IsSuccessStatusCode)
+            {
+                using var steamStream = await steamResp.Content.ReadAsStreamAsync();
+                using var steamDoc = await JsonDocument.ParseAsync(steamStream);
+                if (steamDoc.RootElement.TryGetProperty("items", out var items) && items.GetArrayLength() > 0)
+                {
+                    // Look for exact match first
+                    foreach (var item in items.EnumerateArray())
+                    {
+                        if (item.TryGetProperty("name", out var n) && string.Equals(n.GetString(), title, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (item.TryGetProperty("id", out var id))
+                            {
+                                return $"https://cdn.cloudflare.steamstatic.com/steam/apps/{id.GetInt32()}/library_600x900.jpg";
+                            }
+                        }
+                    }
+
+                    // Fall back to first match
+                    if (items[0].TryGetProperty("id", out var firstId))
+                    {
+                        return $"https://cdn.cloudflare.steamstatic.com/steam/apps/{firstId.GetInt32()}/library_600x900.jpg";
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // 2. Fallback to Epic Games data
         var endpoint = $"{EgDataSearchEndpoint}?query={Uri.EscapeDataString(title)}";
         using var resp = await _http.GetAsync(endpoint);
         if (!resp.IsSuccessStatusCode)

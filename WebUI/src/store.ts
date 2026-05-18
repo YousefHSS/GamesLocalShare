@@ -101,6 +101,28 @@ export interface ExternalLibrary {
   scanSubfolders: boolean;
 }
 
+export type XboxTransferStep = 'SelectGame' | 'SelectDestination' | 'ValidatingSource' | 'CopyingFiles' | 'SelectSource' | 'WaitingForInstallPause' | 'PollingForFolder' | 'Overlaying' | 'ResettingAcls' | 'WaitingForResume' | 'Monitoring' | 'Complete' | 'Failed';
+
+export type XboxTransferVerdict = 'Pending' | 'FullSkip' | 'DeltaOnly' | 'FullRedownload' | 'StillPaused' | 'Error';
+
+export interface XboxTransferState {
+  currentStep: XboxTransferStep;
+  gameName: string;
+  packageFamilyName: string;
+  contentGuid: string;
+  sourcePath: string;
+  destinationPath: string;
+  sourceBytes: number;
+  sourceFileCount: number;
+  overlayProgress: number;
+  statusMessage: string;
+  networkReceivedMB: number;
+  packageInstalled: boolean;
+  packageStatus: string;
+  verdict: XboxTransferVerdict;
+  errorMessage?: string;
+}
+
 export interface CrossLocationGame {
   deviceCopy: GameInfo | null;
   externalCopy: GameInfo | null;
@@ -162,6 +184,12 @@ export interface AppState {
   externalLibraries: ExternalLibrary[];
   crossLocationGames: CrossLocationGame[];
 
+  // Xbox transfers
+  xboxTransfer: XboxTransferState | null;
+  xboxStage: XboxTransferState | null;
+  isXboxTransferActive: boolean;
+  isXboxStageActive: boolean;
+
   // Actions
   updateState: (patch: Partial<AppState>) => void;
   reset: () => void;
@@ -211,6 +239,11 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   drives: [],
   externalLibraries: [],
   crossLocationGames: [],
+
+  xboxTransfer: null,
+  xboxStage: null,
+  isXboxTransferActive: false,
+  isXboxStageActive: false,
 };
 
 export const useAppState = create<AppState>((set) => ({
@@ -255,3 +288,4 @@ declare global {
 (window as any).__updateState = (patch: Partial<AppState>) => {
   useAppState.setState(patch);
 };
+

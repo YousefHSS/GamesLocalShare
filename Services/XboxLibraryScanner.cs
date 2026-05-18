@@ -15,6 +15,7 @@ namespace GamesLocalShare.Services;
 public class XboxLibraryScanner : IGameLibraryScanner
 {
     private readonly List<string> _scanErrors = [];
+    private readonly TitleCoverArtService _coverArt = new();
 
     public GamePlatform Platform => GamePlatform.Xbox;
     public IReadOnlyList<string> ScanErrors => _scanErrors;
@@ -49,7 +50,10 @@ public class XboxLibraryScanner : IGameLibraryScanner
                 {
                     var game = TryParseXboxGame(dir);
                     if (game != null)
+                    {
                         games.Add(game);
+                        _ = LoadCoverImageAsync(game);
+                    }
                 }
             }
             catch (UnauthorizedAccessException ex)
@@ -78,9 +82,8 @@ public class XboxLibraryScanner : IGameLibraryScanner
 
     public Task LoadCoverImageAsync(GameInfo game)
     {
-        // Xbox cover art would need the Microsoft Store API or local cache.
-        // For now, no-op. Can be extended later.
-        return Task.CompletedTask;
+        // Try fetching online cover art by title matching using the Epic storefront catalog
+        return _coverArt.LoadAsync(game);
     }
 
     /// <summary>
@@ -98,8 +101,33 @@ public class XboxLibraryScanner : IGameLibraryScanner
                 if (!drive.IsReady)
                     continue;
 
+                // Check .GamingRoot file created by Xbox app
+                var gamingRootPath = Path.Combine(drive.RootDirectory.FullName, ".GamingRoot");
+                if (File.Exists(gamingRootPath))
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(gamingRootPath);
+                        // Magic bytes: 'R' (0x52), 'G' (0x47), 'B' (0x42), 'X' (0x58)
+                        if (bytes.Length >= 10 && bytes[0] == 0x52 && bytes[1] == 0x47 && bytes[2] == 0x42 && bytes[3] == 0x58)
+                        {
+                            var folderName = System.Text.Encoding.Unicode.GetString(bytes, 8, bytes.Length - 8).TrimEnd('\0');
+                            if (!string.IsNullOrWhiteSpace(folderName))
+                            {
+                                var customXboxPath = Path.Combine(drive.RootDirectory.FullName, folderName);
+                                if (Directory.Exists(customXboxPath))
+                                {
+                                    roots.Add(customXboxPath);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                // Fallback to default XboxGames
                 var xboxPath = Path.Combine(drive.RootDirectory.FullName, "XboxGames");
-                if (Directory.Exists(xboxPath))
+                if (Directory.Exists(xboxPath) && !roots.Contains(xboxPath))
                     roots.Add(xboxPath);
             }
         }
