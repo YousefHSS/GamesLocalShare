@@ -189,7 +189,7 @@ function Find-Destination {
     return $candidates
 }
 
-$initialCandidates = Find-Destination -GameName $gameName -ContentGuid $contentGuid
+$initialCandidates = @(Find-Destination -GameName $gameName -ContentGuid $contentGuid)
 Write-Host ("[SYSTEM phase] Candidates pre-poll: {0}" -f ($initialCandidates -join '; '))
 
 # Default deploy path; will be overridden if we find a GUID folder
@@ -227,7 +227,7 @@ $stats = Get-DestStats -Path $destGame
 while ($stats.Files -eq 0 -and ((Get-Date) - $pollStart) -lt $pollTimeout) {
     Start-Sleep -Seconds 3
     # Re-search every poll - the GUID folder may appear mid-wait.
-    $cands = Find-Destination -GameName $gameName -ContentGuid $contentGuid
+    $cands = @(Find-Destination -GameName $gameName -ContentGuid $contentGuid)
     if ($cands.Count -gt 0 -and $cands[0] -ne $destGame) {
         Write-Host ("[SYSTEM phase]   discovered candidate: {0}" -f $cands[0]) -ForegroundColor Cyan
         $destGame = $cands[0]
@@ -344,6 +344,13 @@ Write-Host "[SYSTEM phase] Overlay robocopy starting..."
 $proc = Start-Process -FilePath 'robocopy.exe' -ArgumentList $rcArgs -NoNewWindow -PassThru -Wait
 $rcExit = $proc.ExitCode
 Write-Host "[SYSTEM phase] Overlay robocopy exit: $rcExit"
+
+# Reset ACLs so files inherit from the parent folder. Without this, the AppX
+# deployment engine cannot read our overlaid files during MRTDataPopulated,
+# causing 0x80070005 (ACCESS_DENIED).
+Write-Host "[SYSTEM phase] Resetting ACLs (icacls /reset /T)..."
+$icaclsProc = Start-Process -FilePath 'icacls.exe' -ArgumentList @("`"$destGame`"", '/reset', '/T', '/Q', '/C') -NoNewWindow -PassThru -Wait
+Write-Host "[SYSTEM phase] icacls exit: $($icaclsProc.ExitCode)"
 
 # Snapshot state AFTER overlay
 $postState = Get-XboxPackageState -PackageFamilyName $pfn

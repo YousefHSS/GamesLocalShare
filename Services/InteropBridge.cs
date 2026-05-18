@@ -212,6 +212,10 @@ public class InteropBridge : IDisposable
             // External drives
             drives = _viewModel.Drives.ToList(),
             crossLocationGames = _viewModel.CrossLocationGames.ToList(),
+
+            // Xbox transfer
+            xboxTransfer = _viewModel.XboxTransfer,
+            isXboxTransferActive = _viewModel.IsXboxTransferActive,
             externalLibraries = _viewModel.Settings.ExternalLibraries.Select(lib => new
             {
                 id = lib.Id.ToString(),
@@ -588,6 +592,52 @@ public class InteropBridge : IDisposable
                         await _viewModel.StartLocalCopyAsync(copyAppId, copyLibGuid, overrideDir);
                     }
                     break;
+
+                // Xbox transfer commands (receiver + sender)
+                case "StartXboxTransfer":
+                    if (payload?.TryGetProperty("sourcePath", out var xboxSourceEl) == true)
+                    {
+                        var sourcePath = xboxSourceEl.GetString() ?? "";
+                        if (_viewModel.StartXboxTransferCommand.CanExecute(sourcePath))
+                            await _viewModel.StartXboxTransferCommand.ExecuteAsync(sourcePath);
+                    }
+                    break;
+
+                case "CancelXboxTransfer":
+                    if (_viewModel.CancelXboxTransferCommand.CanExecute(null))
+                        _viewModel.CancelXboxTransferCommand.Execute(null);
+                    break;
+
+                case "BrowseXboxSource":
+                    await HandleBrowseXboxSourceAsync();
+                    break;
+
+                case "StartXboxStage":
+                    if (payload?.TryGetProperty("sourcePath", out var stageSourceEl) == true)
+                    {
+                        var sourcePath = stageSourceEl.GetString() ?? "";
+                        if (_viewModel.StartXboxStageCommand.CanExecute(sourcePath))
+                            await _viewModel.StartXboxStageCommand.ExecuteAsync(sourcePath);
+                    }
+                    break;
+
+                case "CompleteXboxStage":
+                    if (payload?.TryGetProperty("destinationPath", out var stageDestEl) == true)
+                    {
+                        var destPath = stageDestEl.GetString() ?? "";
+                        if (_viewModel.CompleteXboxStageCommand.CanExecute(destPath))
+                            await _viewModel.CompleteXboxStageCommand.ExecuteAsync(destPath);
+                    }
+                    break;
+
+                case "CancelXboxStage":
+                    if (_viewModel.CancelXboxStageCommand.CanExecute(null))
+                        _viewModel.CancelXboxStageCommand.Execute(null);
+                    break;
+
+                case "BrowseXboxDestination":
+                    await HandleBrowseXboxDestinationAsync();
+                    break;
             }
         }
         catch (Exception ex)
@@ -595,6 +645,46 @@ public class InteropBridge : IDisposable
             System.Diagnostics.Debug.WriteLine($"Command execution error: {ex}");
             try { _viewModel.AddLogPublic($"Command '{cmd}' failed: {ex.Message}", LogMessageType.Error); }
             catch { }
+        }
+    }
+
+    private async Task HandleBrowseXboxSourceAsync()
+    {
+        if (_webView == null) return;
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select Xbox staged game folder (must contain transfer-summary.json)",
+            AllowMultiple = false
+        });
+
+        if (result.Count > 0)
+        {
+            var path = result[0].Path.LocalPath;
+            var json = JsonSerializer.Serialize(new { xboxSourcePath = path }, JsonOptions);
+            await ExecuteJavaScriptAsync($"window.__updateState({json});");
+        }
+    }
+
+    private async Task HandleBrowseXboxDestinationAsync()
+    {
+        if (_webView == null) return;
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select destination folder for Xbox staged game (USB/shared drive)",
+            AllowMultiple = false
+        });
+
+        if (result.Count > 0)
+        {
+            var path = result[0].Path.LocalPath;
+            var json = JsonSerializer.Serialize(new { xboxDestinationPath = path }, JsonOptions);
+            await ExecuteJavaScriptAsync($"window.__updateState({json});");
         }
     }
 

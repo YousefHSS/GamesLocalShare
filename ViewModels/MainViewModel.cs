@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.IO;
 using Avalonia;
 using Avalonia.Controls;
@@ -17,12 +17,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly List<IGameLibraryScanner> _scanners;
     private readonly NetworkDiscoveryService _networkService;
     private readonly FileTransferService _fileTransferService;
+    private readonly XboxTransferService _xboxTransferService;
+    private readonly XboxSenderService _xboxSenderService;
     private readonly AppSettings _settings;
     private readonly DriveDetectionService _driveDetectionService;
     private readonly ExternalFolderScanner _externalScanner;
     private DateTime _lastProgressUpdate = DateTime.MinValue;
     private System.Timers.Timer? _autoUpdateTimer;
     private const int MaxLogMessages = 100;
+
+    [ObservableProperty]
+    private XboxTransferState? _xboxTransfer;
+
+    [ObservableProperty]
+    private bool _isXboxTransferActive;
 
     [ObservableProperty]
     private string _statusMessage = "Ready";
@@ -142,9 +150,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _steamScanner = new SteamLibraryScanner();
         _settings = AppSettings.Load();
         _externalScanner = new ExternalFolderScanner(_settings);
-        _scanners = new List<IGameLibraryScanner> { _steamScanner, new EpicGamesLibraryScanner(), _externalScanner };
+        _scanners = new List<IGameLibraryScanner> { _steamScanner, new EpicGamesLibraryScanner(), new XboxLibraryScanner(), _externalScanner };
         _networkService = new NetworkDiscoveryService();
         _fileTransferService = new FileTransferService();
+        _xboxTransferService = new XboxTransferService();
+        _xboxSenderService = new XboxSenderService();
 
         // Initialize drive detection
         _driveDetectionService = new DriveDetectionService();
@@ -2423,6 +2433,161 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentTransferProgress = 0;
             CurrentTransferFile = string.Empty;
         }
+    }
+
+
+    // ===== Xbox Transfer Wizard =====
+
+
+    // ===== Xbox Sender Commands =====
+
+    [RelayCommand]
+    private async Task StartXboxStageAsync(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            AddLog("Xbox staging: no source path provided", LogMessageType.Error);
+            return;
+        }
+
+        _xboxSenderService.Reset();
+        var error = _xboxSenderService.ValidateSource(sourcePath);
+        if (error != null)
+        {
+            AddLog($"Xbox staging validation failed: {error}", LogMessageType.Error);
+            LastError = error;
+            return;
+        }
+
+        IsXboxTransferActive = true;
+        XboxTransfer = _xboxSenderService.State;
+        _xboxSenderService.StateChanged += OnXboxTransferStateChanged;
+        _xboxSenderService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+
+        AddLog($"Xbox staging: {_xboxSenderService.State.GameName} ({_xboxSenderService.State.SourceBytes / 1024 / 1024} MB, {_xboxSenderService.State.SourceFileCount} files)", LogMessageType.Info);
+
+        // Prompt user for destination
+        StatusMessage = "Xbox staging: Select destination folder (USB/shared drive)...";
+    }
+
+    [RelayCommand]
+    private async Task CompleteXboxStageAsync(string destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            AddLog("Xbox staging: no destination provided", LogMessageType.Error);
+            return;
+        }
+
+        try
+        {
+            await _xboxSenderService.StageAsync(destinationPath);
+            if (_xboxSenderService.State.CurrentStep == XboxTransferStep.Complete)
+            {
+                AddLog($"Xbox staging complete: {_xboxSenderService.State.DestinationPath}", LogMessageType.Info);
+                StatusMessage = $"Xbox staging complete: {_xboxSenderService.State.GameName}";
+                await ScanLocalGamesAsync();
+            }
+            else
+            {
+                LastError = _xboxSenderService.State.ErrorMessage ?? "Staging failed";
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Xbox staging error: {ex.Message}", LogMessageType.Error);
+            LastError = ex.Message;
+        }
+        finally
+        {
+            IsXboxTransferActive = false;
+            _xboxSenderService.StateChanged -= OnXboxTransferStateChanged;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelXboxStage()
+    {
+        _xboxSenderService.Cancel();
+        IsXboxTransferActive = false;
+        StatusMessage = "Xbox staging cancelled";
+        AddLog("Xbox staging cancelled by user", LogMessageType.Warning);
+    }
+
+    [RelayCommand]
+    private async Task StartXboxTransferAsync(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            AddLog("Xbox transfer: no source path provided", LogMessageType.Error);
+            return;
+        }
+
+        _xboxTransferService.Reset();
+        var error = _xboxTransferService.ValidateSource(sourcePath);
+        if (error != null)
+        {
+            AddLog($"Xbox transfer validation failed: {error}", LogMessageType.Error);
+            LastError = error;
+            return;
+        }
+
+        IsXboxTransferActive = true;
+        XboxTransfer = _xboxTransferService.State;
+        _xboxTransferService.StateChanged += OnXboxTransferStateChanged;
+        _xboxTransferService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+
+        AddLog($"Xbox transfer started: {_xboxTransferService.State.GameName} ({_xboxTransferService.State.SourceBytes / 1024 / 1024} MB)", LogMessageType.Info);
+        StatusMessage = $"Xbox transfer: {_xboxTransferService.State.GameName}";
+
+        try
+        {
+            var verdict = await _xboxTransferService.RunOverlayAsync();
+            switch (verdict)
+            {
+                case XboxTransferVerdict.FullSkip:
+                    AddLog($"Xbox transfer SUCCESS: {_xboxTransferService.State.GameName} installed with only {_xboxTransferService.State.NetworkReceivedMB:N1} MB downloaded!", LogMessageType.Info);
+                    StatusMessage = $"Xbox transfer complete - {_xboxTransferService.State.GameName} installed!";
+                    break;
+                case XboxTransferVerdict.DeltaOnly:
+                    AddLog($"Xbox transfer partial success: {_xboxTransferService.State.NetworkReceivedMB:N1} MB downloaded (delta only)", LogMessageType.Warning);
+                    StatusMessage = $"Xbox transfer done - some data re-downloaded ({_xboxTransferService.State.NetworkReceivedMB:N1} MB)";
+                    break;
+                default:
+                    AddLog($"Xbox transfer result: {verdict} (rx={_xboxTransferService.State.NetworkReceivedMB:N1} MB)", LogMessageType.Warning);
+                    StatusMessage = $"Xbox transfer: {verdict}";
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Xbox transfer error: {ex.Message}", LogMessageType.Error);
+            LastError = ex.Message;
+        }
+        finally
+        {
+            IsXboxTransferActive = false;
+            _xboxTransferService.StateChanged -= OnXboxTransferStateChanged;
+            await ScanLocalGamesAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void CancelXboxTransfer()
+    {
+        _xboxTransferService.Cancel();
+        IsXboxTransferActive = false;
+        StatusMessage = "Xbox transfer cancelled";
+        AddLog("Xbox transfer cancelled by user", LogMessageType.Warning);
+    }
+
+    private void OnXboxTransferStateChanged(object? sender, XboxTransferState state)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            XboxTransfer = state;
+            StatusMessage = $"Xbox: {state.StatusMessage}";
+        });
     }
 
     public void Dispose()

@@ -73,6 +73,12 @@ public class AppSettings
     public string? EpicInstallRoot { get; set; }
 
     /// <summary>
+    /// Default path for Xbox game staged transfers (where sender output is stored).
+    /// Used by the Xbox transfer wizard as the default browse location.
+    /// </summary>
+    public string? XboxStagePath { get; set; }
+
+    /// <summary>
     /// List of external drive libraries to scan for games
     /// </summary>
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];

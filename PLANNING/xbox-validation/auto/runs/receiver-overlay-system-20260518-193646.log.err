@@ -1,0 +1,4 @@
+Connecting to local system...Starting PSEXESVC service on local system...Copying authentication key to GELERZ...Connecting with PsExec service on GELERZ...Starting powershell.exe on GELERZ...
+C:\XboxGames\807C7D6A-409F-48BE-8190-30B09BAF7CD4\Content\Hollow Knight Silksong.exe: Access is denied.
+C:\XboxGames\807C7D6A-409F-48BE-8190-30B09BAF7CD4\Content\UnityCrashHandler64.exe: Access is denied.
+powershell.exe exited on GELERZ with error code 0.

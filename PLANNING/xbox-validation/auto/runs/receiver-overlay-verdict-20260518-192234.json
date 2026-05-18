@@ -1,0 +1,203 @@
+﻿{
+    "StartedAtUtc":  "2026-05-18T16:32:24.9310731Z",
+    "ReceiverHost":  "GELERZ",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "E:\\stage\\Hollow Knight- Silksong",
+    "Deploy":  "C:\\XboxGames\\807C7D6A-409F-48BE-8190-30B09BAF7CD4",
+    "GameName":  "Hollow Knight- Silksong",
+    "PackageFamilyName":  "TeamCherry.HollowKnightSilksong_y4jvztpgccj42",
+    "SourceBytes":  8274932854,
+    "SourceFileCount":  2286,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  384,
+    "PreOverlayBytes":  362640212,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  2286,
+    "PostOverlayBytes":  8274932898,
+    "RobocopyExit":  3,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  532053669,
+                     "SentBytes":  36515662,
+                     "Time":  "\/Date(1779121640625)\/"
+                 },
+    "ObserveSeconds":  300,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  0.05,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  2,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  42.63,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  90.67,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  75,
+                        "ReceivedMB":  90.85,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  90,
+                        "ReceivedMB":  90.88,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  105,
+                        "ReceivedMB":  90.92,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  120,
+                        "ReceivedMB":  91.03,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  135,
+                        "ReceivedMB":  91.07,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  150,
+                        "ReceivedMB":  91.15,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  165,
+                        "ReceivedMB":  91.24,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  180,
+                        "ReceivedMB":  91.4,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  195,
+                        "ReceivedMB":  91.47,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  210,
+                        "ReceivedMB":  91.56,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  225,
+                        "ReceivedMB":  91.6,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  240,
+                        "ReceivedMB":  91.75,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  255,
+                        "ReceivedMB":  91.82,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  270,
+                        "ReceivedMB":  91.85,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  285,
+                        "ReceivedMB":  91.86,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  300,
+                        "ReceivedMB":  91.96,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "Installed":  false
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  96422640,
+                       "SentBytes":  8030392,
+                       "ReceivedMB":  91.96,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  91.96,
+    "Hypothesis":  "PARTIAL_PROGRESS"
+}

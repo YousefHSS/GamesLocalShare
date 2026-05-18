@@ -1,0 +1,79 @@
+﻿{
+    "StartedAtUtc":  "2026-05-18T16:07:11.1826712Z",
+    "ReceiverHost":  "GELERZ",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "E:\\stage\\Hollow Knight- Silksong",
+    "Deploy":  "C:\\XboxGames\\807C7D6A-409F-48BE-8190-30B09BAF7CD4",
+    "GameName":  "Hollow Knight- Silksong",
+    "PackageFamilyName":  "TeamCherry.HollowKnightSilksong_y4jvztpgccj42",
+    "SourceBytes":  8274932854,
+    "SourceFileCount":  2286,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  42,
+    "PreOverlayBytes":  101354584,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  2286,
+    "PostOverlayBytes":  8274932854,
+    "RobocopyExit":  3,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  137530898,
+                     "SentBytes":  15403102,
+                     "Time":  "\/Date(1779120370041)\/"
+                 },
+    "ObserveSeconds":  300,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  0.12,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  0.69,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\TeamCherry.HollowKnightSilksong_1.0.30000.0_x64__y4jvztpgccj42",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  0.73,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\TeamCherry.HollowKnightSilksong_1.0.30000.0_x64__y4jvztpgccj42",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  0.78,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\TeamCherry.HollowKnightSilksong_1.0.30000.0_x64__y4jvztpgccj42",
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "SignatureKind":  "Store",
+                       "Status":  "Ok",
+                       "InstallLocation":  "C:\\Program Files\\WindowsApps\\TeamCherry.HollowKnightSilksong_1.0.30000.0_x64__y4jvztpgccj42",
+                       "PackageFullName":  "TeamCherry.HollowKnightSilksong_1.0.30000.0_x64__y4jvztpgccj42",
+                       "Installed":  true
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  827199,
+                       "SentBytes":  161352,
+                       "ReceivedMB":  0.79,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  0.79,
+    "Hypothesis":  "H1_FULL_SKIP"
+}
