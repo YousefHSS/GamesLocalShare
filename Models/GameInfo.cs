@@ -70,6 +70,12 @@ public class GameInfo : INotifyPropertyChanged
     public bool IsExternal { get; set; } = false;
 
     /// <summary>
+    /// Whether this Xbox game uses the MSIXVC package layout and supports overlay transfer.
+    /// Only meaningful for Xbox platform games. Populated by XboxLibraryScanner.
+    /// </summary>
+    public bool IsOverlaySupported { get; set; } = false;
+
+    /// <summary>
     /// Whether this game is hidden from peers (not shared on network)
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]

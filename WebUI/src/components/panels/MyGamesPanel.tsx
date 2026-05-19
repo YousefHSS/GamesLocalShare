@@ -1,7 +1,6 @@
-import { useAppState } from '../../store';
 import { useState } from 'react';
-import { sendCommand } from '../../bridge';
 import { useAppState } from '../../store';
+import { sendCommand } from '../../bridge';
 import XboxTransferModal from '../XboxTransferModal';
 
 export default function MyGamesPanel() {
@@ -91,12 +90,12 @@ export default function MyGamesPanel() {
                       <span>{game.formattedSize}</span>
                     </div>
                   </div>
-                  {selectedLocalGame?.appId === game.appId && (
+                  {selectedLocalGame?.appId === game.appId && game.platform === 'Xbox' && (
                     <button
                       className="ml-auto bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs transition"
                       onClick={(e) => { e.stopPropagation(); setShowTransferModal(true); }}
                     >
-                      Transfer to Xbox
+                      {game.isOverlaySupported ? 'Share via Xbox Overlay' : 'Xbox Transfer'}
                     </button>
                   )}
                 </div>

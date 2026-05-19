@@ -19,6 +19,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly FileTransferService _fileTransferService;
     private readonly XboxTransferService _xboxTransferService;
     private readonly XboxSenderService _xboxSenderService;
+    private readonly XboxNetworkSender _xboxNetworkSender;
     private readonly AppSettings _settings;
     private readonly DriveDetectionService _driveDetectionService;
     private readonly ExternalFolderScanner _externalScanner;
@@ -31,6 +32,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _isXboxTransferActive;
+
+    [ObservableProperty]
+    private ObservableCollection<GameInfo> _xboxOverlayGames = new();
 
     [ObservableProperty]
     private string _statusMessage = "Ready";
@@ -155,6 +159,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _fileTransferService = new FileTransferService();
         _xboxTransferService = new XboxTransferService();
         _xboxSenderService = new XboxSenderService();
+        _xboxNetworkSender = new XboxNetworkSender();
 
         // Initialize drive detection
         _driveDetectionService = new DriveDetectionService();
@@ -314,11 +319,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 LocalGames.Clear();
+                XboxOverlayGames.Clear();
                 foreach (var game in games)
                 {
                     // Apply hidden status from settings
                     game.IsHidden = _settings.IsGameHidden(game.AppId);
                     LocalGames.Add(game);
+                    if (game.Platform == GamePlatform.Xbox && game.IsOverlaySupported)
+                    {
+                        XboxOverlayGames.Add(game);
+                    }
                 }
             });
 
@@ -2485,7 +2495,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            await _xboxSenderService.StageAsync(destinationPath);
+            await _xboxSenderService.StageToFolderAsync(destinationPath);
             if (_xboxSenderService.State.CurrentStep == XboxTransferStep.Complete)
             {
                 AddLog($"Xbox staging complete: {_xboxSenderService.State.DestinationPath}", LogMessageType.Info);
@@ -2507,6 +2517,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
             IsXboxTransferActive = false;
             _xboxSenderService.StateChanged -= OnXboxTransferStateChanged;
         }
+    }
+
+    [RelayCommand]
+    private async Task PrepareXboxNetworkAsync(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            AddLog("Xbox network prep: no source path provided", LogMessageType.Error);
+            return;
+        }
+
+        _xboxSenderService.Reset();
+        var error = _xboxSenderService.ValidateSource(sourcePath);
+        if (error != null)
+        {
+            AddLog($"Xbox network prep validation failed: {error}", LogMessageType.Error);
+            LastError = error;
+            return;
+        }
+
+        try
+        {
+            var manifest = await _xboxSenderService.PrepareForNetworkAsync();
+            _xboxNetworkSender.SetManifest(manifest);
+            _xboxNetworkSender.Start();
+            AddLog($"Xbox network sender ready on port {_xboxNetworkSender.Port}: {manifest.TotalFiles} files, {manifest.TotalBytes / 1024 / 1024} MB", LogMessageType.Info);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Xbox network prep error: {ex.Message}", LogMessageType.Error);
+            LastError = ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private void StopXboxNetwork()
+    {
+        _xboxNetworkSender.Stop();
+        AddLog("Xbox network sender stopped", LogMessageType.Info);
     }
 
     [RelayCommand]
@@ -2577,6 +2626,57 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private async Task StartXboxNetworkTransferAsync((string peerHost, int peerPort, string gameAppId) args)
+    {
+        var (peerHost, peerPort, gameAppId) = args;
+        if (string.IsNullOrWhiteSpace(peerHost))
+        {
+            AddLog("Xbox network transfer: no peer host provided", LogMessageType.Error);
+            return;
+        }
+
+        _xboxTransferService.Reset();
+        IsXboxTransferActive = true;
+        XboxTransfer = _xboxTransferService.State;
+        _xboxTransferService.StateChanged += OnXboxTransferStateChanged;
+        _xboxTransferService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+
+        AddLog($"Xbox network transfer started from {peerHost}:{peerPort}", LogMessageType.Info);
+        StatusMessage = $"Xbox network transfer from {peerHost}";
+
+        try
+        {
+            var verdict = await _xboxTransferService.RunNetworkOverlayAsync(peerHost, peerPort);
+            switch (verdict)
+            {
+                case XboxTransferVerdict.FullSkip:
+                    AddLog($"Xbox network transfer SUCCESS! Installed with minimal extra download.", LogMessageType.Info);
+                    StatusMessage = "Xbox network transfer complete!";
+                    break;
+                case XboxTransferVerdict.DeltaOnly:
+                    AddLog($"Xbox network transfer partial success: some data re-downloaded", LogMessageType.Warning);
+                    StatusMessage = "Xbox network transfer done with some re-download";
+                    break;
+                default:
+                    AddLog($"Xbox network transfer result: {verdict}", LogMessageType.Warning);
+                    StatusMessage = $"Xbox network transfer: {verdict}";
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Xbox network transfer error: {ex.Message}", LogMessageType.Error);
+            LastError = ex.Message;
+        }
+        finally
+        {
+            IsXboxTransferActive = false;
+            _xboxTransferService.StateChanged -= OnXboxTransferStateChanged;
+            await ScanLocalGamesAsync();
+        }
+    }
+
+    [RelayCommand]
     private void CancelXboxTransfer()
     {
         _xboxTransferService.Cancel();
@@ -2614,5 +2714,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _networkService.Dispose();
         _fileTransferService.Dispose();
+        _xboxNetworkSender.Dispose();
     }
 }

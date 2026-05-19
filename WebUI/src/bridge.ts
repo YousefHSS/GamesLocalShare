@@ -61,7 +61,18 @@ export type CommandName =
   | 'RemoveExternalLibrary'
   | 'ScanExternalLibraries'
   | 'CompareGameLocations'
-  | 'StartLocalCopy';
+  | 'StartLocalCopy'
+  | 'PrepareXboxNetwork'
+  | 'StopXboxNetwork'
+  | 'StartXboxNetworkTransfer'
+  | 'RequestElevation'
+  | 'StartXboxTransfer'
+  | 'CancelXboxTransfer'
+  | 'BrowseXboxSource'
+  | 'StartXboxStage'
+  | 'CompleteXboxStage'
+  | 'CancelXboxStage'
+  | 'BrowseXboxDestination';
 
 export interface CommandPayload {
   [key: string]: any;

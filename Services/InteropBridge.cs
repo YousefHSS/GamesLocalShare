@@ -216,6 +216,8 @@ public class InteropBridge : IDisposable
             // Xbox transfer
             xboxTransfer = _viewModel.XboxTransfer,
             isXboxTransferActive = _viewModel.IsXboxTransferActive,
+            xboxOverlayGames = _viewModel.XboxOverlayGames.ToList(),
+            isElevated = ElevationHelper.IsElevated(),
             externalLibraries = _viewModel.Settings.ExternalLibraries.Select(lib => new
             {
                 id = lib.Id.ToString(),
@@ -637,6 +639,41 @@ public class InteropBridge : IDisposable
 
                 case "BrowseXboxDestination":
                     await HandleBrowseXboxDestinationAsync();
+                    break;
+
+                case "PrepareXboxNetwork":
+                    if (payload?.TryGetProperty("sourcePath", out var netSourceEl) == true)
+                    {
+                        var netSourcePath = netSourceEl.GetString() ?? "";
+                        if (_viewModel.PrepareXboxNetworkCommand.CanExecute(netSourcePath))
+                            await _viewModel.PrepareXboxNetworkCommand.ExecuteAsync(netSourcePath);
+                    }
+                    break;
+
+                case "StopXboxNetwork":
+                    if (_viewModel.StopXboxNetworkCommand.CanExecute(null))
+                        _viewModel.StopXboxNetworkCommand.Execute(null);
+                    break;
+
+                case "StartXboxNetworkTransfer":
+                    if (payload?.TryGetProperty("peerHost", out var peerHostEl) == true &&
+                        payload?.TryGetProperty("peerPort", out var peerPortEl) == true &&
+                        payload?.TryGetProperty("gameAppId", out var gameAppIdEl) == true)
+                    {
+                        var netArgs = (peerHostEl.GetString() ?? "", peerPortEl.GetInt32(), gameAppIdEl.GetString() ?? "");
+                        if (_viewModel.StartXboxNetworkTransferCommand.CanExecute(netArgs))
+                            await _viewModel.StartXboxNetworkTransferCommand.ExecuteAsync(netArgs);
+                    }
+                    break;
+
+                case "RequestElevation":
+                    var forwardArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
+                    if (ElevationHelper.RelaunchAsAdmin(forwardArgs))
+                    {
+                        // Signal UI that relaunch is happening, then current process should exit
+                        var json = JsonSerializer.Serialize(new { relaunching = true }, JsonOptions);
+                        await ExecuteJavaScriptAsync($"window.__updateState({json});");
+                    }
                     break;
             }
         }

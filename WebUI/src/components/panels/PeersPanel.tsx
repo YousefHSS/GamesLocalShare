@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useAppState } from '../../store';
 import { sendCommand } from '../../bridge';
+import XboxTransferModal from '../XboxTransferModal';
 
 export default function PeersPanel() {
   const networkPeers = useAppState((state) => state.networkPeers);
@@ -8,6 +10,7 @@ export default function PeersPanel() {
   const selectedPeerGame = useAppState((state) => state.selectedPeerGame);
   const manualPeerIp = useAppState((state) => state.manualPeerIp);
   const isNetworkActive = useAppState((state) => state.isNetworkActive);
+  const [showReceiverModal, setShowReceiverModal] = useState(false);
 
   return (
     <div className="bg-dark-panel rounded flex flex-col h-full overflow-hidden">
@@ -108,12 +111,26 @@ export default function PeersPanel() {
                 >
                   <p className="text-white font-semibold truncate">{game.name}</p>
                   <p className="text-gray-400">{game.buildId} • {game.formattedSize}</p>
+                  {selectedPeerGame?.appId === game.appId && game.platform === 'Xbox' && game.isOverlaySupported && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowReceiverModal(true); }}
+                      className="mt-1 bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded text-xs transition"
+                    >
+                      Receive via Xbox Overlay
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+      {showReceiverModal && (
+        <XboxTransferModal
+          mode="receiver"
+          onClose={() => setShowReceiverModal(false)}
+        />
+      )}
     </div>
   );
 }

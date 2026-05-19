@@ -19,6 +19,7 @@ namespace GamesLocalShare.Services;
 [JsonSerializable(typeof(GameInfo))]
 [JsonSerializable(typeof(GamePlatform))]
 [JsonSerializable(typeof(MessageType))]
+[JsonSerializable(typeof(int))]
 [JsonSourceGenerationOptions(
     PropertyNameCaseInsensitive = true,
     WriteIndented = false,
@@ -52,6 +53,11 @@ public class NetworkDiscoveryService : IDisposable
     /// The file transfer port we're advertising to peers (set by FileTransferService)
     /// </summary>
     public int LocalFileTransferPort { get; set; } = 45679;
+
+    /// <summary>
+    /// The Xbox overlay transfer port we're advertising to peers (set by XboxNetworkSender)
+    /// </summary>
+    public int LocalXboxOverlayPort { get; set; } = 45680;
 
     /// <summary>
     /// Event raised when a new peer is discovered
@@ -265,6 +271,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
                 SenderFileTransferPort = LocalFileTransferPort,
+                SenderXboxOverlayPort = LocalXboxOverlayPort,
                 Games = LocalPeer.Games
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request, NetworkMessageJsonContext.Default.NetworkMessage));
@@ -288,6 +295,7 @@ public class NetworkDiscoveryService : IDisposable
                         IpAddress = ipAddress,
                         Port = response.SenderPort > 0 ? response.SenderPort : TcpPort,
                         FileTransferPort = response.SenderFileTransferPort > 0 ? response.SenderFileTransferPort : 45679,
+                        XboxOverlayPort = response.SenderXboxOverlayPort > 0 ? response.SenderXboxOverlayPort : 45680,
                         Games = new ObservableCollection<GameInfo>(response.Games ?? []),
                         LastSeen = DateTime.Now
                     };
@@ -476,6 +484,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
                 SenderFileTransferPort = LocalFileTransferPort,
+                SenderXboxOverlayPort = LocalXboxOverlayPort,
                 Games = LocalPeer.Games
             };
             
@@ -502,6 +511,10 @@ public class NetworkDiscoveryService : IDisposable
                     if (response.SenderFileTransferPort > 0)
                     {
                         peer.FileTransferPort = response.SenderFileTransferPort;
+                    }
+                    if (response.SenderXboxOverlayPort > 0)
+                    {
+                        peer.XboxOverlayPort = response.SenderXboxOverlayPort;
                         System.Diagnostics.Debug.WriteLine($"Updated {peer.DisplayName}'s FileTransferPort to {peer.FileTransferPort}");
                     }
                     
@@ -721,6 +734,7 @@ public class NetworkDiscoveryService : IDisposable
                                 IpAddress = remoteIp,
                                 Port = request.SenderPort > 0 ? request.SenderPort : TcpPort,
                                 FileTransferPort = request.SenderFileTransferPort > 0 ? request.SenderFileTransferPort : 45679,
+                                XboxOverlayPort = request.SenderXboxOverlayPort > 0 ? request.SenderXboxOverlayPort : 45680,
                                 Games = request.Games ?? [],
                                 LastSeen = DateTime.Now
                             };
@@ -737,6 +751,10 @@ public class NetworkDiscoveryService : IDisposable
                             if (request.SenderFileTransferPort > 0)
                             {
                                 peerToNotify.FileTransferPort = request.SenderFileTransferPort;
+                            }
+                            if (request.SenderXboxOverlayPort > 0)
+                            {
+                                peerToNotify.XboxOverlayPort = request.SenderXboxOverlayPort;
                             }
                             
                             // Only update games if we received a non-empty list
@@ -785,6 +803,7 @@ public class NetworkDiscoveryService : IDisposable
                             SenderName = LocalPeer.DisplayName,
                             SenderPort = LocalPeer.Port,
                             SenderFileTransferPort = LocalFileTransferPort,
+                            SenderXboxOverlayPort = LocalXboxOverlayPort,
                             Games = LocalPeer.Games
                         };
                         
@@ -810,6 +829,10 @@ public class NetworkDiscoveryService : IDisposable
                                     if (request.SenderFileTransferPort > 0)
                                     {
                                         peer.FileTransferPort = request.SenderFileTransferPort;
+                                    }
+                                    if (request.SenderXboxOverlayPort > 0)
+                                    {
+                                        peer.XboxOverlayPort = request.SenderXboxOverlayPort;
                                     }
                                     gameListPeer = peer;
                                     System.Diagnostics.Debug.WriteLine($"GameList handler: Updated {peer.DisplayName} with {request.Games.Count} games");
@@ -954,6 +977,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
                 SenderFileTransferPort = LocalFileTransferPort,
+                SenderXboxOverlayPort = LocalXboxOverlayPort,
                 Games = LocalPeer.Games
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(request, NetworkMessageJsonContext.Default.NetworkMessage));
@@ -970,6 +994,10 @@ public class NetworkDiscoveryService : IDisposable
                         if (response.SenderFileTransferPort > 0)
                         {
                             peer.FileTransferPort = response.SenderFileTransferPort;
+                        }
+                        if (response.SenderXboxOverlayPort > 0)
+                        {
+                            peer.XboxOverlayPort = response.SenderXboxOverlayPort;
                         }
                         PeerGamesUpdated?.Invoke(this, peer);
                     }
@@ -1009,6 +1037,7 @@ public class NetworkDiscoveryService : IDisposable
                 SenderName = LocalPeer.DisplayName,
                 SenderPort = LocalPeer.Port,
                 SenderFileTransferPort = LocalFileTransferPort,
+                SenderXboxOverlayPort = LocalXboxOverlayPort,
                 Games = LocalPeer.Games
             };
             await writer.WriteLineAsync(JsonSerializer.Serialize(message, NetworkMessageJsonContext.Default.NetworkMessage));
@@ -1028,6 +1057,10 @@ public class NetworkDiscoveryService : IDisposable
                     if (response.SenderFileTransferPort > 0)
                     {
                         peer.FileTransferPort = response.SenderFileTransferPort;
+                    }
+                    if (response.SenderXboxOverlayPort > 0)
+                    {
+                        peer.XboxOverlayPort = response.SenderXboxOverlayPort;
                     }
                     System.Diagnostics.Debug.WriteLine($"SendGameListToPeerAsync: Received {response.Games.Count} games back from {peer.DisplayName}");
                     PeerGamesUpdated?.Invoke(this, peer);
@@ -1100,6 +1133,7 @@ public class NetworkMessage
     public string? SenderName { get; set; }
     public int SenderPort { get; set; }
     public int SenderFileTransferPort { get; set; } = 45679;
+    public int SenderXboxOverlayPort { get; set; } = 45680;
     public ObservableCollection<GameInfo>? Games { get; set; }
     public string? GameAppId { get; set; }
 }

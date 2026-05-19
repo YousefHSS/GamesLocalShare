@@ -344,6 +344,93 @@ public class XboxTransferService
         }
     }
 
+    /// <summary>
+    /// Runs the overlay workflow for a network path (streaming from a peer's XboxNetworkSender).
+    /// </summary>
+    public async Task<XboxTransferVerdict> RunNetworkOverlayAsync(string peerHost, int peerPort, CancellationToken ct = default)
+    {
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _cts.Token;
+
+        try
+        {
+            // Step 1: Poll for install folder
+            var dest = await PollForInstallFolderAsync(90, token);
+            if (dest == null)
+            {
+                _state.CurrentStep = XboxTransferStep.Failed;
+                _state.ErrorMessage = "Install folder did not appear within 90 seconds. Ensure you clicked Install and Pause in the Xbox app.";
+                _state.Verdict = XboxTransferVerdict.Error;
+                RaiseStateChanged();
+                return XboxTransferVerdict.Error;
+            }
+
+            // Step 2: Stream files from peer
+            _state.CurrentStep = XboxTransferStep.Overlaying;
+            _state.StatusMessage = "Streaming files from peer...";
+            RaiseStateChanged();
+
+            var receiver = new XboxNetworkReceiver();
+            receiver.LogMessage += (_, msg) => Log(msg);
+            receiver.ProgressChanged += (_, progress) =>
+            {
+                _state.OverlayProgress = progress;
+                _state.StatusMessage = $"Receiving... {progress:N0}%";
+                RaiseStateChanged();
+            };
+            receiver.BytesReceivedChanged += (_, bytes) =>
+            {
+                _state.NetworkReceivedMB = bytes / (1024.0 * 1024.0);
+                RaiseStateChanged();
+            };
+
+            _cts.Token.Register(() => receiver.Cancel());
+
+            await receiver.ReceiveAsync(peerHost, peerPort, dest, token);
+
+            // Step 3: Reset ACLs
+            await ResetAclsAsync(token);
+
+            // Step 4: Wait for user to click Resume
+            _state.CurrentStep = XboxTransferStep.WaitingForResume;
+            _state.StatusMessage = "Overlay complete! Click Resume in the Xbox app now.";
+            RaiseStateChanged();
+
+            await Task.Delay(5000, token);
+
+            // Step 5: Monitor
+            // For network path, the streamed bytes are the ground truth.
+            // We still run NIC monitoring to catch any re-download, but verdict
+            // leans on whether all files were successfully received.
+            await MonitorResumeAsync(300, token);
+
+            // Override verdict based on streamed completeness
+            // If we got close to expected size, treat as success regardless of NIC
+            if (_state.NetworkReceivedMB > 0)
+            {
+                var expectedMB = _state.SourceBytes / (1024.0 * 1024.0);
+                var ratio = expectedMB > 0 ? _state.NetworkReceivedMB / expectedMB : 0;
+                if (_state.PackageInstalled && ratio >= 0.95)
+                {
+                    _state.Verdict = XboxTransferVerdict.FullSkip;
+                    _state.CurrentStep = XboxTransferStep.Complete;
+                    _state.StatusMessage = $"Success: received {_state.NetworkReceivedMB:N1} MB / {expectedMB:N1} MB expected";
+                }
+            }
+
+            RaiseStateChanged();
+            return _state.Verdict;
+        }
+        catch (OperationCanceledException)
+        {
+            _state.CurrentStep = XboxTransferStep.Failed;
+            _state.ErrorMessage = "Transfer cancelled";
+            _state.Verdict = XboxTransferVerdict.Error;
+            RaiseStateChanged();
+            return XboxTransferVerdict.Error;
+        }
+    }
+
     public void Cancel()
     {
         _cts?.Cancel();

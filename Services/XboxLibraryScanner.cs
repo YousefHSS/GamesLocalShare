@@ -209,6 +209,19 @@ public class XboxLibraryScanner : IGameLibraryScanner
         // Try to extract PFN from folder ACL (conditional SYSAPPID ACE)
         string? pfn = TryExtractPfnFromAcl(dir);
 
+        // Determine overlay support: requires both envelope files at root
+        // AND a GUID-named subfolder (the MSIXVC Content container layout).
+        bool hasGuidSubfolder = false;
+        try
+        {
+            hasGuidSubfolder = Directory.GetDirectories(dir)
+                .Any(sub => Guid.TryParse(Path.GetFileName(sub), out _));
+        }
+        catch { }
+
+        bool isOverlaySupported = (xviFile != null || Directory.GetFiles(dir, "*.xvi").Length > 0)
+            && hasGuidSubfolder;
+
         var game = new GameInfo
         {
             AppId = contentGuid ?? dirName,
@@ -219,6 +232,7 @@ public class XboxLibraryScanner : IGameLibraryScanner
             BuildId = contentGuid ?? "unknown",
             Platform = GamePlatform.Xbox,
             IsInstalled = !isGuidFolder,
+            IsOverlaySupported = isOverlaySupported,
         };
 
         return game;

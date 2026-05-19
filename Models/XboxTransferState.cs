@@ -5,7 +5,7 @@ namespace GamesLocalShare.Models;
 /// </summary>
 public class XboxTransferState
 {
-    public XboxTransferStep CurrentStep { get; set; } = XboxTransferStep.SelectSource;
+    public XboxTransferStep CurrentStep { get; set; } = XboxTransferStep.ChooseSource;
     public string GameName { get; set; } = string.Empty;
     public string PackageFamilyName { get; set; } = string.Empty;
     public string ContentGuid { get; set; } = string.Empty;
@@ -23,6 +23,14 @@ public class XboxTransferState
     public bool PackageInstalled { get; set; }
     public string PackageStatus { get; set; } = string.Empty;
 
+    // Transfer mode
+    public bool IsNetwork { get; set; }
+    public string PeerId { get; set; } = string.Empty;
+    public string AppId { get; set; } = string.Empty;
+
+    // Elevation
+    public bool RequiresElevation { get; set; }
+
     // Verdict
     public XboxTransferVerdict Verdict { get; set; } = XboxTransferVerdict.Pending;
     public string? ErrorMessage { get; set; }
@@ -30,19 +38,23 @@ public class XboxTransferState
 
 public enum XboxTransferStep
 {
-    // Sender steps
-    SelectGame,
-    SelectDestination,
-    ValidatingSource,
-    CopyingFiles,
-    // Receiver steps
-    SelectSource,
+    // Wizard steps (receiver)
+    ChooseSource,
+    ElevationGate,
+    InstallInXboxApp,
     WaitingForInstallPause,
     PollingForFolder,
     Overlaying,
     ResettingAcls,
     WaitingForResume,
     Monitoring,
+
+    // Sender steps
+    SelectGame,
+    SelectDestination,
+    ValidatingSource,
+    CopyingFiles,
+
     // Common
     Complete,
     Failed

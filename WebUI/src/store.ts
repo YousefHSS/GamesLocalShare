@@ -11,6 +11,7 @@ export interface GameInfo {
   isInstalled: boolean;
   isAvailableFromPeer: boolean;
   isHidden: boolean;
+  isOverlaySupported?: boolean;
   lastUpdated: string;
   coverUrl?: string | null;
 }
@@ -21,6 +22,7 @@ export interface NetworkPeer {
   ipAddress: string;
   port: number;
   fileTransferPort: number;
+  xboxOverlayPort: number;
   games: GameInfo[];
   lastSeen: string;
   isOnline: boolean;
@@ -101,7 +103,7 @@ export interface ExternalLibrary {
   scanSubfolders: boolean;
 }
 
-export type XboxTransferStep = 'SelectGame' | 'SelectDestination' | 'ValidatingSource' | 'CopyingFiles' | 'SelectSource' | 'WaitingForInstallPause' | 'PollingForFolder' | 'Overlaying' | 'ResettingAcls' | 'WaitingForResume' | 'Monitoring' | 'Complete' | 'Failed';
+export type XboxTransferStep = 'SelectGame' | 'SelectDestination' | 'ValidatingSource' | 'CopyingFiles' | 'ChooseSource' | 'ElevationGate' | 'InstallInXboxApp' | 'WaitingForInstallPause' | 'PollingForFolder' | 'Overlaying' | 'ResettingAcls' | 'WaitingForResume' | 'Monitoring' | 'Complete' | 'Failed';
 
 export type XboxTransferVerdict = 'Pending' | 'FullSkip' | 'DeltaOnly' | 'FullRedownload' | 'StillPaused' | 'Error';
 
@@ -119,6 +121,10 @@ export interface XboxTransferState {
   networkReceivedMB: number;
   packageInstalled: boolean;
   packageStatus: string;
+  isNetwork?: boolean;
+  peerId?: string;
+  appId?: string;
+  requiresElevation?: boolean;
   verdict: XboxTransferVerdict;
   errorMessage?: string;
 }
@@ -189,6 +195,9 @@ export interface AppState {
   xboxStage: XboxTransferState | null;
   isXboxTransferActive: boolean;
   isXboxStageActive: boolean;
+  xboxOverlayGames: GameInfo[];
+  isElevated: boolean;
+  xboxDestinationPath: string;
 
   // Actions
   updateState: (patch: Partial<AppState>) => void;
@@ -244,6 +253,9 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   xboxStage: null,
   isXboxTransferActive: false,
   isXboxStageActive: false,
+  xboxOverlayGames: [],
+  isElevated: false,
+  xboxDestinationPath: '',
 };
 
 export const useAppState = create<AppState>((set) => ({

@@ -37,6 +37,11 @@ public class NetworkPeer : INotifyPropertyChanged
     public int FileTransferPort { get; set; } = 45679;
 
     /// <summary>
+    /// Port the peer is listening on for Xbox overlay network transfers (default TCP 45680)
+    /// </summary>
+    public int XboxOverlayPort { get; set; } = 45680;
+
+    /// <summary>
     /// List of games available on this peer
     /// </summary>
     public ObservableCollection<GameInfo> Games
