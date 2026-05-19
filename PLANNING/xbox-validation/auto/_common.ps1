@@ -156,11 +156,29 @@ function Invoke-AsSystem {
 function Get-NicBaseline {
     param([string]$InterfaceAlias)
     if (-not $InterfaceAlias) {
-        $InterfaceAlias = (Get-NetAdapter | Where-Object Status -eq 'Up' |
-            Sort-Object -Property LinkSpeed -Descending |
-            Select-Object -First 1).Name
+        # Exclude virtual/hypervisor adapters; prefer physical NICs
+        $InterfaceAlias = (Get-NetAdapter | Where-Object {
+            $_.Status -eq 'Up' -and
+            $_.HardwareInterface -eq $true -and
+            $_.InterfaceDescription -notmatch 'VMware|Hyper-V|Virtual|VirtualBox|WireGuard|Wintun|TAP|VPN'
+        } | Sort-Object -Property LinkSpeed -Descending | Select-Object -First 1).Name
     }
-    $s = Get-NetAdapterStatistics -Name $InterfaceAlias -ErrorAction Stop
+    try {
+        $s = Get-NetAdapterStatistics -Name $InterfaceAlias -ErrorAction Stop
+    } catch {
+        # Fallback: use all physical adapters combined via CIM
+        $s = Get-CimInstance -ClassName Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch 'Loopback|VMware|Hyper-V|Virtual' } |
+            Measure-Object -Property BytesReceivedPerSec -Sum |
+            Select-Object -ExpandProperty Sum
+        if (-not $s) { $s = 0 }
+        return [pscustomobject]@{
+            InterfaceAlias = 'Fallback-AllPhysical'
+            ReceivedBytes  = [int64]$s
+            SentBytes      = 0
+            Time           = (Get-Date).ToUniversalTime()
+        }
+    }
     return [pscustomobject]@{
         InterfaceAlias = $InterfaceAlias
         ReceivedBytes  = [int64]$s.ReceivedBytes
@@ -171,7 +189,27 @@ function Get-NicBaseline {
 
 function Get-NicDelta {
     param($Baseline)
-    $s = Get-NetAdapterStatistics -Name $Baseline.InterfaceAlias -ErrorAction Stop
+    if ($Baseline.InterfaceAlias -eq 'Fallback-AllPhysical') {
+        $rx = Get-CimInstance -ClassName Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch 'Loopback|VMware|Hyper-V|Virtual' } |
+            Measure-Object -Property BytesReceivedPerSec -Sum |
+            Select-Object -ExpandProperty Sum
+        if (-not $rx) { $rx = 0 }
+        return [pscustomobject]@{
+            ReceivedBytes  = [int64]$rx
+            SentBytes      = 0
+            ReceivedMB     = [math]::Round([int64]$rx/1MB,2)
+            CounterWrapped = $false
+        }
+    }
+    try {
+        $s = Get-NetAdapterStatistics -Name $Baseline.InterfaceAlias -ErrorAction Stop
+    } catch {
+        return [pscustomobject]@{
+            ReceivedBytes = -1; SentBytes = -1; ReceivedMB = -1
+            CounterWrapped = $true
+        }
+    }
     $rx = [int64]$s.ReceivedBytes - $Baseline.ReceivedBytes
     $tx = [int64]$s.SentBytes     - $Baseline.SentBytes
     if ($rx -lt 0 -or $tx -lt 0) {

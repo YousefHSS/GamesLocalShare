@@ -86,6 +86,52 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     $gameName = $summary.GameName
     $pfn      = $summary.PackageFamilyName
 
+    # Refuse to proceed if the sender flagged this stage as incomplete.
+    # IntegrityOk is missing on stages produced before the integrity check
+    # was added; in that case fall back to the legacy SkippedFiles count.
+    $hasIntegrityField = $summary.PSObject.Properties.Name -contains 'IntegrityOk'
+    $integrityBad      = $false
+    if ($hasIntegrityField) {
+        $integrityBad = -not [bool]$summary.IntegrityOk
+    } elseif ($summary.SkippedFiles -gt 0) {
+        $integrityBad = $true
+    }
+    if ($integrityBad) {
+        Write-Host ""
+        Write-Host "==============================================================" -ForegroundColor Red
+        Write-Host " STAGED COPY IS INCOMPLETE - REFUSING TO RUN OVERLAY" -ForegroundColor Red
+        Write-Host "==============================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "transfer-summary.json reports the staged copy is missing or" -ForegroundColor Yellow
+        Write-Host "has mismatched files. Running the overlay anyway would leave" -ForegroundColor Yellow
+        Write-Host "the receiver's install in a corrupt state and trigger a full" -ForegroundColor Yellow
+        Write-Host "re-download via the 'Repair' flow." -ForegroundColor Yellow
+        Write-Host ""
+        if ($summary.MissingFiles -and $summary.MissingFiles.Count -gt 0) {
+            Write-Host "Missing files ($($summary.MissingFiles.Count)):" -ForegroundColor Red
+            $summary.MissingFiles | Select-Object -First 10 | ForEach-Object {
+                Write-Host "  - $_" -ForegroundColor Yellow
+            }
+            if ($summary.MissingFiles.Count -gt 10) {
+                Write-Host "  ... and $($summary.MissingFiles.Count - 10) more" -ForegroundColor Yellow
+            }
+            Write-Host ""
+        }
+        if ($summary.UnreadableFiles -and $summary.UnreadableFiles.Count -gt 0) {
+            Write-Host "Unreadable on sender ($($summary.UnreadableFiles.Count)):" -ForegroundColor Red
+            $summary.UnreadableFiles | Select-Object -First 10 | ForEach-Object {
+                Write-Host "  - $_" -ForegroundColor Yellow
+            }
+            Write-Host ""
+        }
+        Write-Host "Re-run xbox-transfer-sender.ps1 on the sender PC after:" -ForegroundColor Cyan
+        Write-Host "  1. Closing the Xbox app completely." -ForegroundColor Cyan
+        Write-Host "  2. Making sure the game is not running." -ForegroundColor Cyan
+        Write-Host "  3. (Optional) Stop-Service GamingServices,GamingServicesNet -Force" -ForegroundColor Cyan
+        Write-Host ""
+        exit 11
+    }
+
     Write-Host "PREREQUISITES" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  1. In the Xbox app, find '$gameName' and click Install."
@@ -190,6 +236,17 @@ function Find-Destination {
 }
 
 $initialCandidates = @(Find-Destination -GameName $gameName -ContentGuid $contentGuid)
+
+# Also check the user-provided XboxRoot directly (e.g., F:\Games instead of F:\XboxGames)
+if (Test-Path -LiteralPath $XboxRoot) {
+    $byName = Join-Path $XboxRoot $gameName
+    if (Test-Path -LiteralPath $byName) { $initialCandidates += $byName }
+    if ($contentGuid) {
+        $byGuid = Join-Path $XboxRoot $contentGuid
+        if (Test-Path -LiteralPath $byGuid) { $initialCandidates += $byGuid }
+    }
+}
+
 Write-Host ("[SYSTEM phase] Candidates pre-poll: {0}" -f ($initialCandidates -join '; '))
 
 # Default deploy path; will be overridden if we find a GUID folder

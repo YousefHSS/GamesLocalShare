@@ -177,6 +177,76 @@ $destFiles   = @(Get-ChildItem -LiteralPath $destGame -Recurse -File -Force -Err
 $destBytes   = ($destFiles | Measure-Object -Sum Length).Sum
 $destCount   = $destFiles.Count
 
+# ---------------------------------------------------------------------------
+# Integrity check: compare every source file against the destination
+# Detects files that robocopy silently failed to copy (e.g. SYSAPPID-locked
+# executables) which would otherwise produce a corrupt staged copy.
+# ---------------------------------------------------------------------------
+Write-Host "[SYSTEM phase] Verifying staged copy integrity..."
+$missingFiles  = @()
+$mismatchFiles = @()
+foreach ($f in $allFiles) {
+    $rel  = $f.FullName.Substring($GameFolder.Length).TrimStart('\','/')
+    $dest = Join-Path $destGame $rel
+    if (-not (Test-Path -LiteralPath $dest)) {
+        $missingFiles += $rel
+    } else {
+        $dInfo = Get-Item -LiteralPath $dest -Force
+        if ($dInfo.Length -ne $f.Length) {
+            $mismatchFiles += [pscustomobject]@{
+                Path       = $rel
+                SourceSize = $f.Length
+                DestSize   = $dInfo.Length
+            }
+        }
+    }
+}
+Write-Host ("[SYSTEM phase] Integrity: {0} missing, {1} size-mismatch" -f $missingFiles.Count, $mismatchFiles.Count)
+
+$integrityOk = ($missingFiles.Count -eq 0 -and $mismatchFiles.Count -eq 0)
+
+if (-not $integrityOk) {
+    Write-Host ""
+    Write-Host "==============================================================" -ForegroundColor Red
+    Write-Host " STAGED COPY IS INCOMPLETE - DO NOT USE FOR OVERLAY!" -ForegroundColor Red
+    Write-Host "==============================================================" -ForegroundColor Red
+    if ($missingFiles.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Files MISSING from staged copy ($($missingFiles.Count)):" -ForegroundColor Red
+        $missingFiles | Select-Object -First 20 | ForEach-Object {
+            Write-Host "  - $_" -ForegroundColor Yellow
+        }
+        if ($missingFiles.Count -gt 20) {
+            Write-Host "  ... and $($missingFiles.Count - 20) more" -ForegroundColor Yellow
+        }
+    }
+    if ($mismatchFiles.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Files with SIZE MISMATCH ($($mismatchFiles.Count)):" -ForegroundColor Red
+        $mismatchFiles | Select-Object -First 20 | ForEach-Object {
+            Write-Host ("  - {0}  (src={1:N0}  dst={2:N0})" -f $_.Path, $_.SourceSize, $_.DestSize) -ForegroundColor Yellow
+        }
+    }
+    Write-Host ""
+    Write-Host "ROOT CAUSE: These files are likely locked by the Xbox app, the" -ForegroundColor Yellow
+    Write-Host "running game process, or have SYSAPPID-conditional ACLs that even" -ForegroundColor Yellow
+    Write-Host "SYSTEM cannot read while another process holds them open." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "REMEDIATION (on the sender PC):" -ForegroundColor Cyan
+    Write-Host "  1. Make sure the game is NOT running." -ForegroundColor Cyan
+    Write-Host "  2. Close the Xbox app completely." -ForegroundColor Cyan
+    Write-Host "  3. (Optional) Stop the Gaming Services:" -ForegroundColor Cyan
+    Write-Host "       Stop-Service -Name GamingServices,GamingServicesNet -Force" -ForegroundColor DarkCyan
+    Write-Host "  4. Delete the incomplete staged folder:" -ForegroundColor Cyan
+    Write-Host ("       Remove-Item -Recurse -Force `"{0}`"" -f $destGame) -ForegroundColor DarkCyan
+    Write-Host "  5. Re-run xbox-transfer-sender.ps1 with the same arguments." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "transfer-summary.json will be written with IntegrityOk=false so" -ForegroundColor Yellow
+    Write-Host "the receiver script can refuse this stage." -ForegroundColor Yellow
+    Write-Host "==============================================================" -ForegroundColor Red
+    Write-Host ""
+}
+
 $summary = [ordered]@{
     StartedAtUtc      = (Get-Date).ToUniversalTime().ToString('o')
     SenderHost        = $env:COMPUTERNAME
@@ -193,6 +263,9 @@ $summary = [ordered]@{
     BytesCopied       = [int64]$destBytes
     RobocopyExit      = $rcExit
     RobocopyLog       = $rcLog
+    IntegrityOk       = $integrityOk
+    MissingFiles      = $missingFiles
+    MismatchFiles     = $mismatchFiles
 }
 
 $summaryPath = Join-Path $destGame 'transfer-summary.json'
@@ -204,4 +277,5 @@ $senderCopy = Join-Path $runsDir "sender-summary-$stamp.json"
 Copy-Item -LiteralPath $summaryPath -Destination $senderCopy -Force
 
 if ($rcExit -ge 8) { exit $rcExit }
+if (-not $integrityOk) { exit 10 }
 exit 0
