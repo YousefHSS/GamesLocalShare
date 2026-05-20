@@ -266,10 +266,15 @@ if (Test-Path -LiteralPath $XboxRoot) {
 
 Write-Host ("[SYSTEM phase] Candidates pre-poll: {0}" -f ($initialCandidates -join '; '))
 
-# Default deploy path; will be overridden if we find a GUID folder
+# Default deploy path; prefer whichever candidate already has files on disk
+# (the GUID folder is filled first; the friendly-name folder may be empty)
 $destGame = Join-Path $XboxRoot $gameName
 if ($initialCandidates.Count -gt 0) {
-    $destGame = $initialCandidates[0]
+    $best = $initialCandidates | ForEach-Object {
+        $n = @(Get-ChildItem -LiteralPath $_ -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+        [pscustomobject]@{ Path = $_; Files = $n }
+    } | Sort-Object Files -Descending | Select-Object -First 1
+    $destGame = if ($best.Files -gt 0) { $best.Path } else { $initialCandidates[0] }
 }
 Write-Host "[SYSTEM phase] Deploy:       $destGame"
 
@@ -300,11 +305,16 @@ $pollTimeout = New-TimeSpan -Seconds 90
 $stats = Get-DestStats -Path $destGame
 while ($stats.Files -eq 0 -and ((Get-Date) - $pollStart) -lt $pollTimeout) {
     Start-Sleep -Seconds 3
-    # Re-search every poll - the GUID folder may appear mid-wait.
-    $cands = @(Find-Destination -GameName $gameName -ContentGuid $contentGuid)
-    if ($cands.Count -gt 0 -and $cands[0] -ne $destGame) {
-        Write-Host ("[SYSTEM phase]   discovered candidate: {0}" -f $cands[0]) -ForegroundColor Cyan
-        $destGame = $cands[0]
+    # Re-search every poll - check ALL candidates and switch to whichever has files.
+    $cands = @(Find-Destination -GameName $gameName -ContentGuid $contentGuid) + @($destGame) |
+        Select-Object -Unique
+    $bestCand = $cands | ForEach-Object {
+        $s = Get-DestStats -Path $_
+        [pscustomobject]@{ Path = $_; Files = $s.Files; Bytes = $s.Bytes }
+    } | Sort-Object Files -Descending | Select-Object -First 1
+    if ($bestCand.Files -gt 0 -and $bestCand.Path -ne $destGame) {
+        Write-Host ("[SYSTEM phase]   switching to active candidate: {0}" -f $bestCand.Path) -ForegroundColor Cyan
+        $destGame = $bestCand.Path
     }
     $stats = Get-DestStats -Path $destGame
     $elapsed = [int]((Get-Date) - $pollStart).TotalSeconds
@@ -405,15 +415,53 @@ if ($preDestFiles.Count -eq 0) {
 #   /R:1 /W:2 minimal retry
 #   NO /MIR   - preserve any state files Gaming Services may have placed
 #   /XF       exclude our own metadata file from the overlay
+#
+# MSIXVC metadata files (.xvi/.xct/.xvs/.smd):
+#   The source's .xvi marks all blocks as "downloaded", which tells Gaming
+#   Services to finalize the install rather than re-download everything.
+#   We MUST include them when game versions match.  If versions differ the
+#   .xvi sizes will be different, which caused the 13 GB re-download before.
+#   Check sizes first; exclude them only on a mismatch to avoid corruption.
 if (-not $verdictStamp) { $verdictStamp = (Get-Date).ToString('yyyyMMdd-HHmmss') }
 $stamp = $verdictStamp
+
+$msixvcExcludes = @()
+if ($contentGuid) {
+    $srcXvi      = Join-Path $Source "$contentGuid.xvi"
+    $destXvi     = Join-Path $destGame "$contentGuid.xvi"
+    $srcXviItem  = Get-Item -LiteralPath $srcXvi  -ErrorAction SilentlyContinue
+    $destXviItem = Get-Item -LiteralPath $destXvi -ErrorAction SilentlyContinue
+    if ($srcXviItem -and $destXviItem) {
+        $srcSize  = $srcXviItem.Length
+        $destSize = $destXviItem.Length
+        if ($srcSize -ne $destSize) {
+            Write-Host ""
+            Write-Host "WARNING: .xvi size mismatch - game versions differ!" -ForegroundColor Red
+            Write-Host ("  Source .xvi : {0} bytes  (sender game version)" -f $srcSize) -ForegroundColor Yellow
+            Write-Host ("  Dest   .xvi : {0} bytes  (receiver downloading newer version)" -f $destSize) -ForegroundColor Yellow
+            Write-Host "  Excluding MSIXVC metadata from overlay to avoid block-map corruption." -ForegroundColor Yellow
+            Write-Host "  ACTION: Update the sender's game to the latest version, re-stage, then retry." -ForegroundColor Cyan
+            Write-Host ""
+            $msixvcExcludes = @('/XF','*.xvi','/XF','*.xct','/XF','*.xvs','/XF','*.smd','/XF','*.xsp')
+        } else {
+            Write-Host ("[SYSTEM phase] .xvi size match ({0} bytes) - same version, including MSIXVC metadata in overlay." -f $srcSize) -ForegroundColor Green
+        }
+    } elseif (-not $srcXviItem) {
+        Write-Host "[SYSTEM phase] WARNING: source stage has no .xvi file." -ForegroundColor Yellow
+        Write-Host "  The sender's installed game folder does not contain MSIXVC metadata." -ForegroundColor Yellow
+        Write-Host "  Without the source .xvi, Gaming Services will NOT recognize the overlaid" -ForegroundColor Yellow
+        Write-Host "  blocks as downloaded and will continue the full CDN download." -ForegroundColor Yellow
+        Write-Host "  See PLANNING docs for how to locate and add the .xvi to the stage." -ForegroundColor Cyan
+    }
+}
+
 $rcLog = Join-Path $runsDir "receiver-overlay-robocopy-$stamp.log"
 $rcArgs = @(
     "`"$Source`"", "`"$destGame`"", '/E','/COPY:DAT','/DCOPY:DAT',
     '/IS','/IT','/R:1','/W:2','/MT:8','/NP','/NDL','/TEE',
     "/LOG+:$rcLog",
     '/XF','transfer-summary.json'
-)
+) + $msixvcExcludes
 Write-Host "[SYSTEM phase] Overlay robocopy starting..."
 $proc = Start-Process -FilePath 'robocopy.exe' -ArgumentList $rcArgs -NoNewWindow -PassThru -Wait
 $rcExit = $proc.ExitCode

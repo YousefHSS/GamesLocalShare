@@ -1,0 +1,5 @@
+Connecting to local system...Starting PSEXESVC service on local system...Copying authentication key to GELERZ...Connecting with PsExec service on GELERZ...Starting powershell.exe on GELERZ...
+C:\XboxGames\2B20BAFD-957B-4776-A491-80157CBB90E2\Content\Engine\Binaries\Win64\CrashReportClient.exe: Access is denied.
+C:\XboxGames\2B20BAFD-957B-4776-A491-80157CBB90E2\Content\Subnautica2\Binaries\WinGDK\Subnautica2-WinGDK-Shipping.exe: Access is denied.
+^C
+powershell.exe exited on GELERZ with error code 0.

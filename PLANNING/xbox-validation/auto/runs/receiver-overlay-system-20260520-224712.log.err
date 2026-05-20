@@ -1,0 +1,9 @@
+Connecting to local system...Starting PSEXESVC service on local system...Copying authentication key to GELERZ...Connecting with PsExec service on GELERZ...Starting powershell.exe on GELERZ...
+Get-Item : Could not find item E:\stage\Subnautica 2\2B20BAFD-957B-4776-A491-80157CBB90E2.xvi.
+At C:\laragon\www\GamesLocalShare\PLANNING\xbox-validation\auto\xbox-transfer-receiver-overlay.ps1:433 char:22
++         $srcSize  = (Get-Item -LiteralPath $srcXvi).Length
++                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (E:\stage\Subnau...0157CBB90E2.xvi:String) [Get-Item], IOException
+    + FullyQualifiedErrorId : ItemNotFound,Microsoft.PowerShell.Commands.GetItemCommand
+ 
+powershell.exe exited on GELERZ with error code 1.
