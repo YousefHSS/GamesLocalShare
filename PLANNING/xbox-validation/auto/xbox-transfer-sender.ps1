@@ -33,11 +33,14 @@ param(
     [string] $GameFolder,
     [Parameter(Mandatory, ParameterSetName='User')]
     [string] $Destination,
+    [Parameter(ParameterSetName='User')]
+    [switch] $Force,
     [Parameter(Mandatory, ParameterSetName='System')]
     [string] $SystemArgsFile
 )
 
 $ErrorActionPreference = 'Stop'
+Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' -ErrorAction SilentlyContinue | ForEach-Object { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
 . (Join-Path $PSScriptRoot '_common.ps1')
 
 $scriptPath = $MyInvocation.MyCommand.Path
@@ -51,6 +54,7 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     $argsObj     = Read-SystemArgs -Path $SystemArgsFile
     $GameFolder  = [string]$argsObj.GameFolder
     $Destination = [string]$argsObj.Destination
+    $Force       = [bool]$argsObj.Force
 }
 
 # Normalize paths (strip trailing slashes to avoid quoting issues - even
@@ -67,6 +71,7 @@ if ($PSCmdlet.ParameterSetName -eq 'User') {
     Assert-Elevated -ScriptPath $scriptPath -ScriptArgs @(
         '-GameFolder', "`"$GameFolder`"",
         '-Destination', "`"$destRoot`""
+        if ($Force) { '-Force' }
     )
 
     Write-Host ""
@@ -79,11 +84,14 @@ if ($PSCmdlet.ParameterSetName -eq 'User') {
     $stamp  = (Get-Date).ToString('yyyyMMdd-HHmmss')
     $sysLog = Join-Path $runsDir "sender-system-$stamp.log"
 
+    $systemParams = @{
+        GameFolder  = $GameFolder
+        Destination = $destRoot
+    }
+    if ($Force) { $systemParams.Force = $true }
+
     $code = Invoke-AsSystem -ScriptPath $scriptPath `
-        -Params @{
-            GameFolder  = $GameFolder
-            Destination = $destRoot
-        } `
+        -Params $systemParams `
         -LogPath $sysLog `
         -PsExecPath $psexec
 
@@ -125,6 +133,31 @@ if (-not (Test-IsSystem)) {
 }
 
 if (-not (Test-Path -LiteralPath $GameFolder)) { throw "GameFolder not found: $GameFolder" }
+
+# ---------------------------------------------------------------------------
+# Stop Gaming Services so they release exclusive locks on game executables.
+# GamingServices holds .exe files open with no-share access; backup privilege
+# bypasses ACL checks but cannot override a sharing lock (ERROR 5).
+# We record which services were actually running so we can restore them after.
+# ---------------------------------------------------------------------------
+$gsServiceNames = @('GamingServicesNet', 'GamingServices')
+$stoppedServices = @()
+Write-Host "[SYSTEM phase] Stopping Gaming Services to release file locks..."
+foreach ($svcName in $gsServiceNames) {
+    $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') {
+        try {
+            Stop-Service -Name $svcName -Force -ErrorAction Stop
+            $stoppedServices += $svcName
+            Write-Host ("[SYSTEM phase]   Stopped: {0}" -f $svcName)
+        } catch {
+            Write-Host ("[SYSTEM phase]   WARNING: could not stop {0}: {1}" -f $svcName, $_) -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host ("[SYSTEM phase]   Already stopped: {0}" -f $svcName) -ForegroundColor DarkGray
+    }
+}
+Start-Sleep -Seconds 2
 
 # Sniff package family name from the source folder's ACL
 $pfn = Get-SysAppIdFromAcl -Path $GameFolder
@@ -235,16 +268,30 @@ if (-not $integrityOk) {
     Write-Host "REMEDIATION (on the sender PC):" -ForegroundColor Cyan
     Write-Host "  1. Make sure the game is NOT running." -ForegroundColor Cyan
     Write-Host "  2. Close the Xbox app completely." -ForegroundColor Cyan
-    Write-Host "  3. (Optional) Stop the Gaming Services:" -ForegroundColor Cyan
-    Write-Host "       Stop-Service -Name GamingServices,GamingServicesNet -Force" -ForegroundColor DarkCyan
-    Write-Host "  4. Delete the incomplete staged folder:" -ForegroundColor Cyan
+    Write-Host "  3. Delete the incomplete staged folder:" -ForegroundColor Cyan
     Write-Host ("       Remove-Item -Recurse -Force `"{0}`"" -f $destGame) -ForegroundColor DarkCyan
-    Write-Host "  5. Re-run xbox-transfer-sender.ps1 with the same arguments." -ForegroundColor Cyan
+    Write-Host "  4. Re-run xbox-transfer-sender.ps1 with the same arguments." -ForegroundColor Cyan
+    Write-Host "     (Gaming Services will be stopped automatically.)" -ForegroundColor DarkCyan
     Write-Host ""
     Write-Host "transfer-summary.json will be written with IntegrityOk=false so" -ForegroundColor Yellow
     Write-Host "the receiver script can refuse this stage." -ForegroundColor Yellow
     Write-Host "==============================================================" -ForegroundColor Red
     Write-Host ""
+}
+
+# ---------------------------------------------------------------------------
+# Restore Gaming Services that were stopped before the copy.
+# ---------------------------------------------------------------------------
+if ($stoppedServices.Count -gt 0) {
+    Write-Host "[SYSTEM phase] Restoring Gaming Services..."
+    foreach ($svcName in $stoppedServices) {
+        try {
+            Start-Service -Name $svcName -ErrorAction Stop
+            Write-Host ("[SYSTEM phase]   Started: {0}" -f $svcName)
+        } catch {
+            Write-Host ("[SYSTEM phase]   WARNING: could not restart {0}: {1}" -f $svcName, $_) -ForegroundColor Yellow
+        }
+    }
 }
 
 $summary = [ordered]@{
@@ -277,5 +324,14 @@ $senderCopy = Join-Path $runsDir "sender-summary-$stamp.json"
 Copy-Item -LiteralPath $summaryPath -Destination $senderCopy -Force
 
 if ($rcExit -ge 8) { exit $rcExit }
-if (-not $integrityOk) { exit 10 }
+if (-not $integrityOk) {
+    if ($Force) {
+        Write-Host ""
+        Write-Host "WARNING: --Force specified - proceeding despite incomplete integrity check" -ForegroundColor Yellow
+        Write-Host "The staged copy may be corrupt. Use at your own risk." -ForegroundColor Yellow
+        Write-Host ""
+    } else {
+        exit 10
+    }
+}
 exit 0

@@ -39,11 +39,14 @@ param(
     [string] $XboxRoot       = 'C:\XboxGames',
     [Parameter(ParameterSetName='User')]
     [int]    $ObserveSeconds = 300,
+    [Parameter(ParameterSetName='User')]
+    [switch] $Force,
     [Parameter(Mandatory, ParameterSetName='System')]
     [string] $SystemArgsFile
 )
 
 $ErrorActionPreference = 'Stop'
+Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' -ErrorAction SilentlyContinue | ForEach-Object { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
 . (Join-Path $PSScriptRoot '_common.ps1')
 
 $scriptPath = $MyInvocation.MyCommand.Path
@@ -60,16 +63,20 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     $XboxRoot       = [string]$argsObj.XboxRoot
     $ObserveSeconds = [int]$argsObj.ObserveSeconds
     $verdictStamp   = [string]$argsObj.VerdictStamp
+    $Force          = [bool]$argsObj.Force
 } else {
     # Sanitise inputs in the user/parent branch.
     $Source   = (Resolve-Path -LiteralPath $Source).Path
     $XboxRoot = $XboxRoot.TrimEnd('\','/')
 
-    Assert-Elevated -ScriptPath $scriptPath -ScriptArgs @(
+    $scriptArgs = @(
         '-Source', "`"$Source`"",
         '-XboxRoot', "`"$XboxRoot`"",
         '-ObserveSeconds', "$ObserveSeconds"
     )
+    if ($Force) { $scriptArgs += '-Force' }
+
+    Assert-Elevated -ScriptPath $scriptPath -ScriptArgs $scriptArgs
 
     Write-Host ""
     Write-Host "=== xbox-transfer-receiver-overlay ===" -ForegroundColor Green
@@ -99,7 +106,7 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     if ($integrityBad) {
         Write-Host ""
         Write-Host "==============================================================" -ForegroundColor Red
-        Write-Host " STAGED COPY IS INCOMPLETE - REFUSING TO RUN OVERLAY" -ForegroundColor Red
+        Write-Host " STAGED COPY IS INCOMPLETE" -ForegroundColor Red
         Write-Host "==============================================================" -ForegroundColor Red
         Write-Host ""
         Write-Host "transfer-summary.json reports the staged copy is missing or" -ForegroundColor Yellow
@@ -124,12 +131,19 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
             }
             Write-Host ""
         }
-        Write-Host "Re-run xbox-transfer-sender.ps1 on the sender PC after:" -ForegroundColor Cyan
-        Write-Host "  1. Closing the Xbox app completely." -ForegroundColor Cyan
-        Write-Host "  2. Making sure the game is not running." -ForegroundColor Cyan
-        Write-Host "  3. (Optional) Stop-Service GamingServices,GamingServicesNet -Force" -ForegroundColor Cyan
-        Write-Host ""
-        exit 11
+        if ($Force) {
+            Write-Host "--Force specified - proceeding anyway. Use at your own risk." -ForegroundColor Yellow
+            Write-Host ""
+        } else {
+            Write-Host "Re-run xbox-transfer-sender.ps1 on the sender PC after:" -ForegroundColor Cyan
+            Write-Host "  1. Closing the Xbox app completely." -ForegroundColor Cyan
+            Write-Host "  2. Making sure the game is not running." -ForegroundColor Cyan
+            Write-Host "  3. (Optional) Stop-Service GamingServices,GamingServicesNet -Force" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "Or use -Force to proceed anyway (may result in corrupt install)." -ForegroundColor Yellow
+            Write-Host ""
+            exit 11
+        }
     }
 
     Write-Host "PREREQUISITES" -ForegroundColor Yellow
@@ -146,13 +160,16 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     $sysLog = Join-Path $runsDir "receiver-overlay-system-$stamp.log"
     $verdictPath = Join-Path $runsDir "receiver-overlay-verdict-$stamp.json"
 
+    $systemParams = @{
+        Source         = $Source
+        XboxRoot       = $XboxRoot
+        ObserveSeconds = $ObserveSeconds
+        VerdictStamp   = $stamp
+    }
+    if ($Force) { $systemParams.Force = $true }
+
     $code = Invoke-AsSystem -ScriptPath $scriptPath `
-        -Params @{
-            Source         = $Source
-            XboxRoot       = $XboxRoot
-            ObserveSeconds = $ObserveSeconds
-            VerdictStamp   = $stamp
-        } `
+        -Params $systemParams `
         -LogPath $sysLog `
         -PsExecPath $psexec
 
