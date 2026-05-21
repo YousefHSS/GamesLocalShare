@@ -407,6 +407,85 @@ if ($preDestFiles.Count -eq 0) {
     exit 2
 }
 
+# ---------------------------------------------------------------------------
+# Verify receiver-provided executables BEFORE overlaying.
+# The sender could not read these MSIXVC-protected EXEs, so they were
+# excluded from the stage; the receiver's own Gaming Services must download
+# them. This must happen during the genuine (pre-overlay) Install, because
+# once we overlay the sender's .xvi - which marks every block "downloaded" -
+# Resume will only finalize and will NOT fetch anything more. So if these
+# EXEs are not on disk yet, abort before the overlay and let the user
+# continue the real download.
+# ---------------------------------------------------------------------------
+$receiverProvided = @()
+if ($summary.PSObject.Properties.Name -contains 'ReceiverProvidedFiles') {
+    $receiverProvided = @($summary.ReceiverProvidedFiles)
+}
+if ($receiverProvided.Count -gt 0) {
+    Write-Host ""
+    Write-Host ("[SYSTEM phase] Verifying {0} receiver-provided executable(s) before overlay..." -f $receiverProvided.Count)
+    $badExes = @()
+    foreach ($rp in $receiverProvided) {
+        $rel = [string]$rp.Path
+        $exp = [int64]$rp.Size
+        $p   = Join-Path $destGame $rel
+        $reason = $null
+        if (-not (Test-Path -LiteralPath $p)) {
+            $reason = 'not downloaded yet'
+        } else {
+            $fi = Get-Item -LiteralPath $p -Force
+            if ($exp -gt 0 -and $fi.Length -ne $exp) {
+                $reason = ("size {0:N0}, expected {1:N0}" -f $fi.Length, $exp)
+            } else {
+                try {
+                    $fs = [System.IO.File]::OpenRead($p)
+                    $b0 = $fs.ReadByte(); $b1 = $fs.ReadByte()
+                    $fs.Close()
+                    if (-not ($b0 -eq 0x4D -and $b1 -eq 0x5A)) {
+                        $reason = 'not a valid executable (no MZ header)'
+                    }
+                } catch {
+                    $reason = "unreadable: $_"
+                }
+            }
+        }
+        if ($reason) {
+            Write-Host ("[SYSTEM phase]   BAD  {0}  ({1})" -f $rel, $reason) -ForegroundColor Red
+            $badExes += $rel
+        } else {
+            Write-Host ("[SYSTEM phase]   OK   {0}" -f $rel) -ForegroundColor Green
+        }
+    }
+    if ($badExes.Count -gt 0) {
+        Write-Host ""
+        Write-Host "==============================================================" -ForegroundColor Red
+        Write-Host " RECEIVER-PROVIDED EXECUTABLES ARE NOT READY" -ForegroundColor Red
+        Write-Host "==============================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The sender could not read these executables, so the receiver's" -ForegroundColor Yellow
+        Write-Host "Xbox app must download them. The install was paused before they" -ForegroundColor Yellow
+        Write-Host "finished downloading:" -ForegroundColor Yellow
+        $badExes | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+        Write-Host ""
+        Write-Host "No overlay has been applied yet, so the install is still genuine." -ForegroundColor Cyan
+        Write-Host "REMEDIATION:" -ForegroundColor Cyan
+        Write-Host "  1. Click Resume in the Xbox app." -ForegroundColor Cyan
+        Write-Host "  2. Let the download run - watch the install size grow." -ForegroundColor Cyan
+        Write-Host "  3. Click Pause again once it has progressed a few hundred MB." -ForegroundColor Cyan
+        Write-Host "  4. Re-run this script. Repeat until all executables show OK." -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Use -Force to overlay anyway (the install will likely be corrupt)." -ForegroundColor Yellow
+        Write-Host "==============================================================" -ForegroundColor Red
+        if ($Force) {
+            Write-Host "--Force specified - proceeding with overlay despite bad executables." -ForegroundColor Yellow
+        } else {
+            exit 12
+        }
+    } else {
+        Write-Host "[SYSTEM phase] All receiver-provided executables present and valid." -ForegroundColor Green
+    }
+}
+
 # Overlay - critical flags explained:
 #   /E        recurse, include empty dirs
 #   /COPY:DAT data, attributes, timestamps  (NOT ACLs - we want destination

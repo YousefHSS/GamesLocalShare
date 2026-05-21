@@ -114,6 +114,10 @@ if ($PSCmdlet.ParameterSetName -eq 'User') {
         Write-Host ("  Bytes copied:      {0:N0}  ({1:N1} MB)" -f $summary.BytesCopied, ($summary.BytesCopied/1MB))
         Write-Host ("  Skipped files:     {0}" -f $summary.SkippedFiles)
         Write-Host ("  Robocopy exit:     {0}" -f $summary.RobocopyExit)
+        if ($summary.ReceiverProvidedFiles -and @($summary.ReceiverProvidedFiles).Count -gt 0) {
+            Write-Host ("  Receiver downloads: {0} excluded executable(s)" -f @($summary.ReceiverProvidedFiles).Count) -ForegroundColor Yellow
+        }
+        Write-Host ("  Integrity OK:      {0}" -f $summary.IntegrityOk)
     } else {
         Write-Host "WARNING: transfer-summary.json not found at $summaryPath" -ForegroundColor Yellow
     }
@@ -160,72 +164,14 @@ foreach ($svcName in $gsServiceNames) {
 Start-Sleep -Seconds 2
 
 # ---------------------------------------------------------------------------
-# Bypass clipsp.sys minifilter to read MSIXVC-protected EXEs as decrypted.
-# clipsp (Client License Content Protection) transparently decrypts game
-# executables for authorised processes.  Unauthorised reads (even SYSTEM
-# with backup privilege) get raw encrypted bytes.  Strategy:
-#   1. Try detaching clipsp from the game volume (less disruptive).
-#   2. If that fails, try full unload.
-#   3. If both fail, fall back to the old behaviour (encrypted copies).
+# NOTE: MSIXVC-protected executables cannot be read in plaintext by any
+# process other than the licensed game. clipsp is not a Filter Manager
+# minifilter (fltmc detach/unload return FLT_FILTER_NOT_FOUND), and
+# disabling any decrypting filter would only yield ciphertext. Instead we
+# detect unreadable executables during the source scan below, exclude them
+# from the stage, and let the receiver's own Gaming Services download them
+# during Install.
 # ---------------------------------------------------------------------------
-$clipspBypassed = $false
-$clipspBypassMethod = $null
-$gameVolume = (Split-Path -Qualifier $GameFolder)   # e.g. "F:"
-
-Write-Host "[SYSTEM phase] Listing loaded minifilters..."
-try {
-    $fltList = & fltmc 2>&1 | Out-String
-    Write-Host $fltList
-} catch {
-    Write-Host ("[SYSTEM phase]   fltmc list failed: {0}" -f $_) -ForegroundColor Yellow
-}
-
-Write-Host "[SYSTEM phase] Listing clipsp instances..."
-try {
-    $instOut = & fltmc instances -f clipsp 2>&1 | Out-String
-    Write-Host $instOut
-} catch {
-    Write-Host ("[SYSTEM phase]   fltmc instances failed: {0}" -f $_) -ForegroundColor Yellow
-}
-
-# Attempt 1: detach clipsp from the game volume only
-Write-Host "[SYSTEM phase] Detaching clipsp from $gameVolume ..."
-try {
-    $fltOut = & fltmc detach clipsp $gameVolume 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) {
-        $clipspBypassed = $true
-        $clipspBypassMethod = 'detach'
-        Write-Host "[SYSTEM phase]   clipsp detached from $gameVolume" -ForegroundColor Green
-    } else {
-        Write-Host ("[SYSTEM phase]   fltmc detach returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
-        Write-Host $fltOut -ForegroundColor Yellow
-    }
-} catch {
-    Write-Host ("[SYSTEM phase]   detach failed: {0}" -f $_) -ForegroundColor Yellow
-}
-
-# Attempt 2: if detach failed, try full unload
-if (-not $clipspBypassed) {
-    Write-Host "[SYSTEM phase] Trying full unload of clipsp..."
-    try {
-        $fltOut = & fltmc unload clipsp 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
-            $clipspBypassed = $true
-            $clipspBypassMethod = 'unload'
-            Write-Host "[SYSTEM phase]   clipsp unloaded." -ForegroundColor Green
-        } else {
-            Write-Host ("[SYSTEM phase]   fltmc unload returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
-            Write-Host $fltOut -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host ("[SYSTEM phase]   unload failed: {0}" -f $_) -ForegroundColor Yellow
-    }
-}
-
-if (-not $clipspBypassed) {
-    Write-Host "[SYSTEM phase]   WARNING: could not bypass clipsp. Protected EXEs may be copied encrypted." -ForegroundColor Red
-}
-Start-Sleep -Seconds 1
 
 # Sniff package family name from the source folder's ACL
 $pfn = Get-SysAppIdFromAcl -Path $GameFolder
@@ -268,32 +214,46 @@ $rcArgs    = @(
     '/R:1','/W:2','/MT:8','/NP','/NDL','/TEE',
     "/LOG+:$rcLog"
 )
+# Exclude executables the sender cannot read - the receiver downloads them.
+if ($unreadable.Count -gt 0) {
+    $rcArgs += '/XF'
+    foreach ($u in $unreadable) { $rcArgs += "`"$u`"" }
+}
 Write-Host "[SYSTEM phase] robocopy starting..."
 $proc = Start-Process -FilePath 'robocopy.exe' -ArgumentList $rcArgs -NoNewWindow -PassThru -Wait
 $rcExit = $proc.ExitCode
 Write-Host "[SYSTEM phase] robocopy exit: $rcExit (0/1/2/3 = success)"
 
 # ---------------------------------------------------------------------------
-# Restore clipsp minifilter now that the copy is done.
+# Remove stale copies of excluded (receiver-provided) files. A previous run
+# may have staged these executables as encrypted garbage; since the overlay
+# on the receiver runs without /MIR, leaving them here would clobber the
+# receiver's freshly downloaded, valid copies.
 # ---------------------------------------------------------------------------
-if ($clipspBypassed) {
-    Write-Host "[SYSTEM phase] Restoring clipsp minifilter..."
-    try {
-        if ($clipspBypassMethod -eq 'detach') {
-            $fltOut = & fltmc attach clipsp $gameVolume 2>&1 | Out-String
-        } else {
-            $fltOut = & fltmc load clipsp 2>&1 | Out-String
+$staleRemoved = @()
+foreach ($u in $unreadable) {
+    $rel  = $u.Substring($GameFolder.Length).TrimStart('\','/')
+    $dest = Join-Path $destGame $rel
+    if (Test-Path -LiteralPath $dest) {
+        try {
+            Remove-Item -LiteralPath $dest -Force -ErrorAction Stop
+            $staleRemoved += $rel
+        } catch {
+            Write-Host ("[SYSTEM phase]   WARNING: could not remove stale {0}: {1}" -f $rel, $_) -ForegroundColor Yellow
         }
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[SYSTEM phase]   clipsp restored successfully." -ForegroundColor Green
-        } else {
-            Write-Host ("[SYSTEM phase]   WARNING: clipsp restore returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
-            Write-Host $fltOut -ForegroundColor Yellow
-            Write-Host "[SYSTEM phase]   A reboot will restore clipsp automatically." -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host ("[SYSTEM phase]   WARNING: could not restore clipsp: {0}" -f $_) -ForegroundColor Yellow
-        Write-Host "[SYSTEM phase]   A reboot will restore clipsp automatically." -ForegroundColor Yellow
+    }
+}
+if ($staleRemoved.Count -gt 0) {
+    Write-Host ("[SYSTEM phase] Removed {0} stale excluded file(s) from the stage." -f $staleRemoved.Count) -ForegroundColor Yellow
+}
+
+if ($unreadable.Count -gt 0) {
+    Write-Host ""
+    Write-Host ("[SYSTEM phase] {0} protected executable(s) could not be read on this PC and" -f $unreadable.Count) -ForegroundColor Yellow
+    Write-Host "[SYSTEM phase] were EXCLUDED from the stage. The receiver's Xbox app must" -ForegroundColor Yellow
+    Write-Host "[SYSTEM phase] download these during Install before pausing:" -ForegroundColor Yellow
+    foreach ($u in $unreadable) {
+        Write-Host ("[SYSTEM phase]   - {0}" -f $u.Substring($GameFolder.Length).TrimStart('\','/')) -ForegroundColor DarkYellow
     }
 }
 
@@ -308,10 +268,17 @@ $destCount   = $destFiles.Count
 # executables) which would otherwise produce a corrupt staged copy.
 # ---------------------------------------------------------------------------
 Write-Host "[SYSTEM phase] Verifying staged copy integrity..."
+# Files deliberately excluded from the stage (sender could not read them);
+# their absence at the destination is expected, not an integrity failure.
+$excludedRel = @{}
+foreach ($u in $unreadable) {
+    $excludedRel[$u.Substring($GameFolder.Length).TrimStart('\','/')] = $true
+}
 $missingFiles  = @()
 $mismatchFiles = @()
 foreach ($f in $allFiles) {
     $rel  = $f.FullName.Substring($GameFolder.Length).TrimStart('\','/')
+    if ($excludedRel.ContainsKey($rel)) { continue }
     $dest = Join-Path $destGame $rel
     if (-not (Test-Path -LiteralPath $dest)) {
         $missingFiles += $rel
@@ -326,9 +293,9 @@ foreach ($f in $allFiles) {
         }
     }
 }
-Write-Host ("[SYSTEM phase] Integrity: {0} missing, {1} size-mismatch" -f $missingFiles.Count, $mismatchFiles.Count)
+Write-Host ("[SYSTEM phase] Integrity: {0} missing, {1} size-mismatch, robocopy exit {2}" -f $missingFiles.Count, $mismatchFiles.Count, $rcExit)
 
-$integrityOk = ($missingFiles.Count -eq 0 -and $mismatchFiles.Count -eq 0)
+$integrityOk = ($missingFiles.Count -eq 0 -and $mismatchFiles.Count -eq 0 -and $rcExit -lt 8)
 
 if (-not $integrityOk) {
     Write-Host ""
@@ -386,25 +353,40 @@ if ($stoppedServices.Count -gt 0) {
     }
 }
 
+# Receiver-provided files: executables excluded from the stage that the
+# receiver's Gaming Services must download itself. Includes the expected
+# size so the receiver can verify the download finished.
+$receiverProvided = @()
+foreach ($u in $unreadable) {
+    $fi  = $allFiles | Where-Object { $_.FullName -eq $u } | Select-Object -First 1
+    $rel = $u.Substring($GameFolder.Length).TrimStart('\','/')
+    $receiverProvided += [pscustomobject]@{
+        Path = $rel
+        Size = if ($fi) { [int64]$fi.Length } else { [int64]0 }
+    }
+}
+
 $summary = [ordered]@{
-    StartedAtUtc      = (Get-Date).ToUniversalTime().ToString('o')
-    SenderHost        = $env:COMPUTERNAME
-    Identity          = $identity
-    GameFolder        = $GameFolder
-    GameName          = $gameName
-    Destination       = $destGame
-    PackageFamilyName = $pfn
-    SourceFileCount   = $totalCount
-    SourceBytes       = [int64]$totalBytes
-    UnreadableFiles   = $unreadable
-    SkippedFiles      = $unreadable.Count
-    FilesCopied       = $destCount
-    BytesCopied       = [int64]$destBytes
-    RobocopyExit      = $rcExit
-    RobocopyLog       = $rcLog
-    IntegrityOk       = $integrityOk
-    MissingFiles      = $missingFiles
-    MismatchFiles     = $mismatchFiles
+    StartedAtUtc          = (Get-Date).ToUniversalTime().ToString('o')
+    SenderHost            = $env:COMPUTERNAME
+    Identity              = $identity
+    GameFolder            = $GameFolder
+    GameName              = $gameName
+    Destination           = $destGame
+    PackageFamilyName     = $pfn
+    SourceFileCount       = $totalCount
+    SourceBytes           = [int64]$totalBytes
+    UnreadableFiles       = $unreadable
+    SkippedFiles          = $unreadable.Count
+    ReceiverProvidedFiles = $receiverProvided
+    StaleRemovedFiles     = $staleRemoved
+    FilesCopied           = $destCount
+    BytesCopied           = [int64]$destBytes
+    RobocopyExit          = $rcExit
+    RobocopyLog           = $rcLog
+    IntegrityOk           = $integrityOk
+    MissingFiles          = $missingFiles
+    MismatchFiles         = $mismatchFiles
 }
 
 $summaryPath = Join-Path $destGame 'transfer-summary.json'
