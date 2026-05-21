@@ -21,16 +21,22 @@ Two scripts. Two PCs. No human steps in between.
 
 ## What the scripts do
 
+> **See `..\MSIXVC-TRANSFER-SOLVED.md` for the current, working method and
+> the full background.** This README describes the script mechanics.
+
 ### `xbox-transfer-sender.ps1` (run on PC A)
 
 1. Self-elevates via UAC.
 2. Downloads `PsExec64.exe` (Sysinternals) to `auto\tools\` on first run.
-3. Re-launches itself as `NT AUTHORITY\SYSTEM` so MSIX-protected files
-   (the `.exe`s with SYSAPPID-conditional ACLs) become readable.
+3. Re-launches itself as `NT AUTHORITY\SYSTEM`.
 4. Sniffs the `PackageFamilyName` from the source folder's ACL.
-5. Robocopy `/E /COPYALL /B` to `-Destination\<GameName>\`.
-6. Writes `transfer-summary.json` next to the staged copy so the receiver
-   doesn't need any parameters typed in.
+5. Robocopy `/E /COPYALL /B` to `-Destination\<GameName>\`, excluding any
+   content-protected executables it cannot read (`/XF`).
+6. Back in the user context, **rescues the protected executables** by
+   copying them from inside the game's package context
+   (`Invoke-CommandInDesktopPackage` -> clipsp serves decrypted bytes).
+   This makes the stage complete - the receiver downloads nothing extra.
+7. Writes an honest `transfer-summary.json` next to the staged copy.
 
 ### `xbox-transfer-receiver.ps1` (run on PC B)
 

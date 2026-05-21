@@ -1,5 +1,17 @@
 # Xbox PC Transfer Validation - Conversation Handoff
 
+> **SUPERSEDED (2026-05-21).** The transfer is now SOLVED and proven
+> end-to-end. Read **`MSIXVC-TRANSFER-SOLVED.md`** for the current, working
+> method. The content below is historical (state as of 2026-05-18) and is
+> kept only for the hypothesis history in section 2.
+>
+> Key correction: this doc's later assumption that `clipsp` is a minifilter
+> is **wrong** - `clipsp` is not a Filter Manager filter. Protected
+> executables are extracted by copying from inside the game's package
+> context (`Invoke-CommandInDesktopPackage`). See the solved doc.
+
+---
+
 > **Purpose of this doc**: Resume the Xbox-PC-transfer experiment on a different
 > machine / a fresh AI chat. Read this top-to-bottom before doing anything.
 > Everything below is the synthesized state of the conversation as of
