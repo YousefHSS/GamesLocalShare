@@ -1,0 +1,32 @@
+﻿{
+    "StartedAtUtc":  "2026-05-21T13:48:38.2506484Z",
+    "SenderHost":  "DESKTOP-FHVD1S8",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "GameFolder":  "C:\\XboxGames\\Subnautica 2",
+    "GameName":  "Subnautica 2",
+    "Destination":  "G:\\stage\\Subnautica 2",
+    "PackageFamilyName":  "UnknownWorldsEntertainmen.Subnautica2_bh1f6rvenfkm2",
+    "SourceFileCount":  292,
+    "SourceBytes":  14254736491,
+    "UnreadableFiles":  [
+                            "C:\\XboxGames\\Subnautica 2\\Content\\Subnautica2.exe",
+                            "C:\\XboxGames\\Subnautica 2\\Content\\Engine\\Binaries\\Win64\\CrashReportClient.exe",
+                            "C:\\XboxGames\\Subnautica 2\\Content\\Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe",
+                            "C:\\XboxGames\\Subnautica 2\\Content\\Subnautica2\\Plugins\\Sentry\\Binaries\\Win64\\crashpad_handler.exe"
+                        ],
+    "SkippedFiles":  4,
+    "FilesCopied":  288,
+    "BytesCopied":  14016652395,
+    "RobocopyExit":  9,
+    "RobocopyLog":  "F:\\Documents\\GamesLocalShare\\PLANNING\\xbox-validation\\auto\\runs\\sender-robocopy-20260521-163901.log",
+    "IntegrityOk":  false,
+    "MissingFiles":  [
+                         "Content\\Subnautica2.exe",
+                         "Content\\Engine\\Binaries\\Win64\\CrashReportClient.exe",
+                         "Content\\Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe",
+                         "Content\\Subnautica2\\Plugins\\Sentry\\Binaries\\Win64\\crashpad_handler.exe"
+                     ],
+    "MismatchFiles":  [
+
+                      ]
+}
