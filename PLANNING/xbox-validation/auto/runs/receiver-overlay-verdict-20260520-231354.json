@@ -1,0 +1,79 @@
+﻿{
+    "StartedAtUtc":  "2026-05-20T20:15:24.3273217Z",
+    "ReceiverHost":  "GELERZ",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "E:\\stage\\Subnautica 2",
+    "Deploy":  "C:\\XboxGames\\2B20BAFD-957B-4776-A491-80157CBB90E2",
+    "GameName":  "Subnautica 2",
+    "PackageFamilyName":  "UnknownWorldsEntertainmen.Subnautica2_bh1f6rvenfkm2",
+    "SourceBytes":  14254736103,
+    "SourceFileCount":  291,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  290,
+    "PreOverlayBytes":  14254360203,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  290,
+    "PostOverlayBytes":  14254374631,
+    "RobocopyExit":  3,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  7875160014,
+                     "SentBytes":  287301250,
+                     "Time":  "\/Date(1779308063324)\/"
+                 },
+    "ObserveSeconds":  360,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  0.05,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  0.29,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  0.75,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\UnknownWorldsEntertainmen.Subnautica2_0.11.3933.0_x64__bh1f6rvenfkm2",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  1.48,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\UnknownWorldsEntertainmen.Subnautica2_0.11.3933.0_x64__bh1f6rvenfkm2",
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "SignatureKind":  "Store",
+                       "Status":  "Ok",
+                       "InstallLocation":  "C:\\Program Files\\WindowsApps\\UnknownWorldsEntertainmen.Subnautica2_0.11.3933.0_x64__bh1f6rvenfkm2",
+                       "PackageFullName":  "UnknownWorldsEntertainmen.Subnautica2_0.11.3933.0_x64__bh1f6rvenfkm2",
+                       "Installed":  true
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  1553984,
+                       "SentBytes":  402979,
+                       "ReceivedMB":  1.48,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  1.48,
+    "Hypothesis":  "H1_FULL_SKIP"
+}

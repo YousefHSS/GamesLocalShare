@@ -159,6 +159,29 @@ foreach ($svcName in $gsServiceNames) {
 }
 Start-Sleep -Seconds 2
 
+# ---------------------------------------------------------------------------
+# Unload the clipsp.sys minifilter to make MSIXVC-protected EXEs readable.
+# clipsp (Client License Content Protection) is a kernel minifilter that
+# blocks reads on game executables even when running as SYSTEM with backup
+# privilege.  Stopping Gaming Services above releases user-mode locks but
+# the minifilter stays loaded.  Temporarily unloading it lets robocopy
+# read every file.  We reload it after the copy.
+# ---------------------------------------------------------------------------
+$clipspUnloaded = $false
+Write-Host "[SYSTEM phase] Unloading clipsp minifilter to unlock protected EXEs..."
+try {
+    $fltOut = & fltmc unload clipsp 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $clipspUnloaded = $true
+        Write-Host "[SYSTEM phase]   clipsp unloaded successfully." -ForegroundColor Green
+    } else {
+        Write-Host ("[SYSTEM phase]   fltmc unload clipsp returned {0}: {1}" -f $LASTEXITCODE, $fltOut) -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host ("[SYSTEM phase]   WARNING: could not unload clipsp: {0}" -f $_) -ForegroundColor Yellow
+}
+Start-Sleep -Seconds 1
+
 # Sniff package family name from the source folder's ACL
 $pfn = Get-SysAppIdFromAcl -Path $GameFolder
 if (-not $pfn) {
@@ -204,6 +227,25 @@ Write-Host "[SYSTEM phase] robocopy starting..."
 $proc = Start-Process -FilePath 'robocopy.exe' -ArgumentList $rcArgs -NoNewWindow -PassThru -Wait
 $rcExit = $proc.ExitCode
 Write-Host "[SYSTEM phase] robocopy exit: $rcExit (0/1/2/3 = success)"
+
+# ---------------------------------------------------------------------------
+# Reload clipsp minifilter now that the copy is done.
+# ---------------------------------------------------------------------------
+if ($clipspUnloaded) {
+    Write-Host "[SYSTEM phase] Reloading clipsp minifilter..."
+    try {
+        $fltOut = & fltmc load clipsp 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[SYSTEM phase]   clipsp reloaded successfully." -ForegroundColor Green
+        } else {
+            Write-Host ("[SYSTEM phase]   WARNING: fltmc load clipsp returned {0}: {1}" -f $LASTEXITCODE, $fltOut) -ForegroundColor Yellow
+            Write-Host "[SYSTEM phase]   A reboot will restore clipsp automatically." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host ("[SYSTEM phase]   WARNING: could not reload clipsp: {0}" -f $_) -ForegroundColor Yellow
+        Write-Host "[SYSTEM phase]   A reboot will restore clipsp automatically." -ForegroundColor Yellow
+    }
+}
 
 # Re-scan destination for verification
 $destFiles   = @(Get-ChildItem -LiteralPath $destGame -Recurse -File -Force -ErrorAction SilentlyContinue)
