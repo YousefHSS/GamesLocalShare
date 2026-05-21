@@ -160,14 +160,18 @@ foreach ($svcName in $gsServiceNames) {
 Start-Sleep -Seconds 2
 
 # ---------------------------------------------------------------------------
-# Unload the clipsp.sys minifilter to make MSIXVC-protected EXEs readable.
-# clipsp (Client License Content Protection) is a kernel minifilter that
-# blocks reads on game executables even when running as SYSTEM with backup
-# privilege.  Stopping Gaming Services above releases user-mode locks but
-# the minifilter stays loaded.  Temporarily unloading it lets robocopy
-# read every file.  We reload it after the copy.
+# Bypass clipsp.sys minifilter to read MSIXVC-protected EXEs as decrypted.
+# clipsp (Client License Content Protection) transparently decrypts game
+# executables for authorised processes.  Unauthorised reads (even SYSTEM
+# with backup privilege) get raw encrypted bytes.  Strategy:
+#   1. Try detaching clipsp from the game volume (less disruptive).
+#   2. If that fails, try full unload.
+#   3. If both fail, fall back to the old behaviour (encrypted copies).
 # ---------------------------------------------------------------------------
-$clipspUnloaded = $false
+$clipspBypassed = $false
+$clipspBypassMethod = $null
+$gameVolume = (Split-Path -Qualifier $GameFolder)   # e.g. "F:"
+
 Write-Host "[SYSTEM phase] Listing loaded minifilters..."
 try {
     $fltList = & fltmc 2>&1 | Out-String
@@ -176,18 +180,50 @@ try {
     Write-Host ("[SYSTEM phase]   fltmc list failed: {0}" -f $_) -ForegroundColor Yellow
 }
 
-Write-Host "[SYSTEM phase] Unloading clipsp minifilter to unlock protected EXEs..."
+Write-Host "[SYSTEM phase] Listing clipsp instances..."
 try {
-    $fltOut = & fltmc unload clipsp 2>&1 | Out-String
+    $instOut = & fltmc instances -f clipsp 2>&1 | Out-String
+    Write-Host $instOut
+} catch {
+    Write-Host ("[SYSTEM phase]   fltmc instances failed: {0}" -f $_) -ForegroundColor Yellow
+}
+
+# Attempt 1: detach clipsp from the game volume only
+Write-Host "[SYSTEM phase] Detaching clipsp from $gameVolume ..."
+try {
+    $fltOut = & fltmc detach clipsp $gameVolume 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) {
-        $clipspUnloaded = $true
-        Write-Host "[SYSTEM phase]   clipsp unloaded successfully." -ForegroundColor Green
+        $clipspBypassed = $true
+        $clipspBypassMethod = 'detach'
+        Write-Host "[SYSTEM phase]   clipsp detached from $gameVolume" -ForegroundColor Green
     } else {
-        Write-Host ("[SYSTEM phase]   fltmc unload clipsp returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
+        Write-Host ("[SYSTEM phase]   fltmc detach returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
         Write-Host $fltOut -ForegroundColor Yellow
     }
 } catch {
-    Write-Host ("[SYSTEM phase]   WARNING: could not unload clipsp: {0}" -f $_) -ForegroundColor Yellow
+    Write-Host ("[SYSTEM phase]   detach failed: {0}" -f $_) -ForegroundColor Yellow
+}
+
+# Attempt 2: if detach failed, try full unload
+if (-not $clipspBypassed) {
+    Write-Host "[SYSTEM phase] Trying full unload of clipsp..."
+    try {
+        $fltOut = & fltmc unload clipsp 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            $clipspBypassed = $true
+            $clipspBypassMethod = 'unload'
+            Write-Host "[SYSTEM phase]   clipsp unloaded." -ForegroundColor Green
+        } else {
+            Write-Host ("[SYSTEM phase]   fltmc unload returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
+            Write-Host $fltOut -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host ("[SYSTEM phase]   unload failed: {0}" -f $_) -ForegroundColor Yellow
+    }
+}
+
+if (-not $clipspBypassed) {
+    Write-Host "[SYSTEM phase]   WARNING: could not bypass clipsp. Protected EXEs may be copied encrypted." -ForegroundColor Red
 }
 Start-Sleep -Seconds 1
 
@@ -238,20 +274,25 @@ $rcExit = $proc.ExitCode
 Write-Host "[SYSTEM phase] robocopy exit: $rcExit (0/1/2/3 = success)"
 
 # ---------------------------------------------------------------------------
-# Reload clipsp minifilter now that the copy is done.
+# Restore clipsp minifilter now that the copy is done.
 # ---------------------------------------------------------------------------
-if ($clipspUnloaded) {
-    Write-Host "[SYSTEM phase] Reloading clipsp minifilter..."
+if ($clipspBypassed) {
+    Write-Host "[SYSTEM phase] Restoring clipsp minifilter..."
     try {
-        $fltOut = & fltmc load clipsp 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[SYSTEM phase]   clipsp reloaded successfully." -ForegroundColor Green
+        if ($clipspBypassMethod -eq 'detach') {
+            $fltOut = & fltmc attach clipsp $gameVolume 2>&1 | Out-String
         } else {
-            Write-Host ("[SYSTEM phase]   WARNING: fltmc load clipsp returned {0}: {1}" -f $LASTEXITCODE, $fltOut) -ForegroundColor Yellow
+            $fltOut = & fltmc load clipsp 2>&1 | Out-String
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[SYSTEM phase]   clipsp restored successfully." -ForegroundColor Green
+        } else {
+            Write-Host ("[SYSTEM phase]   WARNING: clipsp restore returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
+            Write-Host $fltOut -ForegroundColor Yellow
             Write-Host "[SYSTEM phase]   A reboot will restore clipsp automatically." -ForegroundColor Yellow
         }
     } catch {
-        Write-Host ("[SYSTEM phase]   WARNING: could not reload clipsp: {0}" -f $_) -ForegroundColor Yellow
+        Write-Host ("[SYSTEM phase]   WARNING: could not restore clipsp: {0}" -f $_) -ForegroundColor Yellow
         Write-Host "[SYSTEM phase]   A reboot will restore clipsp automatically." -ForegroundColor Yellow
     }
 }
