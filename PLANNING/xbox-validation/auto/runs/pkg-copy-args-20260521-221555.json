@@ -1,0 +1,11 @@
+﻿{
+    "Files":  [
+                  "Content\\Subnautica2.exe",
+                  "Content\\Engine\\Binaries\\Win64\\CrashReportClient.exe",
+                  "Content\\Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe",
+                  "Content\\Subnautica2\\Plugins\\Sentry\\Binaries\\Win64\\crashpad_handler.exe"
+              ],
+    "DestGame":  "G:\\stage\\Subnautica 2",
+    "GameFolder":  "F:\\Games\\Subnautica 2",
+    "ResultPath":  "F:\\Documents\\GamesLocalShare\\PLANNING\\xbox-validation\\auto\\runs\\pkg-copy-result-20260521-221555.json"
+}

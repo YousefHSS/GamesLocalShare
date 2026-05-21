@@ -1,0 +1,33 @@
+﻿{
+    "Identity":  "DESKTOP-FHVD1S8\\SIGMA",
+    "Files":  [
+                  {
+                      "Path":  "Content\\Subnautica2.exe",
+                      "Copied":  true,
+                      "Header":  "4d5a",
+                      "Size":  361472,
+                      "Error":  ""
+                  },
+                  {
+                      "Path":  "Content\\Engine\\Binaries\\Win64\\CrashReportClient.exe",
+                      "Copied":  true,
+                      "Header":  "4d5a",
+                      "Size":  27837952,
+                      "Error":  ""
+                  },
+                  {
+                      "Path":  "Content\\Subnautica2\\Binaries\\WinGDK\\Subnautica2-WinGDK-Shipping.exe",
+                      "Copied":  true,
+                      "Header":  "4d5a",
+                      "Size":  208761344,
+                      "Error":  ""
+                  },
+                  {
+                      "Path":  "Content\\Subnautica2\\Plugins\\Sentry\\Binaries\\Win64\\crashpad_handler.exe",
+                      "Copied":  true,
+                      "Header":  "4d5a",
+                      "Size":  1123328,
+                      "Error":  ""
+                  }
+              ]
+}

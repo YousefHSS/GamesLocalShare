@@ -109,6 +109,47 @@ if ($PSCmdlet.ParameterSetName -eq 'User') {
         Write-Host ""
         Write-Host "Transfer summary written to: $summaryPath" -ForegroundColor Green
         $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+
+        # -------------------------------------------------------------------
+        # Rescue protected executables the SYSTEM phase could not read. A
+        # process carrying the game's package identity CAN read them
+        # decrypted (clipsp serves plaintext to authorised readers), so we
+        # copy them from inside the game's package context straight into the
+        # stage. When this succeeds the stage is complete and the receiver
+        # needs no extra download.
+        # -------------------------------------------------------------------
+        $rp = @($summary.ReceiverProvidedFiles)
+        if ($rp.Count -gt 0) {
+            Write-Host ""
+            Write-Host ("Rescuing {0} protected executable(s) via package context..." -f $rp.Count) -ForegroundColor Cyan
+            $relPaths = @($rp | ForEach-Object { [string]$_.Path })
+            $rescue = Copy-ProtectedFilesViaPackage `
+                -PackageFamilyName $summary.PackageFamilyName `
+                -GameFolder $GameFolder `
+                -DestGame $destGame `
+                -RelativePaths $relPaths `
+                -RunsDir $runsDir
+            foreach ($fr in @($rescue.Files)) {
+                if ($fr.Copied -and $fr.Header -eq '4d5a') {
+                    Write-Host ("  OK   {0}" -f $fr.Path) -ForegroundColor Green
+                } else {
+                    $why = if ($fr.Error) { $fr.Error } else { "header=$($fr.Header)" }
+                    Write-Host ("  FAIL {0}  ({1})" -f $fr.Path, $why) -ForegroundColor Red
+                }
+            }
+            if ($rescue.Ok) {
+                Write-Host "All protected executables staged - receiver needs no extra download." -ForegroundColor Green
+                $summary.ReceiverProvidedFiles = @()
+                $summary.UnreadableFiles       = @()
+                $summary.SkippedFiles          = 0
+                $summary | Add-Member -NotePropertyName StagedProtectedFiles -NotePropertyValue $relPaths -Force
+                $summary | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+            } else {
+                Write-Host ("Package-context rescue incomplete: {0}" -f $rescue.Reason) -ForegroundColor Yellow
+                Write-Host "The receiver will still need to download these executables." -ForegroundColor Yellow
+            }
+        }
+
         Write-Host ("  PackageFamilyName: {0}" -f $summary.PackageFamilyName)
         Write-Host ("  Files copied:      {0}" -f $summary.FilesCopied)
         Write-Host ("  Bytes copied:      {0:N0}  ({1:N1} MB)" -f $summary.BytesCopied, ($summary.BytesCopied/1MB))

@@ -279,3 +279,132 @@ function Get-SysAppIdFromAcl {
     if ($m.Count -gt 0) { return $m[0].Groups[1].Value }
     return $null
 }
+
+function Copy-ProtectedFilesViaPackage {
+    <#
+        Copy MSIXVC-protected executables out of an installed game by running
+        the copy from inside the game's own package context.
+
+        clipsp decrypts protected files for any process carrying the game's
+        package identity, so a helper launched via Invoke-CommandInDesktopPackage
+        reads them as valid plaintext executables - something even
+        NT AUTHORITY\SYSTEM with backup privilege cannot do.
+
+        Returns a [pscustomobject] with:
+          Ok     - $true only if every requested file was copied with a valid
+                   'MZ' (4d5a) executable header
+          Reason - short status string
+          Files  - per-file results (Path / Copied / Header / Size / Error)
+    #>
+    param(
+        [Parameter(Mandatory)] [string]   $PackageFamilyName,
+        [Parameter(Mandatory)] [string]   $GameFolder,
+        [Parameter(Mandatory)] [string]   $DestGame,
+        [Parameter(Mandatory)] [string[]] $RelativePaths,
+        [Parameter(Mandatory)] [string]   $RunsDir
+    )
+
+    if (-not (Get-Command Invoke-CommandInDesktopPackage -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'Invoke-CommandInDesktopPackage not available'; Files = @() }
+    }
+
+    # Find the package and any AppId - package identity (not the specific
+    # app) is what grants clipsp decryption.
+    $pkg = Get-AppxPackage -PackageTypeFilter Main -ErrorAction SilentlyContinue |
+        Where-Object { $_.PackageFamilyName -eq $PackageFamilyName } | Select-Object -First 1
+    if (-not $pkg) {
+        return [pscustomobject]@{ Ok = $false; Reason = "package not installed: $PackageFamilyName"; Files = @() }
+    }
+    $appId = $null
+    try {
+        $manifest = Get-AppxPackageManifest -Package $pkg.PackageFullName
+        $appId = ($manifest.Package.Applications.Application | Select-Object -First 1).Id
+    } catch { }
+    if (-not $appId) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'could not determine AppId'; Files = @() }
+    }
+
+    $stamp      = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $helperPath = Join-Path $RunsDir "pkg-copy-helper-$stamp.ps1"
+    $argsPath   = Join-Path $RunsDir "pkg-copy-args-$stamp.json"
+    $resultPath = Join-Path $RunsDir "pkg-copy-result-$stamp.json"
+
+    @{
+        GameFolder = $GameFolder
+        DestGame   = $DestGame
+        Files      = $RelativePaths
+        ResultPath = $resultPath
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $argsPath -Encoding UTF8
+
+    # Helper script - runs inside the package context.
+    $helper = @'
+param([Parameter(Mandatory)][string]$ArgsFile)
+$ErrorActionPreference = 'SilentlyContinue'
+$a = Get-Content -LiteralPath $ArgsFile -Raw | ConvertFrom-Json
+$res = @()
+foreach ($rel in @($a.Files)) {
+    $src = Join-Path $a.GameFolder $rel
+    $dst = Join-Path $a.DestGame   $rel
+    $e = [ordered]@{ Path = $rel; Copied = $false; Header = ''; Size = 0; Error = '' }
+    try {
+        $fs  = [System.IO.File]::Open($src, 'Open', 'Read', 'ReadWrite')
+        $len = $fs.Length
+        $buf = New-Object byte[] $len
+        $off = 0
+        while ($off -lt $len) {
+            $n = $fs.Read($buf, $off, $len - $off)
+            if ($n -le 0) { break }
+            $off += $n
+        }
+        $fs.Close()
+        $dir = Split-Path -Parent $dst
+        if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+        [System.IO.File]::WriteAllBytes($dst, $buf)
+        if ($len -ge 2) { $e.Header = ('{0:x2}{1:x2}' -f $buf[0], $buf[1]) }
+        $e.Size   = $len
+        $e.Copied = $true
+    } catch {
+        $e.Error = "$_"
+    }
+    $res += [pscustomobject]$e
+}
+[pscustomobject]@{
+    Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    Files    = $res
+} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $a.ResultPath -Encoding UTF8
+'@
+    Set-Content -LiteralPath $helperPath -Value $helper -Encoding UTF8
+    if (Test-Path -LiteralPath $resultPath) { Remove-Item -LiteralPath $resultPath -Force }
+
+    $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    try {
+        Invoke-CommandInDesktopPackage -PackageFamilyName $PackageFamilyName -AppId $appId `
+            -Command $ps `
+            -Args "-NoProfile -ExecutionPolicy Bypass -File `"$helperPath`" -ArgsFile `"$argsPath`"" `
+            -ErrorAction Stop
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Reason = "Invoke-CommandInDesktopPackage failed: $_"; Files = @() }
+    }
+
+    # The launched process is asynchronous - poll for its result file.
+    $deadline = (Get-Date).AddSeconds(240)
+    while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $resultPath)) {
+        Start-Sleep -Milliseconds 1000
+    }
+    if (-not (Test-Path -LiteralPath $resultPath)) {
+        return [pscustomobject]@{ Ok = $false; Reason = 'package-context copy timed out (240s)'; Files = @() }
+    }
+
+    $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    $files  = @($result.Files)
+    $bad    = @($files | Where-Object { -not $_.Copied -or $_.Header -ne '4d5a' })
+    $allOk  = ($files.Count -eq $RelativePaths.Count) -and ($bad.Count -eq 0)
+    return [pscustomobject]@{
+        Ok       = [bool]$allOk
+        Reason   = if ($allOk) { 'ok' } else { 'one or more files not decrypted' }
+        Identity = $result.Identity
+        Files    = $files
+    }
+}
