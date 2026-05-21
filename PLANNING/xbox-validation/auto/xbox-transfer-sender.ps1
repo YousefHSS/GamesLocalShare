@@ -168,14 +168,23 @@ Start-Sleep -Seconds 2
 # read every file.  We reload it after the copy.
 # ---------------------------------------------------------------------------
 $clipspUnloaded = $false
+Write-Host "[SYSTEM phase] Listing loaded minifilters..."
+try {
+    $fltList = & fltmc 2>&1 | Out-String
+    Write-Host $fltList
+} catch {
+    Write-Host ("[SYSTEM phase]   fltmc list failed: {0}" -f $_) -ForegroundColor Yellow
+}
+
 Write-Host "[SYSTEM phase] Unloading clipsp minifilter to unlock protected EXEs..."
 try {
-    $fltOut = & fltmc unload clipsp 2>&1
+    $fltOut = & fltmc unload clipsp 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) {
         $clipspUnloaded = $true
         Write-Host "[SYSTEM phase]   clipsp unloaded successfully." -ForegroundColor Green
     } else {
-        Write-Host ("[SYSTEM phase]   fltmc unload clipsp returned {0}: {1}" -f $LASTEXITCODE, $fltOut) -ForegroundColor Yellow
+        Write-Host ("[SYSTEM phase]   fltmc unload clipsp returned {0}:" -f $LASTEXITCODE) -ForegroundColor Yellow
+        Write-Host $fltOut -ForegroundColor Yellow
     }
 } catch {
     Write-Host ("[SYSTEM phase]   WARNING: could not unload clipsp: {0}" -f $_) -ForegroundColor Yellow
