@@ -2728,6 +2728,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             XboxTransfer = state;
+            // XboxTransferState is mutated in place, so the generated setter sees
+            // no reference change and skips its notification. Force it so the
+            // bridge re-pushes the updated state (step, progress) to the WebUI.
+            OnPropertyChanged(nameof(XboxTransfer));
             StatusMessage = $"Xbox: {state.StatusMessage}";
         });
     }

@@ -25,6 +25,7 @@ public class XboxTransferService
         new(@"t\+\s*(\d+)s\s+rx=\s*([\d.,]+)\s*MB\s+installed=(\w+)", RegexOptions.Compiled);
 
     private CancellationTokenSource? _cts;
+    private string? _overlayDestPath;
 
     public event EventHandler<XboxTransferState>? StateChanged;
     public event EventHandler<string>? LogMessage;
@@ -90,7 +91,9 @@ public class XboxTransferService
         try
         {
             _state.CurrentStep = XboxTransferStep.PollingForFolder;
+            _state.OverlayProgress = 0;
             _state.StatusMessage = "Starting overlay transfer...";
+            _overlayDestPath = null;
             RaiseStateChanged();
 
             XboxScriptHost host;
@@ -112,11 +115,19 @@ public class XboxTransferService
             if (force)
                 args.Add("-Force");
 
+            // Once the script reports the install folder, poll its size to drive
+            // a progress bar through the overlay copy.
+            using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var progressTask = PollOverlayProgressAsync(progressCts.Token);
+
             int exitCode = await host.RunAsync(host.ReceiverScript, args, line =>
             {
                 Log(line);
                 ApplyProgressLine(line);
             }, confirmPausePrompt: true, ct: token);
+
+            progressCts.Cancel();
+            try { await progressTask; } catch { }
 
             Log($"Receiver script exit code: {exitCode}");
 
@@ -239,6 +250,17 @@ public class XboxTransferService
             return;
         }
 
+        // Capture the install folder the script settled on, so the progress
+        // poller knows which directory to measure.
+        const string destMarker = "Final destination:";
+        var destIdx = line.IndexOf(destMarker, StringComparison.Ordinal);
+        if (destIdx >= 0)
+        {
+            var p = line[(destIdx + destMarker.Length)..].Trim();
+            if (p.Length > 0)
+                _overlayDestPath = p;
+        }
+
         XboxTransferStep? step = null;
         string? status = null;
 
@@ -261,6 +283,7 @@ public class XboxTransferService
         {
             step = XboxTransferStep.WaitingForResume;
             status = "Overlay done. Click RESUME in the Xbox app now.";
+            _state.OverlayProgress = 0;
         }
 
         if (step != null)
@@ -268,6 +291,49 @@ public class XboxTransferService
             _state.CurrentStep = step.Value;
             _state.StatusMessage = status ?? _state.StatusMessage;
             RaiseStateChanged();
+        }
+    }
+
+    /// <summary>
+    /// While the overlay robocopy runs, measures the install folder against the
+    /// staged source size to drive a progress bar.
+    /// </summary>
+    private async Task PollOverlayProgressAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(1500, ct); }
+            catch (OperationCanceledException) { return; }
+
+            if (_overlayDestPath == null ||
+                _state.CurrentStep != XboxTransferStep.Overlaying ||
+                _state.SourceBytes <= 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!Directory.Exists(_overlayDestPath))
+                    continue;
+
+                long bytes = 0;
+                foreach (var f in new DirectoryInfo(_overlayDestPath)
+                             .EnumerateFiles("*", SearchOption.AllDirectories))
+                {
+                    bytes += f.Length;
+                }
+
+                _state.OverlayProgress = Math.Min(100.0, bytes * 100.0 / _state.SourceBytes);
+                _state.StatusMessage =
+                    $"Overlaying: {bytes / 1024d / 1024d:N0} / " +
+                    $"{_state.SourceBytes / 1024d / 1024d:N0} MB ({_state.OverlayProgress:N0}%)";
+                RaiseStateChanged();
+            }
+            catch
+            {
+                // Enumeration can race with robocopy writing files; ignore.
+            }
         }
     }
 

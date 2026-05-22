@@ -135,7 +135,10 @@ function Invoke-AsSystem {
                 $sr = New-Object System.IO.StreamReader($fs)
                 $chunk = $sr.ReadToEnd()
                 $sr.Close(); $fs.Close()
-                if ($chunk) { Write-Host $chunk -NoNewline }
+                # Write straight to stdout and flush: when this script's stdout
+                # is a redirected pipe (the app captures it) Write-Host is
+                # block-buffered and the caller sees nothing until exit.
+                if ($chunk) { [Console]::Out.Write($chunk); [Console]::Out.Flush() }
                 $lastLen = $fi.Length
             }
         } catch { }
@@ -146,7 +149,7 @@ function Invoke-AsSystem {
         if ($fi.Length -gt $lastLen) {
             $tail = Get-Content -LiteralPath $LogPath -Raw
             $tail = $tail.Substring($lastLen)
-            Write-Host $tail -NoNewline
+            [Console]::Out.Write($tail); [Console]::Out.Flush()
         }
     } catch { }
 
