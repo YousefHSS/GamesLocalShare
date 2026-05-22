@@ -29,6 +29,7 @@ public class XboxSenderService
 
     private CancellationTokenSource? _cts;
     private long _totalSourceBytes;
+    private long _stagingBaselineBytes = -1;
 
     public event EventHandler<XboxTransferState>? StateChanged;
     public event EventHandler<string>? LogMessage;
@@ -69,9 +70,16 @@ public class XboxSenderService
         // the script does the authoritative scan as SYSTEM.
         try
         {
-            var files = new DirectoryInfo(sourcePath).EnumerateFiles("*", SearchOption.AllDirectories);
-            _state.SourceFileCount = files.Count();
-            _state.SourceBytes = files.Sum(f => f.Length);
+            long totalBytes = 0;
+            int totalFiles = 0;
+            foreach (var f in new DirectoryInfo(sourcePath)
+                         .EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                totalBytes += f.Length;
+                totalFiles++;
+            }
+            _state.SourceFileCount = totalFiles;
+            _state.SourceBytes = totalBytes;
         }
         catch
         {
@@ -120,6 +128,7 @@ public class XboxSenderService
 
             var stagedDir = Path.Combine(destinationPath, _state.GameName);
             _totalSourceBytes = _state.SourceBytes;
+            _stagingBaselineBytes = -1;
 
             // Robocopy runs with /NP, so it emits no percentage. Poll the staged
             // folder's size against the source total to drive a real progress bar.
@@ -274,27 +283,44 @@ public class XboxSenderService
                 if (!Directory.Exists(stagedDir))
                     continue;
 
-                long copied = 0;
+                long bytes = 0;
                 int files = 0;
                 foreach (var f in new DirectoryInfo(stagedDir)
                              .EnumerateFiles("*", SearchOption.AllDirectories))
                 {
-                    copied += f.Length;
+                    bytes += f.Length;
                     files++;
                 }
 
-                long total = _totalSourceBytes;
+                // First measurement: capture the pre-copy baseline so we track
+                // only the delta written by robocopy. Without this, a previous
+                // staging to the same destination would make progress jump to
+                // ~100% immediately.
+                if (_stagingBaselineBytes < 0)
+                    _stagingBaselineBytes = bytes;
+
+                long copied = bytes - _stagingBaselineBytes;
+                long total  = _totalSourceBytes > 0
+                    ? _totalSourceBytes - _stagingBaselineBytes
+                    : 0;
+
                 double copiedMb = copied / 1024d / 1024d;
                 if (total > 0)
                 {
-                    _state.OverlayProgress = Math.Min(100.0, copied * 100.0 / total);
+                    _state.OverlayProgress = Math.Min(100.0, Math.Max(0, copied * 100.0 / total));
                     _state.StatusMessage =
                         $"Copying: {copiedMb:N0} / {total / 1024d / 1024d:N0} MB " +
                         $"({_state.OverlayProgress:N0}%)";
                 }
+                else if (_totalSourceBytes > 0)
+                {
+                    // Re-stage: baseline ≈ total, so delta tracking isn't useful.
+                    // Show overall bytes as indeterminate progress.
+                    _state.StatusMessage = $"Re-staging: {bytes / 1024d / 1024d:N0} MB ({files} files)...";
+                }
                 else
                 {
-                    _state.StatusMessage = $"Copying: {files} files, {copiedMb:N0} MB...";
+                    _state.StatusMessage = $"Copying: {files} files, {bytes / 1024d / 1024d:N0} MB...";
                 }
                 RaiseStateChanged();
             }
@@ -357,6 +383,7 @@ public class XboxSenderService
         _state = new XboxTransferState();
         _cts?.Dispose();
         _cts = null;
+        _stagingBaselineBytes = -1;
     }
 
     private void Fail(string message)

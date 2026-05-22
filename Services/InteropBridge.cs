@@ -20,6 +20,8 @@ public class InteropBridge : IDisposable
     private readonly WebView? _webView;
     private readonly MainViewModel _viewModel;
     private bool _isInitialized = false;
+    private CancellationTokenSource? _debounceCts;
+    private const int DebounceMs = 80;
 
     // Serialization options for JSON
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -46,12 +48,14 @@ public class InteropBridge : IDisposable
 
         _isInitialized = true;
 
-        // Subscribe to ViewModel property changes
+        // Subscribe to ViewModel property changes (debounced so rapid-fire
+        // updates like folder-picker closure don't serialize the full state
+        // on every single property change).
         _viewModel.PropertyChanged += (s, e) =>
         {
             if (e.PropertyName != null)
             {
-                _ = PushStateChangeAsync();
+                SchedulePushStateChange();
             }
         };
 
@@ -141,13 +145,76 @@ public class InteropBridge : IDisposable
         await ExecuteJavaScriptAsync($"window.__initState({json});");
     }
 
-    private async Task PushStateChangeAsync()
+    private void SchedulePushStateChange()
     {
         if (_webView == null) return;
 
-        var state = GetFullState();
-        var json = JsonSerializer.Serialize(state, JsonOptions);
+        // Cancel any pending push — only the last one in a burst runs.
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        var cts = _debounceCts = new CancellationTokenSource();
 
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(DebounceMs, cts.Token);
+                await Dispatcher.UIThread.InvokeAsync(() => PushStateNow());
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private async void PushStateNow()
+    {
+        if (_webView == null) return;
+
+        // Push only scalar / small properties — collections are already
+        // pushed independently by SubscribeToCollection, so re-serializing
+        // them here was the source of multi-second freezes.
+        var patch = new Dictionary<string, object?>
+        {
+            ["statusMessage"]       = _viewModel.StatusMessage,
+            ["isScanning"]          = _viewModel.IsScanning,
+            ["isNetworkActive"]     = _viewModel.IsNetworkActive,
+            ["isScanningPeers"]     = _viewModel.IsScanningPeers,
+            ["localIpAddress"]      = _viewModel.LocalIpAddress,
+            ["manualPeerIp"]        = _viewModel.ManualPeerIp,
+            ["isTransferring"]      = _viewModel.IsTransferring,
+            ["firewallConfigured"]  = _viewModel.FirewallConfigured,
+            ["isAdmin"]             = _viewModel.IsAdmin,
+            ["isWindows"]           = _viewModel.IsWindows,
+            ["highSpeedMode"]       = _viewModel.HighSpeedMode,
+            ["isLogVisible"]        = _viewModel.IsLogVisible,
+            ["isQueueProcessing"]   = _viewModel.IsQueueProcessing,
+            ["showSpeedInMbps"]     = _viewModel.ShowSpeedInMbps,
+            ["lastError"]           = _viewModel.LastError,
+
+            // Transfer progress
+            ["currentTransferGameName"]          = _viewModel.CurrentTransferGameName,
+            ["currentTransferProgress"]          = _viewModel.CurrentTransferProgress,
+            ["currentTransferFile"]              = _viewModel.CurrentTransferFile,
+            ["currentTransferSpeed"]             = _viewModel.CurrentTransferSpeed,
+            ["currentTransferTimeRemaining"]     = _viewModel.CurrentTransferTimeRemaining,
+            ["currentTransferTotalBytes"]        = _viewModel.CurrentTransferTotalBytes,
+            ["currentTransferDownloadedBytes"]   = _viewModel.CurrentTransferDownloadedBytes,
+            ["currentTransferFormattedProgress"] = _viewModel.CurrentTransferFormattedProgress,
+
+            // Selections are NOT pushed here — they are managed via explicit
+            // commands (SelectLocalGame, SelectPeer, etc.) and only included in
+            // the initial full-state push.  Re-pushing them on every scalar
+            // PropertyChanged would overwrite UI-local selections.
+
+            // Xbox transfer
+            ["xboxTransfer"]         = _viewModel.XboxTransfer,
+            ["isXboxTransferActive"] = _viewModel.IsXboxTransferActive,
+            ["xboxSourcePath"]       = _viewModel.XboxSourcePath,
+            ["xboxDestinationPath"]  = _viewModel.XboxDestinationPath,
+            ["xboxRootPath"]         = _viewModel.XboxRootPath,
+            ["isElevated"]           = ElevationHelper.IsElevated(),
+        };
+
+        var json = JsonSerializer.Serialize(patch, JsonOptions);
         await ExecuteJavaScriptAsync($"window.__updateState({json});");
     }
 
@@ -217,6 +284,9 @@ public class InteropBridge : IDisposable
             xboxTransfer = _viewModel.XboxTransfer,
             isXboxTransferActive = _viewModel.IsXboxTransferActive,
             xboxOverlayGames = _viewModel.XboxOverlayGames.ToList(),
+            xboxSourcePath = _viewModel.XboxSourcePath,
+            xboxDestinationPath = _viewModel.XboxDestinationPath,
+            xboxRootPath = _viewModel.XboxRootPath,
             isElevated = ElevationHelper.IsElevated(),
             externalLibraries = _viewModel.Settings.ExternalLibraries.Select(lib => new
             {
@@ -651,6 +721,18 @@ public class InteropBridge : IDisposable
                     await HandleBrowseXboxRootAsync();
                     break;
 
+                case "SetXboxPath":
+                    if (payload.HasValue)
+                    {
+                        if (payload.Value.TryGetProperty("xboxSourcePath", out var xsp))
+                            _viewModel.XboxSourcePath = xsp.GetString() ?? "";
+                        if (payload.Value.TryGetProperty("xboxDestinationPath", out var xdp))
+                            _viewModel.XboxDestinationPath = xdp.GetString() ?? "";
+                        if (payload.Value.TryGetProperty("xboxRootPath", out var xrp))
+                            _viewModel.XboxRootPath = xrp.GetString() ?? "";
+                    }
+                    break;
+
                 case "PrepareXboxNetwork":
                     if (payload?.TryGetProperty("sourcePath", out var netSourceEl) == true)
                     {
@@ -697,7 +779,6 @@ public class InteropBridge : IDisposable
 
     private async Task HandleBrowseXboxSourceAsync()
     {
-        if (_webView == null) return;
         var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (topLevel == null) return;
 
@@ -709,15 +790,12 @@ public class InteropBridge : IDisposable
 
         if (result.Count > 0)
         {
-            var path = result[0].Path.LocalPath;
-            var json = JsonSerializer.Serialize(new { xboxSourcePath = path }, JsonOptions);
-            await ExecuteJavaScriptAsync($"window.__updateState({json});");
+            _viewModel.XboxSourcePath = result[0].Path.LocalPath;
         }
     }
 
     private async Task HandleBrowseXboxDestinationAsync()
     {
-        if (_webView == null) return;
         var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (topLevel == null) return;
 
@@ -729,15 +807,12 @@ public class InteropBridge : IDisposable
 
         if (result.Count > 0)
         {
-            var path = result[0].Path.LocalPath;
-            var json = JsonSerializer.Serialize(new { xboxDestinationPath = path }, JsonOptions);
-            await ExecuteJavaScriptAsync($"window.__updateState({json});");
+            _viewModel.XboxDestinationPath = result[0].Path.LocalPath;
         }
     }
 
     private async Task HandleBrowseXboxRootAsync()
     {
-        if (_webView == null) return;
         var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (topLevel == null) return;
 
@@ -749,9 +824,7 @@ public class InteropBridge : IDisposable
 
         if (result.Count > 0)
         {
-            var path = result[0].Path.LocalPath;
-            var json = JsonSerializer.Serialize(new { xboxRootPath = path }, JsonOptions);
-            await ExecuteJavaScriptAsync($"window.__updateState({json});");
+            _viewModel.XboxRootPath = result[0].Path.LocalPath;
         }
     }
 
@@ -954,6 +1027,8 @@ public class InteropBridge : IDisposable
 
     public void Dispose()
     {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
         if (_webView != null)
         {
             _webView.WebMessageReceived -= OnWebMessageReceived;

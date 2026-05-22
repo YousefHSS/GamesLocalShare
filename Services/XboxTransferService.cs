@@ -26,6 +26,7 @@ public class XboxTransferService
 
     private CancellationTokenSource? _cts;
     private string? _overlayDestPath;
+    private long _overlayBaselineBytes = -1;
 
     public event EventHandler<XboxTransferState>? StateChanged;
     public event EventHandler<string>? LogMessage;
@@ -86,6 +87,11 @@ public class XboxTransferService
         string? xboxRoot = null, bool force = false, CancellationToken ct = default)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Overall timeout: the script has a 90s polling phase, a robocopy
+        // phase, and up to 300s of NIC observation. 10 minutes covers all
+        // phases with margin; if we're still running after that something
+        // is stuck (PsExec download hang, SYSTEM child never started, etc).
+        _cts.CancelAfter(TimeSpan.FromMinutes(10));
         var token = _cts.Token;
 
         try
@@ -94,6 +100,7 @@ public class XboxTransferService
             _state.OverlayProgress = 0;
             _state.StatusMessage = "Starting overlay transfer...";
             _overlayDestPath = null;
+            _overlayBaselineBytes = -1;
             RaiseStateChanged();
 
             XboxScriptHost host;
@@ -114,19 +121,27 @@ public class XboxTransferService
             }
             if (force)
                 args.Add("-Force");
+            args.Add("-AutoConfirm");
 
-            // Once the script reports the install folder, poll its size to drive
-            // a progress bar through the overlay copy.
-            using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var progressTask = PollOverlayProgressAsync(progressCts.Token);
+            // Launch the script in a visible PowerShell window so the user
+            // can follow all output (robocopy, ACL reset, "click Resume"
+            // prompt) with full colors.  Progress in the UI is driven by
+            // tailing the SYSTEM-phase log file that the script writes to
+            // disk — this avoids the PsExec stdout-piping issues that made
+            // the hidden-process approach unreliable.
+            _state.StatusMessage = "Script running in PowerShell window...";
+            RaiseStateChanged();
 
-            int exitCode = await host.RunAsync(host.ReceiverScript, args, line =>
-            {
-                Log(line);
-                ApplyProgressLine(line);
-            }, confirmPausePrompt: true, ct: token);
+            var transferStartedAt = DateTime.UtcNow;
+            using var logPollCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var logPollTask = PollSystemLogAsync(host.RunsDir, transferStartedAt, logPollCts.Token);
+            var progressTask = PollOverlayProgressAsync(logPollCts.Token);
 
-            progressCts.Cancel();
+            int exitCode = await host.RunVisibleAsync(
+                host.ReceiverScript, args, ct: token);
+
+            logPollCts.Cancel();
+            try { await logPollTask; } catch { }
             try { await progressTask; } catch { }
 
             Log($"Receiver script exit code: {exitCode}");
@@ -157,7 +172,11 @@ public class XboxTransferService
         }
         catch (OperationCanceledException)
         {
-            return Fail("Transfer cancelled");
+            return Fail(ct.IsCancellationRequested
+                ? "Transfer cancelled."
+                : "Transfer timed out. The script may be stuck (check network " +
+                  "connectivity for PsExec download, or verify the Xbox app " +
+                  "install was started and paused).");
         }
         catch (Exception ex)
         {
@@ -264,7 +283,26 @@ public class XboxTransferService
         XboxTransferStep? step = null;
         string? status = null;
 
-        if (line.Contains("Polling for in-progress install"))
+        // [STATUS] lines from the parent (User) phase — these use
+        // [Console]::Out.WriteLine so they reach our stdout pipe even
+        // though Write-Host does not in Windows PowerShell 5.1.
+        if (line.Contains("[STATUS] Validating staged source"))
+        {
+            step = XboxTransferStep.PollingForFolder;
+            status = "Validating staged source...";
+        }
+        else if (line.Contains("[STATUS] Preparing PsExec"))
+        {
+            step = XboxTransferStep.PollingForFolder;
+            status = "Preparing helper tools...";
+        }
+        else if (line.Contains("[STATUS] Launching SYSTEM child"))
+        {
+            step = XboxTransferStep.PollingForFolder;
+            status = "Launching transfer as SYSTEM...";
+        }
+        // Lines from the SYSTEM child (tailed via [Console]::Out.Write)
+        else if (line.Contains("Polling for in-progress install"))
         {
             step = XboxTransferStep.PollingForFolder;
             status = "Waiting for the Xbox install folder to appear...";
@@ -324,15 +362,87 @@ public class XboxTransferService
                     bytes += f.Length;
                 }
 
-                _state.OverlayProgress = Math.Min(100.0, bytes * 100.0 / _state.SourceBytes);
+                // First measurement: capture the pre-overlay baseline so
+                // we track only the delta written by robocopy.
+                if (_overlayBaselineBytes < 0)
+                    _overlayBaselineBytes = bytes;
+
+                long copied = bytes - _overlayBaselineBytes;
+                long total  = _state.SourceBytes - _overlayBaselineBytes;
+                if (total <= 0) total = 1; // avoid div-by-zero
+
+                _state.OverlayProgress = Math.Min(100.0, copied * 100.0 / total);
                 _state.StatusMessage =
-                    $"Overlaying: {bytes / 1024d / 1024d:N0} / " +
-                    $"{_state.SourceBytes / 1024d / 1024d:N0} MB ({_state.OverlayProgress:N0}%)";
+                    $"Overlaying: {copied / 1024d / 1024d:N0} / " +
+                    $"{total / 1024d / 1024d:N0} MB ({_state.OverlayProgress:N0}%)";
                 RaiseStateChanged();
             }
             catch
             {
                 // Enumeration can race with robocopy writing files; ignore.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tails the most recent SYSTEM-phase log file in <paramref name="runsDir"/>
+    /// and feeds new lines through <see cref="ApplyProgressLine"/> so the UI
+    /// updates even when the script runs in a visible window with no stdout
+    /// redirection.
+    /// </summary>
+    private async Task PollSystemLogAsync(string runsDir, DateTime startedAfterUtc, CancellationToken ct)
+    {
+        string? logPath = null;
+        long lastLen = 0;
+
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(800, ct); }
+            catch (OperationCanceledException) { return; }
+
+            try
+            {
+                // Find the latest log file created AFTER this transfer started,
+                // so we never pick up stale output from a previous run.
+                if (logPath == null || !File.Exists(logPath))
+                {
+                    logPath = Directory.Exists(runsDir)
+                        ? Directory.EnumerateFiles(runsDir, "receiver-overlay-system-*.log")
+                            .Select(f => new FileInfo(f))
+                            .Where(fi => fi.CreationTimeUtc >= startedAfterUtc.AddSeconds(-5))
+                            .OrderByDescending(fi => fi.LastWriteTimeUtc)
+                            .Select(fi => fi.FullName)
+                            .FirstOrDefault()
+                        : null;
+                    lastLen = 0;
+                    if (logPath == null) continue;
+                }
+
+                var fi = new FileInfo(logPath);
+                if (fi.Length <= lastLen) continue;
+
+                using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                fs.Seek(lastLen, SeekOrigin.Begin);
+                using var sr = new StreamReader(fs);
+                var chunk = await sr.ReadToEndAsync(ct);
+                lastLen = fi.Length;
+
+                if (string.IsNullOrEmpty(chunk)) continue;
+
+                foreach (var line in chunk.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = line.TrimEnd('\r');
+                    if (trimmed.Length > 0)
+                    {
+                        Log(trimmed);
+                        ApplyProgressLine(trimmed);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch
+            {
+                // File may be locked or not yet created; retry next cycle.
             }
         }
     }

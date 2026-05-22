@@ -165,6 +165,48 @@ public sealed class XboxScriptHost
     }
 
     /// <summary>
+    /// Launches a script in a visible PowerShell console window with no
+    /// output redirection. The user sees all output (Write-Host, colors,
+    /// progress) exactly as they would running the script manually.
+    /// Uses -AutoConfirm to skip the Read-Host pause prompt.
+    /// Returns the exit code.
+    /// </summary>
+    public async Task<int> RunVisibleAsync(
+        string scriptPath,
+        IReadOnlyList<string> args,
+        CancellationToken ct = default)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            CreateNoWindow = false,
+            WorkingDirectory = WorkDir,
+        };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+        psi.ArgumentList.Add("-File");
+        psi.ArgumentList.Add(scriptPath);
+        foreach (var a in args)
+            psi.ArgumentList.Add(a);
+
+        using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+        if (!proc.Start())
+            throw new InvalidOperationException("Failed to start powershell.exe");
+
+        using var reg = ct.Register(() =>
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+            catch { }
+        });
+
+        await proc.WaitForExitAsync(ct);
+        return proc.ExitCode;
+    }
+
+    /// <summary>
     /// Returns the most recently written receiver overlay verdict JSON file,
     /// or null if none exists. Used to recover the verdict after a run.
     /// </summary>

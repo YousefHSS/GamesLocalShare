@@ -105,10 +105,16 @@ function Invoke-AsSystem {
     $manifestPath = [System.IO.Path]::ChangeExtension($LogPath, '.args.json')
     $Params | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
+    # Use -Command with *>&1 instead of -File so that ALL PowerShell
+    # output streams (including stream 6 / Write-Host) are merged into
+    # stdout. PsExec only captures stdout/stderr pipes; Write-Host
+    # output (Information stream) is invisible to PsExec when using
+    # -File, causing the log file to be empty and the parent to never
+    # see progress updates.
+    $cmdString = "& '$($ScriptPath.Replace("'","''"))' -SystemArgsFile '$($manifestPath.Replace("'","''"))' *>&1"
     $psArgs = @(
         '-NoProfile','-ExecutionPolicy','Bypass',
-        '-File', "`"$ScriptPath`"",
-        '-SystemArgsFile', "`"$manifestPath`""
+        '-Command', $cmdString
     )
     $psExecArgs = @('-accepteula','-nobanner','-s','-h','powershell.exe') + $psArgs
 
@@ -123,6 +129,12 @@ function Invoke-AsSystem {
         -RedirectStandardError  "$LogPath.err" `
         -NoNewWindow -PassThru
 
+    # When the app launches us, stdout is a redirected pipe so
+    # [Console]::Out feeds the C# callback but the console window is
+    # blank. Detect this and also Write-Host so the user can follow
+    # along in the visible PowerShell window.
+    $pipeMode = [Console]::IsOutputRedirected
+
     # Tail the log while the child runs
     $lastLen = 0
     while (-not $proc.HasExited) {
@@ -135,10 +147,10 @@ function Invoke-AsSystem {
                 $sr = New-Object System.IO.StreamReader($fs)
                 $chunk = $sr.ReadToEnd()
                 $sr.Close(); $fs.Close()
-                # Write straight to stdout and flush: when this script's stdout
-                # is a redirected pipe (the app captures it) Write-Host is
-                # block-buffered and the caller sees nothing until exit.
-                if ($chunk) { [Console]::Out.Write($chunk); [Console]::Out.Flush() }
+                if ($chunk) {
+                    [Console]::Out.Write($chunk); [Console]::Out.Flush()
+                    if ($pipeMode) { Write-Host $chunk -NoNewline }
+                }
                 $lastLen = $fi.Length
             }
         } catch { }
@@ -150,6 +162,7 @@ function Invoke-AsSystem {
             $tail = Get-Content -LiteralPath $LogPath -Raw
             $tail = $tail.Substring($lastLen)
             [Console]::Out.Write($tail); [Console]::Out.Flush()
+            if ($pipeMode) { Write-Host $tail -NoNewline }
         }
     } catch { }
 

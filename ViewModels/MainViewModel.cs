@@ -37,6 +37,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private ObservableCollection<GameInfo> _xboxOverlayGames = new();
 
     [ObservableProperty]
+    private string _xboxSourcePath = string.Empty;
+
+    [ObservableProperty]
+    private string _xboxDestinationPath = string.Empty;
+
+    [ObservableProperty]
+    private string _xboxRootPath = string.Empty;
+
+    [ObservableProperty]
     private string _statusMessage = "Ready";
 
     [ObservableProperty]

@@ -41,6 +41,8 @@ param(
     [int]    $ObserveSeconds = 300,
     [Parameter(ParameterSetName='User')]
     [switch] $Force,
+    [Parameter(ParameterSetName='User')]
+    [switch] $AutoConfirm,
     [Parameter(Mandatory, ParameterSetName='System')]
     [string] $SystemArgsFile
 )
@@ -59,8 +61,8 @@ New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 # fall through to the SYSTEM phase.
 if ($PSCmdlet.ParameterSetName -eq 'System') {
     $argsObj        = Read-SystemArgs -Path $SystemArgsFile
-    $Source         = [string]$argsObj.Source
-    $XboxRoot       = [string]$argsObj.XboxRoot
+    $Source         = ([string]$argsObj.Source).TrimEnd('\','/')
+    $XboxRoot       = ([string]$argsObj.XboxRoot).TrimEnd('\','/')
     $ObserveSeconds = [int]$argsObj.ObserveSeconds
     $verdictStamp   = [string]$argsObj.VerdictStamp
     $Force          = [bool]$argsObj.Force
@@ -77,6 +79,10 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     if ($Force) { $scriptArgs += '-Force' }
 
     Assert-Elevated -ScriptPath $scriptPath -ScriptArgs $scriptArgs
+
+    # Machine-readable status line for the C# host (Write-Host is invisible
+    # when stdout is redirected; [Console]::Out goes through the pipe).
+    [Console]::Out.WriteLine("[STATUS] Validating staged source..."); [Console]::Out.Flush()
 
     Write-Host ""
     Write-Host "=== xbox-transfer-receiver-overlay ===" -ForegroundColor Green
@@ -146,15 +152,21 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
         }
     }
 
-    Write-Host "PREREQUISITES" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  1. In the Xbox app, find '$gameName' and click Install."
-    Write-Host "  2. Wait ~10 seconds for the download to start, then click Pause."
-    Write-Host "  3. Leave the Xbox app open (do not close it)."
-    Write-Host ""
-    Write-Host "Press Enter when the install is paused..." -ForegroundColor Cyan
-    [void](Read-Host)
+    if (-not $AutoConfirm) {
+        [Console]::Out.WriteLine("[STATUS] Source validated. Waiting for user confirmation..."); [Console]::Out.Flush()
+        Write-Host "PREREQUISITES" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  1. In the Xbox app, find '$gameName' and click Install."
+        Write-Host "  2. Wait ~10 seconds for the download to start, then click Pause."
+        Write-Host "  3. Leave the Xbox app open (do not close it)."
+        Write-Host ""
+        Write-Host "Press Enter when the install is paused..." -ForegroundColor Cyan
+        [void](Read-Host)
+    } else {
+        Write-Host "AutoConfirm: skipping pause prompt (confirmed via UI)." -ForegroundColor Cyan
+    }
 
+    [Console]::Out.WriteLine("[STATUS] Preparing PsExec..."); [Console]::Out.Flush()
     $psexec = Ensure-PsExec -ToolsDir $toolsDir
     $stamp  = (Get-Date).ToString('yyyyMMdd-HHmmss')
     $sysLog = Join-Path $runsDir "receiver-overlay-system-$stamp.log"
@@ -168,6 +180,7 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
     }
     if ($Force) { $systemParams.Force = $true }
 
+    [Console]::Out.WriteLine("[STATUS] Launching SYSTEM child process..."); [Console]::Out.Flush()
     $code = Invoke-AsSystem -ScriptPath $scriptPath `
         -Params $systemParams `
         -LogPath $sysLog `
@@ -508,8 +521,8 @@ $msixvcExcludes = @()
 if ($contentGuid) {
     $srcXvi      = Join-Path $Source "$contentGuid.xvi"
     $destXvi     = Join-Path $destGame "$contentGuid.xvi"
-    $srcXviItem  = Get-Item -LiteralPath $srcXvi  -ErrorAction SilentlyContinue
-    $destXviItem = Get-Item -LiteralPath $destXvi -ErrorAction SilentlyContinue
+    $srcXviItem  = Get-Item -LiteralPath $srcXvi  -Force -ErrorAction SilentlyContinue
+    $destXviItem = Get-Item -LiteralPath $destXvi -Force -ErrorAction SilentlyContinue
     if ($srcXviItem -and $destXviItem) {
         $srcSize  = $srcXviItem.Length
         $destSize = $destXviItem.Length

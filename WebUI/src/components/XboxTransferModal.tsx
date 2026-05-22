@@ -71,7 +71,11 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   const handleBrowseSource = () => sendCommand('BrowseXboxSource');
 
   const handleStartSenderDrive = () => {
-    if (!game?.installPath || !xboxDestinationPath) {
+    if (!game?.installPath) {
+      setError(`No game selected or game has no install path. (game=${game?.name ?? 'null'}, installPath=${game?.installPath ?? 'null'})`);
+      return;
+    }
+    if (!xboxDestinationPath) {
       setError('Please select a destination folder.');
       return;
     }
@@ -142,10 +146,35 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
 
   // ---- Working / result view (backend-driven) ------------------------------
 
+  // Step-specific user guidance: tells the user what THEY need to do right now.
+  const stepGuidance: Record<string, { hint: string; action?: 'wait' | 'resume' }> = {
+    PollingForFolder: {
+      hint: 'Keep the Xbox app open with the install paused. The script is searching for the download folder on disk.',
+      action: 'wait',
+    },
+    Overlaying: {
+      hint: 'Do NOT touch the Xbox app. Files are being copied into the install folder.',
+      action: 'wait',
+    },
+    ResettingAcls: {
+      hint: 'Almost done — do NOT touch the Xbox app yet.',
+      action: 'wait',
+    },
+    WaitingForResume: {
+      hint: 'Go to the Xbox app and click RESUME on the install now.',
+      action: 'resume',
+    },
+    Monitoring: {
+      hint: 'Monitoring network traffic after Resume. Wait for it to finish.',
+      action: 'wait',
+    },
+  };
+
   const renderProgress = () => {
     if (finished) {
       const v = xboxTransfer?.verdict;
       const ok = v === 'FullSkip' || v === 'DeltaOnly';
+      const wasStillPaused = v === 'StillPaused';
       return (
         <div className="space-y-4">
           {ok ? (
@@ -160,7 +189,14 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
             </div>
           )}
           <p className="text-gray-300 text-sm">{xboxTransfer?.statusMessage}</p>
-          {xboxTransfer?.errorMessage && !ok && (
+          {wasStillPaused && (
+            <div className="bg-yellow-900/40 border border-yellow-700 text-yellow-300 text-sm p-3 rounded">
+              It looks like the install was never resumed in the Xbox app. Try
+              again: after the overlay finishes, switch to the Xbox app and click
+              <strong> Resume</strong> on the paused install.
+            </div>
+          )}
+          {xboxTransfer?.errorMessage && !ok && !wasStillPaused && (
             <div className="bg-red-900/40 border border-red-700 text-red-300 text-sm p-3 rounded whitespace-pre-line">
               {xboxTransfer.errorMessage}
             </div>
@@ -182,23 +218,34 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
       );
     }
 
+    const guidance = transferStep ? stepGuidance[transferStep] : undefined;
+
     return (
       <div className="space-y-4">
         {awaitingResume ? (
-          <div className="bg-yellow-900/40 border border-yellow-600 rounded p-4 space-y-1">
-            <div className="flex items-center gap-2 text-yellow-300 font-bold">
-              <Play size={20} />
+          <div className="bg-yellow-900/40 border border-yellow-600 rounded p-4 space-y-2">
+            <div className="flex items-center gap-2 text-yellow-300 font-bold text-lg">
+              <Play size={22} />
               Click RESUME in the Xbox app now
             </div>
             <p className="text-yellow-200/80 text-sm">
-              The staged files are in place. Resuming the install finalizes it.
+              The staged files are in place. Open the Xbox app, find the paused
+              install, and click <strong>Resume</strong>. The transfer will
+              monitor network traffic to verify the result.
             </p>
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-blue-400 font-semibold">
-            <Loader2 className="animate-spin" size={20} />
-            {xboxTransfer?.statusMessage || 'Working...'}
-          </div>
+          <>
+            <div className="flex items-center gap-2 text-blue-400 font-semibold">
+              <Loader2 className="animate-spin" size={20} />
+              {xboxTransfer?.statusMessage || 'Working...'}
+            </div>
+            {guidance && (
+              <div className="bg-gray-800/60 border border-gray-700 rounded p-3 text-sm text-gray-300">
+                {guidance.hint}
+              </div>
+            )}
+          </>
         )}
 
         {!!xboxTransfer && xboxTransfer.overlayProgress > 0 && (
@@ -242,9 +289,6 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     if (step === STEP_CHOOSE) {
       return (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-white">
-            {mode === 'sender' ? 'Share Xbox Game' : 'Receive Xbox Game'}
-          </h3>
           <p className="text-gray-400 text-sm">
             {mode === 'sender'
               ? `${game?.name || 'This game'} can be staged for overlay transfer. How do you want to share it?`
@@ -344,7 +388,10 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
               <input
                 type="text"
                 value={xboxRootPath}
-                onChange={(e) => updateState({ xboxRootPath: e.target.value })}
+                onChange={(e) => {
+                  updateState({ xboxRootPath: e.target.value });
+                  sendCommand('SetXboxPath', { xboxRootPath: e.target.value });
+                }}
                 placeholder="e.g. D:\XboxGames - leave blank to auto-detect"
                 className="flex-1 bg-dark-item border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500"
               />
@@ -418,8 +465,8 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-[#1f1f2e] border border-gray-700 rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
+      <div className="bg-[#1f1f2e] border border-gray-700 rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-full overflow-hidden">
         <div className="flex justify-between items-center p-4 border-b border-gray-700">
           <h2 className="text-xl font-semibold text-white">
             {mode === 'sender' ? 'Share Xbox Game' : 'Receive Xbox Game'}
@@ -429,7 +476,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1">
+        <div className="p-6 overflow-y-auto flex-1 min-h-0">
           {mode === 'sender' && !isXboxOverlayGame && !launched && step === STEP_CHOOSE && (
             <div className="text-yellow-400 text-sm mb-4 flex items-center gap-2">
               <AlertCircle size={16} />

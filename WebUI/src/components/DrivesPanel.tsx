@@ -118,6 +118,12 @@ export default function DrivesPanel() {
   const handleXboxStage = (game: CrossLocationGame) => {
     if (!game.deviceCopy) return;
     s.updateState({ selectedLocalGame: game.deviceCopy });
+    sendCommand('SelectLocalGame', { appId: game.deviceCopy.appId });
+    // Default destination to first external library if not already set
+    if (!s.xboxDestinationPath && libs.length > 0) {
+      s.updateState({ xboxDestinationPath: libs[0].rootPath });
+      sendCommand('SetXboxPath', { xboxDestinationPath: libs[0].rootPath });
+    }
     setXboxModal({ mode: 'sender' });
   };
 

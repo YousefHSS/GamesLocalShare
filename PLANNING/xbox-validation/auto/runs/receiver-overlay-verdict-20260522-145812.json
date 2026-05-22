@@ -1,0 +1,79 @@
+﻿{
+    "StartedAtUtc":  "2026-05-22T12:03:46.3102577Z",
+    "ReceiverHost":  "GELERZ",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "E:\\stage\\Rematch",
+    "Deploy":  "C:\\XboxGames\\D889719C-B203-445E-90D7-82B59F6BCF20",
+    "GameName":  "Rematch",
+    "PackageFamilyName":  "SLOCLAP.ProjectRuntime_cse8z5zpmcvkt",
+    "SourceBytes":  10290029178,
+    "SourceFileCount":  198,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  72,
+    "PreOverlayBytes":  252847682,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  198,
+    "PostOverlayBytes":  10290029178,
+    "RobocopyExit":  1,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  498742748,
+                     "SentBytes":  66432617,
+                     "Time":  "\/Date(1779451364788)\/"
+                 },
+    "ObserveSeconds":  360,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  0.61,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\SLOCLAP.ProjectRuntime_1.203.100.0_x64__cse8z5zpmcvkt",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  0.71,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\SLOCLAP.ProjectRuntime_1.203.100.0_x64__cse8z5zpmcvkt",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  6.78,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\SLOCLAP.ProjectRuntime_1.203.100.0_x64__cse8z5zpmcvkt",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  28.33,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\SLOCLAP.ProjectRuntime_1.203.100.0_x64__cse8z5zpmcvkt",
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "SignatureKind":  "Store",
+                       "Status":  "Ok",
+                       "InstallLocation":  "C:\\Program Files\\WindowsApps\\SLOCLAP.ProjectRuntime_1.203.100.0_x64__cse8z5zpmcvkt",
+                       "PackageFullName":  "SLOCLAP.ProjectRuntime_1.203.100.0_x64__cse8z5zpmcvkt",
+                       "Installed":  true
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  29714033,
+                       "SentBytes":  1362186,
+                       "ReceivedMB":  28.34,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  28.34,
+    "Hypothesis":  "H1_FULL_SKIP"
+}
