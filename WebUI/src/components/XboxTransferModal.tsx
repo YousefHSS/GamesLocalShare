@@ -46,6 +46,8 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   const [step, setStep] = useState(STEP_CHOOSE);
   const [launched, setLaunched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [xboxRoot, setXboxRoot] = useState('');
+  const [force, setForce] = useState(false);
 
   const game = mode === 'sender' ? selectedLocalGame : null;
   const isXboxOverlayGame = game?.platform === 'Xbox' && game?.isOverlaySupported;
@@ -88,7 +90,11 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     }
     setError(null);
     setLaunched(true);
-    sendCommand('StartXboxTransfer', { sourcePath: xboxSourcePath });
+    sendCommand('StartXboxTransfer', {
+      sourcePath: xboxSourcePath,
+      xboxRoot: xboxRoot.trim() || undefined,
+      force,
+    });
   };
 
   // ---- Shared sub-views -----------------------------------------------------
@@ -328,6 +334,29 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
               <FolderOpen size={18} />
             </button>
           </div>
+
+          <div className="space-y-2 border-t border-gray-700 pt-3">
+            <label className="block text-xs text-gray-400">
+              Xbox install drive (optional)
+            </label>
+            <input
+              type="text"
+              value={xboxRoot}
+              onChange={(e) => setXboxRoot(e.target.value)}
+              placeholder="e.g. D:\XboxGames - leave blank to auto-detect"
+              className="w-full bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
+            />
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => setForce(e.target.checked)}
+                className="accent-yellow-500"
+              />
+              Force overlay even if safety checks fail (may corrupt the install)
+            </label>
+          </div>
+
           <button
             onClick={() => {
               if (!xboxSourcePath) {

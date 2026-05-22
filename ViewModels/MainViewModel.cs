@@ -2591,8 +2591,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task StartXboxTransferAsync(string sourcePath)
+    private async Task StartXboxTransferAsync((string sourcePath, string? xboxRoot, bool force) args)
     {
+        var (sourcePath, xboxRoot, force) = args;
         if (string.IsNullOrWhiteSpace(sourcePath))
         {
             AddLog("Xbox transfer: no source path provided", LogMessageType.Error);
@@ -2627,7 +2628,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            var verdict = await _xboxTransferService.RunOverlayAsync();
+            if (!string.IsNullOrWhiteSpace(xboxRoot))
+                AddLog($"Xbox transfer: using install root {xboxRoot}", LogMessageType.Info);
+            if (force)
+                AddLog("Xbox transfer: -Force enabled (safety checks bypassed)", LogMessageType.Warning);
+
+            var verdict = await _xboxTransferService.RunOverlayAsync(xboxRoot, force);
             switch (verdict)
             {
                 case XboxTransferVerdict.FullSkip:

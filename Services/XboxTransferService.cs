@@ -77,8 +77,12 @@ public class XboxTransferService
     /// Optional override for the Xbox install root (e.g. "D:\XboxGames") when
     /// the title is being installed off the system drive.
     /// </param>
+    /// <param name="force">
+    /// When true, passes -Force to the script so it overlays even if the staged
+    /// copy looks incomplete or receiver-provided executables are not ready.
+    /// </param>
     public async Task<XboxTransferVerdict> RunOverlayAsync(
-        string? xboxRoot = null, CancellationToken ct = default)
+        string? xboxRoot = null, bool force = false, CancellationToken ct = default)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
@@ -105,6 +109,8 @@ public class XboxTransferService
                 args.Add("-XboxRoot");
                 args.Add(xboxRoot!);
             }
+            if (force)
+                args.Add("-Force");
 
             int exitCode = await host.RunAsync(host.ReceiverScript, args, line =>
             {
@@ -114,19 +120,28 @@ public class XboxTransferService
 
             Log($"Receiver script exit code: {exitCode}");
 
+            string Detail()
+            {
+                var err = host.LatestSystemError("receiver-overlay");
+                return err == null ? "" : $"\n\nScript output:\n{err}";
+            }
+
             return exitCode switch
             {
                 0 => ApplyVerdict(host.LatestVerdictFile()),
                 2 => Fail("The Xbox install folder never appeared. Make sure you clicked " +
                           "Install in the Xbox app on this PC, and that the title is an " +
-                          "MSIXVC game (its Manage > Files menu shows an install-drive picker)."),
+                          "MSIXVC game (its Manage > Files menu shows an install-drive " +
+                          "picker). If it installs to a non-system drive, set the Xbox " +
+                          "install drive in Advanced options."),
                 11 => Fail("The staged copy is incomplete - the sender's integrity check " +
-                           "failed. Re-stage the game on the sender PC, then retry."),
+                           "failed. Re-stage the game on the sender PC, or enable 'Force " +
+                           "overlay' to proceed anyway."),
                 12 => Fail("Some protected executables have not downloaded yet. In the Xbox " +
                            "app: click Resume, let the install grow a few hundred MB, click " +
-                           "Pause, then run this transfer again."),
+                           "Pause, then retry - or enable 'Force overlay' to proceed anyway."),
                 99 => Fail("Elevation error. Restart the app as Administrator and retry."),
-                _ => Fail($"Receiver script exited with code {exitCode}."),
+                _ => Fail($"Receiver script exited with code {exitCode}.{Detail()}"),
             };
         }
         catch (OperationCanceledException)

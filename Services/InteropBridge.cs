@@ -600,8 +600,14 @@ public class InteropBridge : IDisposable
                     if (payload?.TryGetProperty("sourcePath", out var xboxSourceEl) == true)
                     {
                         var sourcePath = xboxSourceEl.GetString() ?? "";
-                        if (_viewModel.StartXboxTransferCommand.CanExecute(sourcePath))
-                            await _viewModel.StartXboxTransferCommand.ExecuteAsync(sourcePath);
+                        string? xboxRoot = payload?.TryGetProperty("xboxRoot", out var xboxRootEl) == true
+                            ? xboxRootEl.GetString()
+                            : null;
+                        bool force = payload?.TryGetProperty("force", out var xboxForceEl) == true
+                            && xboxForceEl.ValueKind == JsonValueKind.True;
+                        var xboxTransferArgs = (sourcePath, xboxRoot, force);
+                        if (_viewModel.StartXboxTransferCommand.CanExecute(xboxTransferArgs))
+                            await _viewModel.StartXboxTransferCommand.ExecuteAsync(xboxTransferArgs);
                     }
                     break;
 

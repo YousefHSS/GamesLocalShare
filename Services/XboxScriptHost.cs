@@ -178,4 +178,38 @@ public sealed class XboxScriptHost
             .Select(fi => fi.FullName)
             .FirstOrDefault();
     }
+
+    /// <summary>
+    /// Returns the last few lines of the most recent SYSTEM-phase error/log for
+    /// scripts matching <paramref name="logPrefix"/> (e.g. "receiver-overlay").
+    /// The SYSTEM child's stderr goes to a .err file that is not streamed live,
+    /// so this is how the real cause of a generic failure is recovered.
+    /// </summary>
+    public string? LatestSystemError(string logPrefix, int maxLines = 15)
+    {
+        if (!Directory.Exists(RunsDir))
+            return null;
+
+        FileInfo? Newest(string pattern) =>
+            Directory.EnumerateFiles(RunsDir, pattern)
+                .Select(f => new FileInfo(f))
+                .Where(fi => fi.Length > 0)
+                .OrderByDescending(fi => fi.LastWriteTimeUtc)
+                .FirstOrDefault();
+
+        // Prefer the .err file; fall back to the tail of the stdout log.
+        var file = Newest($"{logPrefix}-system-*.log.err")
+                   ?? Newest($"{logPrefix}-system-*.log");
+        if (file == null)
+            return null;
+
+        try
+        {
+            var lines = File.ReadLines(file.FullName)
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .ToList();
+            return lines.Count == 0 ? null : string.Join("\n", lines.TakeLast(maxLines));
+        }
+        catch { return null; }
+    }
 }
