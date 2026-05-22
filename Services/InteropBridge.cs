@@ -647,6 +647,10 @@ public class InteropBridge : IDisposable
                     await HandleBrowseXboxDestinationAsync();
                     break;
 
+                case "BrowseXboxRoot":
+                    await HandleBrowseXboxRootAsync();
+                    break;
+
                 case "PrepareXboxNetwork":
                     if (payload?.TryGetProperty("sourcePath", out var netSourceEl) == true)
                     {
@@ -727,6 +731,26 @@ public class InteropBridge : IDisposable
         {
             var path = result[0].Path.LocalPath;
             var json = JsonSerializer.Serialize(new { xboxDestinationPath = path }, JsonOptions);
+            await ExecuteJavaScriptAsync($"window.__updateState({json});");
+        }
+    }
+
+    private async Task HandleBrowseXboxRootAsync()
+    {
+        if (_webView == null) return;
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select the Xbox install root (e.g. the XboxGames folder on the install drive)",
+            AllowMultiple = false
+        });
+
+        if (result.Count > 0)
+        {
+            var path = result[0].Path.LocalPath;
+            var json = JsonSerializer.Serialize(new { xboxRootPath = path }, JsonOptions);
             await ExecuteJavaScriptAsync($"window.__updateState({json});");
         }
     }

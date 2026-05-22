@@ -199,6 +199,7 @@ export interface AppState {
   isElevated: boolean;
   xboxDestinationPath: string;
   xboxSourcePath: string;
+  xboxRootPath: string;
 
   // Actions
   updateState: (patch: Partial<AppState>) => void;
@@ -258,6 +259,7 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   isElevated: false,
   xboxDestinationPath: '',
   xboxSourcePath: '',
+  xboxRootPath: '',
 };
 
 export const useAppState = create<AppState>((set) => ({

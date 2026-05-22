@@ -42,11 +42,12 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   const isXboxTransferActive = useAppState((s) => s.isXboxTransferActive);
   const xboxDestinationPath = useAppState((s) => s.xboxDestinationPath);
   const xboxSourcePath = useAppState((s) => s.xboxSourcePath);
+  const xboxRootPath = useAppState((s) => s.xboxRootPath);
+  const updateState = useAppState((s) => s.updateState);
 
   const [step, setStep] = useState(STEP_CHOOSE);
   const [launched, setLaunched] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [xboxRoot, setXboxRoot] = useState('');
   const [force, setForce] = useState(false);
 
   const game = mode === 'sender' ? selectedLocalGame : null;
@@ -92,7 +93,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     setLaunched(true);
     sendCommand('StartXboxTransfer', {
       sourcePath: xboxSourcePath,
-      xboxRoot: xboxRoot.trim() || undefined,
+      xboxRoot: xboxRootPath.trim() || undefined,
       force,
     });
   };
@@ -125,7 +126,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   );
 
   const networkButton = (
-    <div className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem border border-gray-800 opacity-50 cursor-not-allowed">
+    <div className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-item border border-gray-800 opacity-50 cursor-not-allowed">
       <Wifi className="text-gray-500" size={24} />
       <div className="text-left">
         <div className="text-gray-400 font-medium">
@@ -251,7 +252,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
           </p>
           <button
             onClick={handleChooseDrive}
-            className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem hover:bg-dark-hover border border-gray-700 transition"
+            className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-item hover:bg-[#4a4a4a] border border-gray-700 transition"
           >
             <HardDrive className="text-blue-400" size={24} />
             <div className="text-left">
@@ -285,7 +286,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
               readOnly
               value={xboxDestinationPath}
               placeholder="Click Browse to select folder..."
-              className="flex-1 bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
+              className="flex-1 bg-dark-item border border-gray-700 rounded px-3 py-2 text-sm text-white"
             />
             <button
               onClick={handleBrowseDestination}
@@ -325,7 +326,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
               readOnly
               value={xboxSourcePath}
               placeholder="Click Browse to select the staged folder..."
-              className="flex-1 bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
+              className="flex-1 bg-dark-item border border-gray-700 rounded px-3 py-2 text-sm text-white"
             />
             <button
               onClick={handleBrowseSource}
@@ -339,13 +340,22 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
             <label className="block text-xs text-gray-400">
               Xbox install drive (optional)
             </label>
-            <input
-              type="text"
-              value={xboxRoot}
-              onChange={(e) => setXboxRoot(e.target.value)}
-              placeholder="e.g. D:\XboxGames - leave blank to auto-detect"
-              className="w-full bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={xboxRootPath}
+                onChange={(e) => updateState({ xboxRootPath: e.target.value })}
+                placeholder="e.g. D:\XboxGames - leave blank to auto-detect"
+                className="flex-1 bg-dark-item border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500"
+              />
+              <button
+                onClick={() => sendCommand('BrowseXboxRoot')}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded transition"
+                title="Browse for the Xbox install folder"
+              >
+                <FolderOpen size={18} />
+              </button>
+            </div>
             <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
               <input
                 type="checkbox"
