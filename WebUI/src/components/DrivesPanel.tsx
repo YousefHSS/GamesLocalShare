@@ -112,14 +112,13 @@ export default function DrivesPanel() {
 
   // Xbox (MSIXVC) games cannot use the plain file copy - their executables are
   // content-protected and a copied folder is invisible to the receiving Xbox
-  // app. Route them to the overlay transfer modal instead.
-  const handleXboxTransfer = (game: CrossLocationGame) => {
-    if (game.deviceCopy) {
-      s.updateState({ selectedLocalGame: game.deviceCopy });
-      setXboxModal({ mode: 'sender' });
-    } else {
-      setXboxModal({ mode: 'receiver' });
-    }
+  // app. Staging (device -> drive) is per-row; receiving (drive -> this PC)
+  // is the toolbar "Receive Xbox Game" button, since it just browses for the
+  // staged folder and is not tied to a comparison row.
+  const handleXboxStage = (game: CrossLocationGame) => {
+    if (!game.deviceCopy) return;
+    s.updateState({ selectedLocalGame: game.deviceCopy });
+    setXboxModal({ mode: 'sender' });
   };
 
   const canCopy = (dir: CrossLocationGame['direction']) =>
@@ -184,6 +183,13 @@ export default function DrivesPanel() {
           className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs font-medium flex items-center gap-1.5"
         >
           <HardDrive className="w-3.5 h-3.5" /> Add Library
+        </button>
+        <button
+          onClick={() => setXboxModal({ mode: 'receiver' })}
+          className="px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white rounded text-xs font-medium flex items-center gap-1.5"
+          title="Install a staged Xbox game (from a drive) onto this PC"
+        >
+          Receive Xbox Game
         </button>
         <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
           <input
@@ -300,13 +306,13 @@ export default function DrivesPanel() {
                             {game.statusText}
                           </span>
                           {platformFor(game) === 'Xbox' ? (
-                            (canCopy(game.direction) || game.direction === 'UnknownVersion') && (
+                            game.deviceCopy && (
                               <button
-                                onClick={() => handleXboxTransfer(game)}
+                                onClick={() => handleXboxStage(game)}
                                 className="px-1.5 py-0.5 bg-green-700 hover:bg-green-600 rounded text-[10px] font-medium text-white"
-                                title="Transfer via Xbox Overlay (required for MSIXVC / Game Pass titles)"
+                                title="Stage this install to a drive (required for MSIXVC / Game Pass titles)"
                               >
-                                Xbox Overlay
+                                Stage to Drive
                               </button>
                             )
                           ) : (
