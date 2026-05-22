@@ -3,6 +3,7 @@ import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle, I
 import { useAppState, type CrossLocationGame, type ExternalLibrary, type DriveCandidate } from '../store';
 import { sendCommand } from '../bridge';
 import PlatformIcon from './PlatformIcon';
+import XboxTransferModal from './XboxTransferModal';
 
 function statusBadgeClass(color: string): string {
   switch (color) {
@@ -36,6 +37,7 @@ export default function DrivesPanel() {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [pendingName, setPendingName] = useState('');
   const [manualPath, setManualPath] = useState('');
+  const [xboxModal, setXboxModal] = useState<{ mode: 'sender' | 'receiver' } | null>(null);
   // "Device-only" rows (games installed locally but not on the drive) dominate
   // the list once compared, so they're hidden by default. The user can opt in
   // when they actually want to see what's missing from a drive.
@@ -106,6 +108,18 @@ export default function DrivesPanel() {
       libraryId: game.library.id,
       direction: overrideDirection ?? game.direction,
     });
+  };
+
+  // Xbox (MSIXVC) games cannot use the plain file copy - their executables are
+  // content-protected and a copied folder is invisible to the receiving Xbox
+  // app. Route them to the overlay transfer modal instead.
+  const handleXboxTransfer = (game: CrossLocationGame) => {
+    if (game.deviceCopy) {
+      s.updateState({ selectedLocalGame: game.deviceCopy });
+      setXboxModal({ mode: 'sender' });
+    } else {
+      setXboxModal({ mode: 'receiver' });
+    }
   };
 
   const canCopy = (dir: CrossLocationGame['direction']) =>
@@ -285,34 +299,48 @@ export default function DrivesPanel() {
                           <span className={`text-[10px] px-1.5 py-0.5 rounded border ${statusBadgeClass(game.statusColor)}`}>
                             {game.statusText}
                           </span>
-                          {canCopy(game.direction) && (
-                            <button
-                              onClick={() => handleCopy(game)}
-                              disabled={s.isTransferring}
-                              className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
-                              title="Copy"
-                            >
-                              <Copy className="w-3.5 h-3.5 text-slate-300" />
-                            </button>
-                          )}
-                          {game.direction === 'UnknownVersion' && (
+                          {platformFor(game) === 'Xbox' ? (
+                            (canCopy(game.direction) || game.direction === 'UnknownVersion') && (
+                              <button
+                                onClick={() => handleXboxTransfer(game)}
+                                className="px-1.5 py-0.5 bg-green-700 hover:bg-green-600 rounded text-[10px] font-medium text-white"
+                                title="Transfer via Xbox Overlay (required for MSIXVC / Game Pass titles)"
+                              >
+                                Xbox Overlay
+                              </button>
+                            )
+                          ) : (
                             <>
-                              <button
-                                onClick={() => handleCopy(game, 'DeviceToDrive')}
-                                disabled={s.isTransferring}
-                                className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
-                                title="Copy device → drive (overwrite drive copy)"
-                              >
-                                <ArrowRight className="w-3.5 h-3.5 text-slate-300" />
-                              </button>
-                              <button
-                                onClick={() => handleCopy(game, 'DriveToDevice')}
-                                disabled={s.isTransferring}
-                                className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
-                                title="Copy drive → device (overwrite device copy)"
-                              >
-                                <ArrowLeft className="w-3.5 h-3.5 text-slate-300" />
-                              </button>
+                              {canCopy(game.direction) && (
+                                <button
+                                  onClick={() => handleCopy(game)}
+                                  disabled={s.isTransferring}
+                                  className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+                                  title="Copy"
+                                >
+                                  <Copy className="w-3.5 h-3.5 text-slate-300" />
+                                </button>
+                              )}
+                              {game.direction === 'UnknownVersion' && (
+                                <>
+                                  <button
+                                    onClick={() => handleCopy(game, 'DeviceToDrive')}
+                                    disabled={s.isTransferring}
+                                    className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+                                    title="Copy device → drive (overwrite drive copy)"
+                                  >
+                                    <ArrowRight className="w-3.5 h-3.5 text-slate-300" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleCopy(game, 'DriveToDevice')}
+                                    disabled={s.isTransferring}
+                                    className="p-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+                                    title="Copy drive → device (overwrite device copy)"
+                                  >
+                                    <ArrowLeft className="w-3.5 h-3.5 text-slate-300" />
+                                  </button>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
@@ -325,6 +353,13 @@ export default function DrivesPanel() {
           })
         )}
       </div>
+
+      {xboxModal && (
+        <XboxTransferModal
+          mode={xboxModal.mode}
+          onClose={() => setXboxModal(null)}
+        />
+      )}
     </div>
   );
 }

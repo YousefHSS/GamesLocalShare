@@ -87,4 +87,15 @@
     </Content>
   </ItemGroup>
 
+  <!-- Proven Xbox MSIXVC transfer scripts. Source of truth lives in
+       PLANNING\xbox-validation\auto; these three are copied to the build
+       output as xbox-scripts\ and deployed to a writable per-user folder
+       at runtime by XboxScriptHost. -->
+  <ItemGroup>
+    <None Update="PLANNING\xbox-validation\auto\_common.ps1;PLANNING\xbox-validation\auto\xbox-transfer-sender.ps1;PLANNING\xbox-validation\auto\xbox-transfer-receiver-overlay.ps1">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>xbox-scripts\%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
 </Project>

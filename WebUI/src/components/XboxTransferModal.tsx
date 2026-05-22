@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAppState } from '../store';
 import { sendCommand } from '../bridge';
 import {
@@ -12,394 +12,367 @@ import {
   Loader2,
   ArrowRight,
   FolderOpen,
-  Monitor
 } from 'lucide-react';
 
 type FlowMode = 'sender' | 'receiver';
-type TransferType = 'drive' | 'network' | null;
 
 interface XboxTransferModalProps {
   onClose: () => void;
   mode?: FlowMode;
 }
 
+// Wizard step ids. Negative-free numbering; the working/result views are
+// driven entirely by the backend xboxTransfer state once `launched` is set.
+const STEP_CHOOSE = 0;
+const STEP_ELEVATION = 1;
+const STEP_SELECT_SOURCE = 2; // receiver only
+const STEP_INSTRUCTIONS = 3; // receiver only
+const STEP_SELECT_DEST = 10; // sender only
+
+function baseName(p: string): string {
+  if (!p) return '';
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || p;
+}
+
 export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTransferModalProps) {
   const selectedLocalGame = useAppState((s) => s.selectedLocalGame);
-  const selectedPeerGame = useAppState((s) => s.selectedPeerGame);
   const xboxTransfer = useAppState((s) => s.xboxTransfer);
   const isElevated = useAppState((s) => s.isElevated);
   const isXboxTransferActive = useAppState((s) => s.isXboxTransferActive);
   const xboxDestinationPath = useAppState((s) => s.xboxDestinationPath);
-  const [step, setStep] = useState(0);
+  const xboxSourcePath = useAppState((s) => s.xboxSourcePath);
+
+  const [step, setStep] = useState(STEP_CHOOSE);
+  const [launched, setLaunched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const game = mode === 'sender' ? selectedLocalGame : selectedPeerGame;
+  const game = mode === 'sender' ? selectedLocalGame : null;
+  const isXboxOverlayGame = game?.platform === 'Xbox' && game?.isOverlaySupported;
 
-  // Advance step based on backend state when in receiver mode
-  useEffect(() => {
-    if (mode !== 'receiver' || !xboxTransfer) return;
-    const backendStep = xboxTransfer.currentStep;
-    if (backendStep === 'Complete' || backendStep === 'Failed') {
-      setStep(99);
+  const transferStep = xboxTransfer?.currentStep;
+  const finished = transferStep === 'Complete' || transferStep === 'Failed';
+  const awaitingResume = transferStep === 'WaitingForResume';
+
+  const handleChooseDrive = () => {
+    setError(null);
+    if (!isElevated) {
+      setStep(STEP_ELEVATION);
       return;
     }
-    const stepMap: Record<string, number> = {
-      ChooseSource: 0,
-      ElevationGate: 1,
-      InstallInXboxApp: 2,
-      WaitingForInstallPause: 3,
-      PollingForFolder: 4,
-      Overlaying: 5,
-      ResettingAcls: 6,
-      WaitingForResume: 7,
-      Monitoring: 8,
-    };
-    const mapped = stepMap[backendStep];
-    if (mapped !== undefined && mapped > step) setStep(mapped);
-  }, [xboxTransfer, mode, step]);
-
-  const handleChooseType = (type: TransferType) => {
-    setError(null);
-    if (mode === 'sender') {
-      if (type === 'drive') {
-        setStep(10); // Sender drive flow
-      } else {
-        setStep(20); // Sender network flow
-      }
-    } else {
-      // Receiver flow
-      if (!isElevated) {
-        setStep(1); // Elevation gate
-      } else {
-        setStep(2); // Install instructions
-      }
-    }
+    setStep(mode === 'sender' ? STEP_SELECT_DEST : STEP_SELECT_SOURCE);
   };
 
-  const handleRequestElevation = () => {
-    sendCommand('RequestElevation');
-  };
+  const handleRequestElevation = () => sendCommand('RequestElevation');
+  const handleBrowseDestination = () => sendCommand('BrowseXboxDestination');
+  const handleBrowseSource = () => sendCommand('BrowseXboxSource');
 
-  const handleStartSenderDrive = async () => {
+  const handleStartSenderDrive = () => {
     if (!game?.installPath || !xboxDestinationPath) {
-      setError('Please select a destination folder');
+      setError('Please select a destination folder.');
       return;
     }
     setError(null);
+    setLaunched(true);
     sendCommand('StartXboxStage', { sourcePath: game.installPath });
-    // Wait a tick then complete with destination
+    // StartXboxStage validates and prepares; CompleteXboxStage does the copy.
     setTimeout(() => {
       sendCommand('CompleteXboxStage', { destinationPath: xboxDestinationPath });
     }, 500);
-    setStep(11);
   };
 
-  const handleStartSenderNetwork = async () => {
-    if (!game?.installPath) {
-      setError('No game selected');
+  const handleStartReceiver = () => {
+    if (!xboxSourcePath) {
+      setError('Please select the staged game folder.');
       return;
     }
     setError(null);
-    sendCommand('PrepareXboxNetwork', { sourcePath: game.installPath });
-    setStep(21);
+    setLaunched(true);
+    sendCommand('StartXboxTransfer', { sourcePath: xboxSourcePath });
   };
 
-  const handleBrowseDestination = () => {
-    sendCommand('BrowseXboxDestination');
-  };
+  // ---- Shared sub-views -----------------------------------------------------
 
-  const isXboxOverlayGame = game?.platform === 'Xbox' && game?.isOverlaySupported;
+  const elevationGate = (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-yellow-400 font-semibold">
+        <Shield size={20} />
+        Administrator Required
+      </div>
+      <p className="text-gray-300 text-sm">
+        Xbox transfer copies files into protected MSIXVC install folders and
+        runs helper processes as SYSTEM. The app must be restarted with
+        Administrator privileges.
+      </p>
+      <button
+        onClick={handleRequestElevation}
+        className="w-full bg-yellow-600 hover:bg-yellow-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
+      >
+        <Shield size={18} />
+        Restart as Administrator
+      </button>
+      <p className="text-gray-500 text-xs">
+        The app will close and reopen with a UAC prompt. Reopen this window
+        afterwards.
+      </p>
+    </div>
+  );
 
-  const renderStepContent = () => {
-    // === RECEIVER FLOW ===
-    if (mode === 'receiver') {
-      switch (step) {
-        case 0:
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Choose Source</h3>
-              <p className="text-gray-400 text-sm">
-                How is the staged game available to you?
-              </p>
-              <button
-                onClick={() => handleChooseType('drive')}
-                className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem hover:bg-dark-hover border border-gray-700 transition"
-              >
-                <HardDrive className="text-blue-400" size={24} />
-                <div className="text-left">
-                  <div className="text-white font-medium">Drive / USB</div>
-                  <div className="text-gray-400 text-xs">A pre-staged copy on a local or shared drive</div>
-                </div>
-              </button>
-              <button
-                onClick={() => handleChooseType('network')}
-                className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem hover:bg-dark-hover border border-gray-700 transition"
-              >
-                <Wifi className="text-green-400" size={24} />
-                <div className="text-left">
-                  <div className="text-white font-medium">Network Peer</div>
-                  <div className="text-gray-400 text-xs">Stream directly from a peer on your LAN</div>
-                </div>
-              </button>
+  const networkButton = (
+    <div className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem border border-gray-800 opacity-50 cursor-not-allowed">
+      <Wifi className="text-gray-500" size={24} />
+      <div className="text-left">
+        <div className="text-gray-400 font-medium">
+          {mode === 'sender' ? 'Stream to Peer' : 'Network Peer'}
+          <span className="ml-2 text-xs text-gray-500">(coming soon)</span>
+        </div>
+        <div className="text-gray-600 text-xs">
+          LAN streaming is not available yet for Xbox titles.
+        </div>
+      </div>
+    </div>
+  );
+
+  // ---- Working / result view (backend-driven) ------------------------------
+
+  const renderProgress = () => {
+    if (finished) {
+      const v = xboxTransfer?.verdict;
+      const ok = v === 'FullSkip' || v === 'DeltaOnly';
+      return (
+        <div className="space-y-4">
+          {ok ? (
+            <div className="flex items-center gap-2 text-green-400 font-semibold">
+              <CheckCircle size={24} />
+              {mode === 'sender' ? 'Staging Complete' : 'Transfer Complete'}
             </div>
-          );
-
-        case 1:
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-yellow-400 font-semibold">
-                <Shield size={20} />
-                Administrator Required
-              </div>
-              <p className="text-gray-300 text-sm">
-                Xbox overlay transfer requires Administrator privileges to copy files into the protected MSIXVC install folder.
-              </p>
-              <button
-                onClick={handleRequestElevation}
-                className="w-full bg-yellow-600 hover:bg-yellow-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
-              >
-                <Shield size={18} />
-                Restart as Administrator
-              </button>
-              <p className="text-gray-500 text-xs">
-                The app will close and reopen with a UAC prompt.
-              </p>
+          ) : (
+            <div className="flex items-center gap-2 text-red-400 font-semibold">
+              <AlertCircle size={24} />
+              {mode === 'sender' ? 'Staging Failed' : `Transfer ${v || 'Failed'}`}
             </div>
-          );
-
-        case 2:
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Install in Xbox App</h3>
-              <ol className="text-gray-300 text-sm list-decimal list-inside space-y-2">
-                <li>Open the Xbox app on this PC</li>
-                <li>Find <strong>{game?.name || 'the game'}</strong> and click <strong>Install</strong></li>
-                <li>As soon as it starts downloading, click <strong>Pause</strong></li>
-                <li>Come back here and click Continue</li>
-              </ol>
-              <button
-                onClick={() => setStep(3)}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
-              >
-                <ArrowRight size={18} />
-                I've Paused the Install
-              </button>
+          )}
+          <p className="text-gray-300 text-sm">{xboxTransfer?.statusMessage}</p>
+          {xboxTransfer?.errorMessage && !ok && (
+            <div className="bg-red-900/40 border border-red-700 text-red-300 text-sm p-3 rounded whitespace-pre-line">
+              {xboxTransfer.errorMessage}
             </div>
-          );
-
-        case 3:
-        case 4:
-        case 5:
-        case 6:
-        case 7:
-        case 8:
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-blue-400 font-semibold">
-                <Loader2 className="animate-spin" size={20} />
-                {xboxTransfer?.statusMessage || 'Working...'}
-              </div>
-              {xboxTransfer && xboxTransfer.overlayProgress > 0 && (
-                <div className="w-full bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${xboxTransfer.overlayProgress}%` }}
-                  />
-                </div>
-              )}
-              <div className="text-gray-400 text-xs font-mono">
-                Step: {xboxTransfer?.currentStep || '...'}
-              </div>
-              {isXboxTransferActive && (
-                <button
-                  onClick={() => sendCommand('CancelXboxTransfer')}
-                  className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold transition"
-                >
-                  Cancel Transfer
-                </button>
-              )}
+          )}
+          {mode === 'receiver' && (
+            <div className="text-gray-400 text-xs space-y-1">
+              <p>Verdict: <span className="font-semibold">{xboxTransfer?.verdict}</span></p>
+              <p>Downloaded: {xboxTransfer?.networkReceivedMB?.toFixed(1)} MB</p>
+              <p>Package installed: {xboxTransfer?.packageInstalled ? 'Yes' : 'No'}</p>
             </div>
-          );
-
-        case 99:
-          return (
-            <div className="space-y-4">
-              {xboxTransfer?.verdict === 'FullSkip' || xboxTransfer?.verdict === 'DeltaOnly' ? (
-                <div className="flex items-center gap-2 text-green-400 font-semibold">
-                  <CheckCircle size={24} />
-                  Transfer Complete!
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-red-400 font-semibold">
-                  <AlertCircle size={24} />
-                  Transfer {xboxTransfer?.verdict || 'Failed'}
-                </div>
-              )}
-              <div className="text-gray-300 text-sm space-y-1">
-                <p>Verdict: <span className="font-semibold">{xboxTransfer?.verdict}</span></p>
-                <p>Network: {xboxTransfer?.networkReceivedMB.toFixed(1)} MB</p>
-                <p>Installed: {xboxTransfer?.packageInstalled ? 'Yes' : 'No'}</p>
-                {xboxTransfer?.errorMessage && (
-                  <p className="text-red-400">{xboxTransfer.errorMessage}</p>
-                )}
-              </div>
-              <button
-                onClick={onClose}
-                className="w-full bg-gray-600 hover:bg-gray-500 text-white py-2 rounded font-semibold transition"
-              >
-                Close
-              </button>
-            </div>
-          );
-      }
+          )}
+          <button
+            onClick={onClose}
+            className="w-full bg-gray-600 hover:bg-gray-500 text-white py-2 rounded font-semibold transition"
+          >
+            Close
+          </button>
+        </div>
+      );
     }
 
-    // === SENDER FLOW ===
-    if (mode === 'sender') {
-      switch (step) {
-        case 0:
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Share Xbox Game</h3>
-              <p className="text-gray-400 text-sm">
-                {game?.name || 'Selected game'} supports overlay transfer.
-                How do you want to share it?
-              </p>
-              <button
-                onClick={() => handleChooseType('drive')}
-                className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem hover:bg-dark-hover border border-gray-700 transition"
-              >
-                <HardDrive className="text-blue-400" size={24} />
-                <div className="text-left">
-                  <div className="text-white font-medium">Stage to Drive</div>
-                  <div className="text-gray-400 text-xs">Copy to a USB or shared folder for manual handoff</div>
-                </div>
-              </button>
-              <button
-                onClick={() => handleChooseType('network')}
-                className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem hover:bg-dark-hover border border-gray-700 transition"
-              >
-                <Wifi className="text-green-400" size={24} />
-                <div className="text-left">
-                  <div className="text-white font-medium">Stream to Peer</div>
-                  <div className="text-gray-400 text-xs">Let a peer download directly over your LAN</div>
-                </div>
-              </button>
+    return (
+      <div className="space-y-4">
+        {awaitingResume ? (
+          <div className="bg-yellow-900/40 border border-yellow-600 rounded p-4 space-y-1">
+            <div className="flex items-center gap-2 text-yellow-300 font-bold">
+              <Play size={20} />
+              Click RESUME in the Xbox app now
             </div>
-          );
+            <p className="text-yellow-200/80 text-sm">
+              The staged files are in place. Resuming the install finalizes it.
+            </p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-blue-400 font-semibold">
+            <Loader2 className="animate-spin" size={20} />
+            {xboxTransfer?.statusMessage || 'Working...'}
+          </div>
+        )}
 
-        case 10:
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Stage to Drive</h3>
-              <p className="text-gray-400 text-sm">
-                Select a destination folder (USB drive or shared folder).
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={xboxDestinationPath}
-                  placeholder="Click Browse to select folder..."
-                  className="flex-1 bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
-                />
-                <button
-                  onClick={handleBrowseDestination}
-                  className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded transition"
-                >
-                  <FolderOpen size={18} />
-                </button>
+        {!!xboxTransfer && xboxTransfer.overlayProgress > 0 && (
+          <div className="w-full bg-gray-700 rounded-full h-2">
+            <div
+              className="bg-blue-500 h-2 rounded-full transition-all"
+              style={{ width: `${xboxTransfer.overlayProgress}%` }}
+            />
+          </div>
+        )}
+
+        {mode === 'receiver' && (xboxTransfer?.networkReceivedMB ?? 0) > 0 && (
+          <div className="text-gray-400 text-xs">
+            Downloaded so far: {xboxTransfer?.networkReceivedMB?.toFixed(1)} MB
+          </div>
+        )}
+
+        <div className="text-gray-500 text-xs font-mono">
+          Step: {transferStep || '...'}
+        </div>
+
+        {isXboxTransferActive && (
+          <button
+            onClick={() =>
+              sendCommand(mode === 'sender' ? 'CancelXboxStage' : 'CancelXboxTransfer')
+            }
+            className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold transition"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // ---- Wizard views --------------------------------------------------------
+
+  const renderWizard = () => {
+    if (step === STEP_ELEVATION) return elevationGate;
+
+    if (step === STEP_CHOOSE) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-white">
+            {mode === 'sender' ? 'Share Xbox Game' : 'Receive Xbox Game'}
+          </h3>
+          <p className="text-gray-400 text-sm">
+            {mode === 'sender'
+              ? `${game?.name || 'This game'} can be staged for overlay transfer. How do you want to share it?`
+              : 'How is the staged game available to you?'}
+          </p>
+          <button
+            onClick={handleChooseDrive}
+            className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-elem hover:bg-dark-hover border border-gray-700 transition"
+          >
+            <HardDrive className="text-blue-400" size={24} />
+            <div className="text-left">
+              <div className="text-white font-medium">
+                {mode === 'sender' ? 'Stage to Drive' : 'Drive / USB'}
               </div>
-              <button
-                onClick={handleStartSenderDrive}
-                disabled={!xboxDestinationPath || isXboxTransferActive}
-                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
-              >
-                {isXboxTransferActive ? <Loader2 className="animate-spin" size={18} /> : <Play size={18} />}
-                Start Staging
-              </button>
-            </div>
-          );
-
-        case 11:
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-blue-400 font-semibold">
-                <Loader2 className="animate-spin" size={20} />
-                {xboxTransfer?.statusMessage || 'Staging...'}
+              <div className="text-gray-400 text-xs">
+                {mode === 'sender'
+                  ? 'Copy to a USB or shared folder for manual handoff'
+                  : 'A pre-staged copy on a local or shared drive'}
               </div>
-              {xboxTransfer && xboxTransfer.overlayProgress > 0 && (
-                <div className="w-full bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${xboxTransfer.overlayProgress}%` }}
-                  />
-                </div>
-              )}
-              {isXboxTransferActive && (
-                <button
-                  onClick={() => sendCommand('CancelXboxStage')}
-                  className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold transition"
-                >
-                  Cancel
-                </button>
-              )}
-              {!isXboxTransferActive && xboxTransfer?.currentStep === 'Complete' && (
-                <button
-                  onClick={onClose}
-                  className="w-full bg-green-600 hover:bg-green-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
-                >
-                  <CheckCircle size={18} />
-                  Done
-                </button>
-              )}
             </div>
-          );
+          </button>
+          {networkButton}
+        </div>
+      );
+    }
 
-        case 20:
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-white">Stream to Peer</h3>
-              <p className="text-gray-400 text-sm">
-                This will start a network sender so peers can stream the game directly.
-                Keep this window open until the peer finishes receiving.
-              </p>
-              <button
-                onClick={handleStartSenderNetwork}
-                disabled={isXboxTransferActive}
-                className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
-              >
-                <Wifi size={18} />
-                Start Network Sender
-              </button>
-            </div>
-          );
+    // Sender: pick destination and start.
+    if (mode === 'sender' && step === STEP_SELECT_DEST) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-white">Stage to Drive</h3>
+          <p className="text-gray-400 text-sm">
+            Select a destination folder (USB drive or shared folder). The game
+            folder name is appended automatically.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              readOnly
+              value={xboxDestinationPath}
+              placeholder="Click Browse to select folder..."
+              className="flex-1 bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
+            />
+            <button
+              onClick={handleBrowseDestination}
+              className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded transition"
+            >
+              <FolderOpen size={18} />
+            </button>
+          </div>
+          <button
+            onClick={handleStartSenderDrive}
+            disabled={!xboxDestinationPath}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
+          >
+            <Play size={18} />
+            Start Staging
+          </button>
+          <p className="text-gray-500 text-xs">
+            This stops Gaming Services briefly and rescues content-protected
+            executables. It can take several minutes for large titles.
+          </p>
+        </div>
+      );
+    }
 
-        case 21:
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-green-400 font-semibold">
-                <Monitor size={20} />
-                Network Sender Running
-              </div>
-              <p className="text-gray-300 text-sm">
-                Peers can now stream <strong>{game?.name}</strong> from this device.
-              </p>
-              <p className="text-gray-400 text-xs">
-                Port: 45680
-              </p>
-              <button
-                onClick={() => {
-                  sendCommand('StopXboxNetwork');
-                  onClose();
-                }}
-                className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold transition"
-              >
-                Stop Sender & Close
-              </button>
-            </div>
-          );
-      }
+    // Receiver: select the staged source folder.
+    if (mode === 'receiver' && step === STEP_SELECT_SOURCE) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-white">Select Staged Game</h3>
+          <p className="text-gray-400 text-sm">
+            Pick the folder produced by the sender. It must contain
+            <span className="font-mono text-gray-300"> transfer-summary.json</span>.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              readOnly
+              value={xboxSourcePath}
+              placeholder="Click Browse to select the staged folder..."
+              className="flex-1 bg-dark-elem border border-gray-700 rounded px-3 py-2 text-sm text-white"
+            />
+            <button
+              onClick={handleBrowseSource}
+              className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded transition"
+            >
+              <FolderOpen size={18} />
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              if (!xboxSourcePath) {
+                setError('Please select the staged game folder.');
+                return;
+              }
+              setError(null);
+              setStep(STEP_INSTRUCTIONS);
+            }}
+            disabled={!xboxSourcePath}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
+          >
+            <ArrowRight size={18} />
+            Continue
+          </button>
+        </div>
+      );
+    }
+
+    // Receiver: install + pause instructions, then launch.
+    if (mode === 'receiver' && step === STEP_INSTRUCTIONS) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-white">Install in the Xbox App</h3>
+          <ol className="text-gray-300 text-sm list-decimal list-inside space-y-2">
+            <li>Open the Xbox app on this PC.</li>
+            <li>
+              Find <strong>{baseName(xboxSourcePath) || 'the game'}</strong> and
+              click <strong>Install</strong>.
+            </li>
+            <li>Wait ~10 seconds for the download to start, then click <strong>Pause</strong>.</li>
+            <li>Leave the Xbox app open and click the button below.</li>
+          </ol>
+          <button
+            onClick={handleStartReceiver}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
+          >
+            <ArrowRight size={18} />
+            I've Paused the Install
+          </button>
+          <p className="text-gray-500 text-xs">
+            You will be prompted to click Resume once the overlay is applied.
+          </p>
+        </div>
+      );
     }
 
     return null;
@@ -418,7 +391,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
         </div>
 
         <div className="p-6 overflow-y-auto flex-1">
-          {!isXboxOverlayGame && step === 0 && (
+          {mode === 'sender' && !isXboxOverlayGame && !launched && step === STEP_CHOOSE && (
             <div className="text-yellow-400 text-sm mb-4 flex items-center gap-2">
               <AlertCircle size={16} />
               This game does not appear to support overlay transfer.
@@ -431,26 +404,8 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
             </div>
           )}
 
-          {renderStepContent()}
+          {launched ? renderProgress() : renderWizard()}
         </div>
-
-        {/* Step indicator */}
-        {mode === 'receiver' && step > 0 && step < 99 && (
-          <div className="px-6 pb-4">
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>{step >= 1 ? 'Elevated' : '...'}</span>
-              <span>{step >= 2 ? 'Paused' : '...'}</span>
-              <span>{step >= 5 ? 'Overlay' : '...'}</span>
-              <span>{step >= 8 ? 'Monitor' : '...'}</span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-1 mt-1">
-              <div
-                className="bg-blue-500 h-1 rounded-full transition-all"
-                style={{ width: `${Math.min((step / 8) * 100, 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

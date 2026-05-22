@@ -2347,6 +2347,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Xbox (MSIXVC) games cannot be moved with a plain file copy: their
+        // executables are content-protected (copying them yields Access Denied
+        // or encrypted bytes) and a copied folder is not recognized by the
+        // receiving Xbox app. They must go through the Xbox Overlay transfer.
+        if (crossGame.DeviceCopy?.Platform == GamePlatform.Xbox
+            || crossGame.ExternalCopy?.Platform == GamePlatform.Xbox)
+        {
+            const string msg = "Xbox (Game Pass / MSIXVC) games cannot be moved with a plain " +
+                "copy - use 'Xbox Overlay' transfer instead.";
+            AddLog($"StartLocalCopy: {msg}", LogMessageType.Error);
+            LastError = msg;
+            return;
+        }
+
         // The user can resolve UnknownVersion (and force-override any other direction) by
         // passing an explicit DeviceToDrive / DriveToDevice from the UI.
         var effectiveDirection = overrideDirection ?? crossGame.Direction;
@@ -2464,6 +2478,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!ElevationHelper.IsElevated())
+        {
+            const string msg = "Xbox staging requires the app to run as Administrator. " +
+                "Use 'Restart as Administrator' first.";
+            AddLog(msg, LogMessageType.Error);
+            LastError = msg;
+            return;
+        }
+
         _xboxSenderService.Reset();
         var error = _xboxSenderService.ValidateSource(sourcePath);
         if (error != null)
@@ -2573,6 +2596,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (string.IsNullOrWhiteSpace(sourcePath))
         {
             AddLog("Xbox transfer: no source path provided", LogMessageType.Error);
+            return;
+        }
+
+        if (!ElevationHelper.IsElevated())
+        {
+            const string msg = "Xbox transfer requires the app to run as Administrator. " +
+                "Use 'Restart as Administrator' first.";
+            AddLog(msg, LogMessageType.Error);
+            LastError = msg;
             return;
         }
 

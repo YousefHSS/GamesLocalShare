@@ -1,23 +1,34 @@
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
-using System.Security.Principal;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GamesLocalShare.Models;
 
 namespace GamesLocalShare.Services;
 
 /// <summary>
-/// Handles the Xbox MSIXVC sender staging workflow.
-/// Copies an installed Xbox game to a portable destination (USB/shared drive)
-/// with proper metadata for the receiver overlay process.
-/// Requires running as Administrator (robocopy /B for backup privileges).
+/// Sender side of the Xbox MSIXVC transfer: stages an installed Game Pass
+/// title to a portable destination so a receiver can overlay it onto a
+/// paused install.
+///
+/// This is a thin wrapper around the proven xbox-transfer-sender.ps1 script
+/// (see PLANNING/xbox-validation/MSIXVC-TRANSFER-SOLVED.md). The script
+/// self-elevates, re-launches as SYSTEM via PsExec, stops Gaming Services,
+/// robocopies the install, and rescues content-protected executables via the
+/// game's package context. The app must already be elevated so the script's
+/// Assert-Elevated is a no-op and its stdout stays capturable.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public class XboxSenderService
 {
+    // Matches the script's source-scan line, e.g.
+    //   [SYSTEM phase] Files: 198, Bytes: 12,345,678 (11.8 MB), Unreadable: 2
+    private static readonly Regex SourceScanLine =
+        new(@"Bytes:\s*([\d,]+)", RegexOptions.Compiled);
+
     private CancellationTokenSource? _cts;
+    private long _totalSourceBytes;
 
     public event EventHandler<XboxTransferState>? StateChanged;
     public event EventHandler<string>? LogMessage;
@@ -34,7 +45,7 @@ public class XboxSenderService
         if (!Directory.Exists(sourcePath))
             return $"Source directory not found: {sourcePath}";
 
-        // Check for MSIXVC indicators: .xvi/.xvs/.xct files and Content\ subfolder
+        // MSIXVC indicators: .xvi/.xvs/.xct envelope files and a Content\ subfolder.
         var xviFiles = Directory.GetFiles(sourcePath, "*.xvi");
         var xvsFiles = Directory.GetFiles(sourcePath, "*.xvs");
         var xctFiles = Directory.GetFiles(sourcePath, "*.xct");
@@ -46,42 +57,36 @@ public class XboxSenderService
         if (!Directory.Exists(contentDir))
             return "Content subfolder not found - not a valid Xbox install";
 
-        // Extract metadata
         _state.SourcePath = sourcePath;
         _state.GameName = Path.GetFileName(sourcePath);
 
-        // Extract content GUID from .xvi filename
         if (xviFiles.Length > 0)
-        {
             _state.ContentGuid = Path.GetFileNameWithoutExtension(xviFiles[0]);
-        }
 
-        // Extract PFN from ACL
         _state.PackageFamilyName = ExtractPfnFromAcl(sourcePath) ?? "";
 
-        // Count source files and size
+        // Best-effort size estimate. Protected installs may deny enumeration;
+        // the script does the authoritative scan as SYSTEM.
         try
         {
             var files = new DirectoryInfo(sourcePath).EnumerateFiles("*", SearchOption.AllDirectories);
             _state.SourceFileCount = files.Count();
             _state.SourceBytes = files.Sum(f => f.Length);
         }
-        catch (UnauthorizedAccessException)
+        catch
         {
             _state.SourceFileCount = 0;
             _state.SourceBytes = 0;
-        }
-        catch
-        {
-            return "Could not count source files";
         }
 
         return null;
     }
 
     /// <summary>
-    /// Stages the Xbox game to a local/shared drive destination.
-    /// Performs a post-copy integrity walk and writes transfer-summary.json.
+    /// Stages the Xbox game to a local/shared drive by running
+    /// xbox-transfer-sender.ps1. The script appends the game folder name to
+    /// <paramref name="destinationPath"/> and writes transfer-summary.json
+    /// into the staged folder.
     /// </summary>
     public async Task StageToFolderAsync(string destinationPath, CancellationToken ct = default)
     {
@@ -91,128 +96,239 @@ public class XboxSenderService
         try
         {
             _state.DestinationPath = destinationPath;
-            _state.CurrentStep = XboxTransferStep.ValidatingSource;
-            _state.StatusMessage = "Validating source...";
-            RaiseStateChanged();
-
-            Directory.CreateDirectory(destinationPath);
-
             _state.CurrentStep = XboxTransferStep.CopyingFiles;
-            _state.StatusMessage = $"Staging {_state.SourceFileCount} files...";
+            _state.OverlayProgress = 0;
+            _state.StatusMessage = "Staging via xbox-transfer-sender.ps1...";
             RaiseStateChanged();
 
-            // Run robocopy with backup privileges (/B)
-            var args = $"\"{_state.SourcePath}\" \"{destinationPath}\" /E /COPY:DAT /DCOPY:DAT /IS /IT /R:1 /W:2 /MT:8 /NP /NDL /B /XF transfer-summary.json";
-            Log($"robocopy {args}");
-
-            var psi = new ProcessStartInfo
+            XboxScriptHost host;
+            try
             {
-                FileName = "robocopy.exe",
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using var proc = Process.Start(psi);
-            if (proc == null)
+                host = XboxScriptHost.Deploy();
+            }
+            catch (Exception ex)
             {
-                _state.CurrentStep = XboxTransferStep.Failed;
-                _state.ErrorMessage = "Failed to start robocopy";
-                RaiseStateChanged();
+                Fail($"Could not deploy transfer scripts: {ex.Message}");
                 return;
             }
 
-            var progressTask = MonitorProgressAsync(destinationPath, token);
-            await proc.WaitForExitAsync(token);
-            var exitCode = proc.ExitCode;
-            Log($"robocopy exit code: {exitCode}");
-            await progressTask;
-
-            // Post-copy integrity walk
-            _state.CurrentStep = XboxTransferStep.CopyingFiles;
-            _state.StatusMessage = "Verifying integrity...";
-            RaiseStateChanged();
-
-            var integrity = RunIntegrityWalk(_state.SourcePath, destinationPath);
-            int destFileCount = integrity.DestFileCount;
-            long destBytes = integrity.DestBytes;
-
-            bool integrityOk = integrity.MissingFiles.Count == 0 && integrity.MismatchFiles.Count == 0;
-            WriteTransferSummary(destinationPath, destFileCount, destBytes, exitCode, integrity);
-
-            if (exitCode >= 8)
+            var args = new List<string>
             {
-                _state.CurrentStep = XboxTransferStep.Failed;
-                _state.ErrorMessage = $"Robocopy failed with exit code {exitCode}";
-                _state.Verdict = XboxTransferVerdict.Error;
-            }
-            else if (!integrityOk)
+                "-GameFolder", _state.SourcePath,
+                "-Destination", destinationPath,
+            };
+
+            var stagedDir = Path.Combine(destinationPath, _state.GameName);
+            _totalSourceBytes = _state.SourceBytes;
+
+            // Robocopy runs with /NP, so it emits no percentage. Poll the staged
+            // folder's size against the source total to drive a real progress bar.
+            using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var progressTask = PollStagingProgressAsync(stagedDir, progressCts.Token);
+
+            int exitCode = await host.RunAsync(host.SenderScript, args, line =>
             {
-                _state.CurrentStep = XboxTransferStep.Complete;
-                _state.StatusMessage = $"Staging complete with integrity warnings: {integrity.MissingFiles.Count} missing, {integrity.MismatchFiles.Count} mismatched";
-                _state.Verdict = XboxTransferVerdict.DeltaOnly; // partial success
-            }
-            else
+                Log(line);
+                var scan = SourceScanLine.Match(line);
+                if (scan.Success &&
+                    long.TryParse(scan.Groups[1].Value.Replace(",", ""), out var total) && total > 0)
+                {
+                    _totalSourceBytes = total;
+                }
+                if (line.Contains("robocopy exit"))
+                {
+                    _state.OverlayProgress = 100;
+                    progressCts.Cancel();
+                }
+                ApplyProgressLine(line);
+            }, confirmPausePrompt: false, ct: token);
+
+            progressCts.Cancel();
+            try { await progressTask; } catch { }
+
+            Log($"Sender script exit code: {exitCode}");
+
+            var summaryPath = Path.Combine(stagedDir, "transfer-summary.json");
+
+            if (exitCode != 0 || !File.Exists(summaryPath))
             {
-                _state.CurrentStep = XboxTransferStep.Complete;
-                _state.StatusMessage = $"Staging complete: {destFileCount} files, {destBytes / 1024 / 1024:N1} MB (integrity OK)";
-                _state.Verdict = XboxTransferVerdict.FullSkip; // success
+                var reason = exitCode == 10
+                    ? "Staged copy failed its integrity check - files are missing or mismatched. " +
+                      "Close the Xbox app and the game, then retry."
+                    : exitCode >= 8
+                        ? $"Robocopy reported a fatal error (exit {exitCode})."
+                        : $"Sender script exited with code {exitCode}.";
+                Fail(reason);
+                return;
             }
 
-            RaiseStateChanged();
+            ApplySummary(summaryPath, stagedDir);
         }
         catch (OperationCanceledException)
         {
-            _state.CurrentStep = XboxTransferStep.Failed;
-            _state.ErrorMessage = "Staging cancelled";
-            _state.Verdict = XboxTransferVerdict.Error;
+            Fail("Staging cancelled");
+        }
+        catch (Exception ex)
+        {
+            Fail($"Staging error: {ex.Message}");
+        }
+    }
+
+    private void ApplySummary(string summaryPath, string stagedDir)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(summaryPath));
+            var root = doc.RootElement;
+
+            long bytesCopied = GetLong(root, "BytesCopied");
+            int filesCopied = GetInt(root, "FilesCopied");
+            bool integrityOk = root.TryGetProperty("IntegrityOk", out var iok) &&
+                               iok.ValueKind == JsonValueKind.True;
+
+            int receiverProvided = root.TryGetProperty("ReceiverProvidedFiles", out var rp) &&
+                                   rp.ValueKind == JsonValueKind.Array
+                ? rp.GetArrayLength()
+                : 0;
+            int stagedProtected = root.TryGetProperty("StagedProtectedFiles", out var sp) &&
+                                  sp.ValueKind == JsonValueKind.Array
+                ? sp.GetArrayLength()
+                : 0;
+
+            if (root.TryGetProperty("PackageFamilyName", out var pfn) && pfn.ValueKind == JsonValueKind.String)
+                _state.PackageFamilyName = pfn.GetString() ?? _state.PackageFamilyName;
+
+            _state.DestinationPath = stagedDir;
+
+            if (!integrityOk)
+            {
+                Fail("Staged copy is incomplete (integrity check failed). " +
+                     "Close the Xbox app and the game on this PC, then retry.");
+                return;
+            }
+
+            _state.CurrentStep = XboxTransferStep.Complete;
+            var mb = bytesCopied / 1024d / 1024d;
+
+            if (receiverProvided > 0)
+            {
+                _state.Verdict = XboxTransferVerdict.DeltaOnly;
+                _state.StatusMessage =
+                    $"Staged {filesCopied} files ({mb:N1} MB). {receiverProvided} protected " +
+                    "executable(s) could not be rescued - the receiver's Xbox app must " +
+                    "download those before pausing.";
+            }
+            else
+            {
+                _state.Verdict = XboxTransferVerdict.FullSkip;
+                var rescued = stagedProtected > 0 ? $" ({stagedProtected} protected EXE(s) rescued)" : "";
+                _state.StatusMessage =
+                    $"Staging complete: {filesCopied} files, {mb:N1} MB{rescued}. " +
+                    "The staged copy is complete - move it to the receiver.";
+            }
+
             RaiseStateChanged();
         }
         catch (Exception ex)
         {
-            _state.CurrentStep = XboxTransferStep.Failed;
-            _state.ErrorMessage = $"Staging error: {ex.Message}";
-            _state.Verdict = XboxTransferVerdict.Error;
+            Fail($"Could not read transfer-summary.json: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Updates the live status from a notable script output line.
+    /// </summary>
+    private void ApplyProgressLine(string line)
+    {
+        string? status = line switch
+        {
+            _ when line.Contains("Scanning source") => "Scanning the installed game...",
+            _ when line.Contains("robocopy starting") => "Copying game files...",
+            _ when line.Contains("Verifying staged copy integrity") => "Verifying the staged copy...",
+            _ when line.Contains("Rescuing") && line.Contains("protected") =>
+                "Rescuing protected executables via package context...",
+            _ when line.Contains("Stopping Gaming Services") => "Stopping Gaming Services...",
+            _ => null,
+        };
+
+        if (status != null)
+        {
+            _state.StatusMessage = status;
             RaiseStateChanged();
         }
     }
 
     /// <summary>
-    /// Prepares the game for network overlay transfer by building the manifest.
-    /// Returns the overlay manifest that describes every file relative to the Content\ folder.
-    /// Does NOT copy files; streaming is handled by XboxNetworkSender.
+    /// While the sender script copies, periodically measures the staged folder's
+    /// size and reports it as a percentage of the source total.
+    /// </summary>
+    private async Task PollStagingProgressAsync(string stagedDir, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(2000, ct); }
+            catch (OperationCanceledException) { return; }
+
+            try
+            {
+                if (!Directory.Exists(stagedDir))
+                    continue;
+
+                long copied = 0;
+                int files = 0;
+                foreach (var f in new DirectoryInfo(stagedDir)
+                             .EnumerateFiles("*", SearchOption.AllDirectories))
+                {
+                    copied += f.Length;
+                    files++;
+                }
+
+                long total = _totalSourceBytes;
+                double copiedMb = copied / 1024d / 1024d;
+                if (total > 0)
+                {
+                    _state.OverlayProgress = Math.Min(100.0, copied * 100.0 / total);
+                    _state.StatusMessage =
+                        $"Copying: {copiedMb:N0} / {total / 1024d / 1024d:N0} MB " +
+                        $"({_state.OverlayProgress:N0}%)";
+                }
+                else
+                {
+                    _state.StatusMessage = $"Copying: {files} files, {copiedMb:N0} MB...";
+                }
+                RaiseStateChanged();
+            }
+            catch
+            {
+                // Enumeration can race with robocopy writing files; ignore.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds the overlay manifest for a network transfer. Network streaming
+    /// is deferred (see UI-INTEGRATION.md) - this remains for a future phase.
     /// </summary>
     public Task<XboxOverlayManifest> PrepareForNetworkAsync(CancellationToken ct = default)
     {
         _state.IsNetwork = true;
-        _state.CurrentStep = XboxTransferStep.ValidatingSource;
-        _state.StatusMessage = "Building overlay manifest...";
-        RaiseStateChanged();
-
         var contentDir = Path.Combine(_state.SourcePath, "Content");
         if (!Directory.Exists(contentDir))
-        {
             throw new InvalidOperationException("Content subfolder not found; cannot build manifest");
-        }
 
         var entries = new List<XboxOverlayManifestEntry>();
-        var sourceFiles = new List<FileInfo>();
         long totalBytes = 0;
         int totalFiles = 0;
 
         foreach (var file in new DirectoryInfo(contentDir).EnumerateFiles("*", SearchOption.AllDirectories))
         {
             ct.ThrowIfCancellationRequested();
-            var relativePath = Path.GetRelativePath(_state.SourcePath, file.FullName);
             entries.Add(new XboxOverlayManifestEntry
             {
-                RelativePath = relativePath,
+                RelativePath = Path.GetRelativePath(_state.SourcePath, file.FullName),
                 Size = file.Length,
-                LastModifiedUtc = file.LastWriteTimeUtc
+                LastModifiedUtc = file.LastWriteTimeUtc,
             });
-            sourceFiles.Add(file);
             totalBytes += file.Length;
             totalFiles++;
         }
@@ -224,132 +340,46 @@ public class XboxSenderService
             SourcePath = _state.SourcePath,
             TotalFiles = totalFiles,
             TotalBytes = totalBytes,
-            Entries = entries
+            Entries = entries,
         };
 
         _state.SourceFileCount = totalFiles;
         _state.SourceBytes = totalBytes;
         _state.CurrentStep = XboxTransferStep.Complete;
-        _state.StatusMessage = $"Manifest ready: {totalFiles} files, {totalBytes / 1024 / 1024:N1} MB";
         RaiseStateChanged();
-
         return Task.FromResult(manifest);
     }
 
-    private async Task MonitorProgressAsync(string destPath, CancellationToken ct)
-    {
-        var checkInterval = TimeSpan.FromSeconds(2);
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                var destFiles = Directory.GetFiles(destPath, "*", SearchOption.AllDirectories);
-                var progress = (double)destFiles.Length / Math.Max(1, _state.SourceFileCount);
-                _state.OverlayProgress = Math.Min(progress * 100, 100);
-                _state.StatusMessage = $"Staging... {destFiles.Length}/{_state.SourceFileCount} files ({_state.OverlayProgress:N0}%)";
-                RaiseStateChanged();
-            }
-            catch { }
+    public void Cancel() => _cts?.Cancel();
 
-            await Task.Delay(checkInterval, ct);
-        }
+    public void Reset()
+    {
+        _state = new XboxTransferState();
+        _cts?.Dispose();
+        _cts = null;
     }
 
-    private void WriteTransferSummary(string destPath, int filesCopied, long bytesCopied, int robocopyExit, IntegrityWalkResult? integrity = null)
+    private void Fail(string message)
     {
-        var summary = new
-        {
-            StartedAtUtc = DateTime.UtcNow.ToString("o"),
-            SenderHost = Environment.MachineName,
-            Identity = WindowsIdentity.GetCurrent().Name,
-            GameFolder = _state.SourcePath,
-            GameName = _state.GameName,
-            Destination = destPath,
-            PackageFamilyName = _state.PackageFamilyName,
-            SourceFileCount = _state.SourceFileCount,
-            SourceBytes = _state.SourceBytes,
-            UnreadableFiles = Array.Empty<string>(),
-            SkippedFiles = integrity?.SkippedFiles ?? 0,
-            MissingFiles = integrity?.MissingFiles ?? new List<string>(),
-            MismatchFiles = integrity?.MismatchFiles ?? new List<string>(),
-            IntegrityOk = integrity?.IntegrityOk ?? false,
-            FilesCopied = filesCopied,
-            BytesCopied = bytesCopied,
-            RobocopyExit = robocopyExit,
-            RobocopyLog = ""
-        };
-
-        var summaryPath = Path.Combine(destPath, "transfer-summary.json");
-        var json = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(summaryPath, json);
-        Log($"Wrote transfer-summary.json to {summaryPath}");
+        _state.CurrentStep = XboxTransferStep.Failed;
+        _state.ErrorMessage = message;
+        _state.StatusMessage = message;
+        _state.Verdict = XboxTransferVerdict.Error;
+        RaiseStateChanged();
     }
 
-    private IntegrityWalkResult RunIntegrityWalk(string sourcePath, string destPath)
-    {
-        var result = new IntegrityWalkResult();
-        var sourceFiles = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+    private static long GetLong(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt64() : 0;
 
-        try
-        {
-            foreach (var file in new DirectoryInfo(sourcePath).EnumerateFiles("*", SearchOption.AllDirectories))
-            {
-                var rel = Path.GetRelativePath(sourcePath, file.FullName);
-                sourceFiles[rel] = file.Length;
-            }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            result.SkippedFiles++;
-        }
+    private static int GetInt(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt32() : 0;
 
-        try
-        {
-            foreach (var file in new DirectoryInfo(destPath).EnumerateFiles("*", SearchOption.AllDirectories))
-            {
-                var rel = Path.GetRelativePath(destPath, file.FullName);
-                if (rel.Equals("transfer-summary.json", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                result.DestFileCount++;
-                result.DestBytes += file.Length;
-
-                if (!sourceFiles.TryGetValue(rel, out var expectedSize))
-                {
-                    result.SkippedFiles++;
-                    continue;
-                }
-
-                if (file.Length != expectedSize)
-                {
-                    result.MismatchFiles.Add(rel);
-                }
-            }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            result.SkippedFiles++;
-        }
-
-        foreach (var kvp in sourceFiles)
-        {
-            var destFile = Path.Combine(destPath, kvp.Key);
-            if (!File.Exists(destFile))
-            {
-                result.MissingFiles.Add(kvp.Key);
-            }
-        }
-
-        result.IntegrityOk = result.MissingFiles.Count == 0 && result.MismatchFiles.Count == 0;
-        return result;
-    }
-
+    [SupportedOSPlatform("windows")]
     private static string? ExtractPfnFromAcl(string dir)
     {
         try
         {
-            var dirInfo = new DirectoryInfo(dir);
-            var security = dirInfo.GetAccessControl();
+            var security = new DirectoryInfo(dir).GetAccessControl();
             var sddl = security.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
 
             const string marker = "SYSAPPID";
@@ -366,35 +396,7 @@ public class XboxSenderService
         catch { return null; }
     }
 
-    public void Cancel()
-    {
-        _cts?.Cancel();
-    }
+    private void Log(string message) => LogMessage?.Invoke(this, $"[Xbox Sender] {message}");
 
-    private class IntegrityWalkResult
-    {
-        public int DestFileCount { get; set; }
-        public long DestBytes { get; set; }
-        public int SkippedFiles { get; set; }
-        public List<string> MissingFiles { get; set; } = new();
-        public List<string> MismatchFiles { get; set; } = new();
-        public bool IntegrityOk { get; set; }
-    }
-
-    public void Reset()
-    {
-        _state = new XboxTransferState();
-        _cts?.Dispose();
-        _cts = null;
-    }
-
-    private void Log(string message)
-    {
-        LogMessage?.Invoke(this, $"[Xbox Sender] {message}");
-    }
-
-    private void RaiseStateChanged()
-    {
-        StateChanged?.Invoke(this, _state);
-    }
+    private void RaiseStateChanged() => StateChanged?.Invoke(this, _state);
 }

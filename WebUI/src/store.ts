@@ -198,6 +198,7 @@ export interface AppState {
   xboxOverlayGames: GameInfo[];
   isElevated: boolean;
   xboxDestinationPath: string;
+  xboxSourcePath: string;
 
   // Actions
   updateState: (patch: Partial<AppState>) => void;
@@ -256,6 +257,7 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   xboxOverlayGames: [],
   isElevated: false,
   xboxDestinationPath: '',
+  xboxSourcePath: '',
 };
 
 export const useAppState = create<AppState>((set) => ({
