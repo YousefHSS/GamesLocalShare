@@ -9,6 +9,7 @@ import { sendCommand } from './bridge';
 import SettingsModal from './components/SettingsModal';
 import DrivesPanel from './components/DrivesPanel';
 import PlatformIcon from './components/PlatformIcon';
+import XboxTransferModal from './components/XboxTransferModal';
 
 interface GameContextMenu {
   x: number;
@@ -25,6 +26,7 @@ export default function App() {
   const [peerGameFilter, setPeerGameFilter] = useState('');
   const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
   const [showDrives, setShowDrives] = useState(false);
+  const [xboxReceiverGame, setXboxReceiverGame] = useState<GameInfo | null>(null);
 
   useEffect(() => {
     (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
@@ -304,12 +306,21 @@ export default function App() {
                           </div>
                           <p className="text-slate-400 text-[10px] mt-0.5">{game.buildId} • {game.formattedSize}</p>
                           {selected && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); sendCommand('DownloadNewGame'); }}
-                              className="mt-2 w-full py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
-                            >
-                              <Download className="w-3 h-3" /> Download
-                            </button>
+                            game.platform === 'Xbox' ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setXboxReceiverGame(game); }}
+                                className="mt-2 w-full py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
+                              >
+                                <Download className="w-3 h-3" /> Receive via Xbox Overlay
+                              </button>
+                            ) : (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); sendCommand('DownloadNewGame'); }}
+                                className="mt-2 w-full py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
+                              >
+                                <Download className="w-3 h-3" /> Download
+                              </button>
+                            )
                           )}
                         </div>
                       );
@@ -523,6 +534,15 @@ export default function App() {
 
       {settingsPayload && (
         <SettingsModal payload={settingsPayload} onClose={() => setSettingsPayload(null)} />
+      )}
+
+      {xboxReceiverGame && (
+        <XboxTransferModal
+          mode="receiver"
+          initialPeer={s.networkPeers.find(p => p.games.some(g => g.appId === xboxReceiverGame.appId))}
+          initialGame={xboxReceiverGame}
+          onClose={() => setXboxReceiverGame(null)}
+        />
       )}
 
       {showDrives && (

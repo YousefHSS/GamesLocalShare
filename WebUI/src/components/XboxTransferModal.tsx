@@ -371,13 +371,13 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
 
   const renderPeerSelection = () => {
     const peersWithXbox = networkPeers.filter(p =>
-      p.isOnline && p.games.some(g => g.platform === 'Xbox' && g.isOverlaySupported)
+      p.isOnline && p.games.some(g => g.platform === 'Xbox')
     );
 
     // Sub-step: pick a specific game from a selected peer
     if (selectedNetworkPeer) {
       const xboxGames = selectedNetworkPeer.games.filter(
-        g => g.platform === 'Xbox' && g.isOverlaySupported
+        g => g.platform === 'Xbox'
       );
       return (
         <div className="space-y-4">
@@ -437,7 +437,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {peersWithXbox.map((peer) => {
               const xboxCount = peer.games.filter(
-                g => g.platform === 'Xbox' && g.isOverlaySupported
+                g => g.platform === 'Xbox'
               ).length;
               return (
                 <button
@@ -666,7 +666,9 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
 
       return (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-white">Install in the Xbox App</h3>
+          <h3 className="text-lg font-semibold text-white">
+            {isNetworkMode ? 'Prepare & Install' : 'Install in the Xbox App'}
+          </h3>
 
           {isNetworkMode && selectedNetworkPeer && (
             <div className="bg-green-900/30 border border-green-700 rounded p-3 text-sm text-green-300 flex items-center gap-2">
@@ -675,7 +677,21 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
             </div>
           )}
 
+          {isNetworkMode && (
+            <div className="bg-yellow-900/30 border border-yellow-700 rounded p-3 text-sm text-yellow-300 space-y-1">
+              <p className="font-semibold">On the sender PC first:</p>
+              <p className="text-yellow-200/80 text-xs">
+                Open the app on <strong>{selectedNetworkPeer?.displayName || 'the sender PC'}</strong>,
+                select this game, click <strong>Share via Xbox Overlay</strong> &gt; <strong>Stream to Peer</strong>,
+                and wait until it says &quot;Waiting for receiver&quot;.
+              </p>
+            </div>
+          )}
+
           <ol className="text-gray-300 text-sm list-decimal list-inside space-y-2">
+            {isNetworkMode && (
+              <li>Make sure the sender shows <strong>&quot;Waiting for receiver&quot;</strong>.</li>
+            )}
             <li>Open the Xbox app on this PC.</li>
             <li>
               Find <strong>{gameName}</strong> and

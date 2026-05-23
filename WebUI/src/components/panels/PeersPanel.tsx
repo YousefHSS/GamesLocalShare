@@ -113,22 +113,35 @@ export default function PeersPanel() {
                 >
                   <p className="text-white font-semibold truncate">{game.name}</p>
                   <p className="text-gray-400">{game.buildId} • {game.formattedSize}</p>
-                  {selectedPeerGame?.appId === game.appId && game.platform === 'Xbox' && game.isOverlaySupported && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Find the peer that owns this game
-                        const ownerPeer = networkPeers.find(p =>
-                          p.games.some(g => g.appId === game.appId)
-                        );
-                        setReceiverPeer(ownerPeer);
-                        setReceiverGame(game);
-                        setShowReceiverModal(true);
-                      }}
-                      className="mt-1 bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded text-xs transition"
-                    >
-                      Receive via Xbox Overlay
-                    </button>
+                  {selectedPeerGame?.appId === game.appId && (
+                    <div className="flex gap-1 mt-1">
+                      {game.platform === 'Xbox' ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const ownerPeer = networkPeers.find(p =>
+                              p.games.some(g => g.appId === game.appId)
+                            );
+                            setReceiverPeer(ownerPeer);
+                            setReceiverGame(game);
+                            setShowReceiverModal(true);
+                          }}
+                          className="bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded text-xs transition"
+                        >
+                          Receive via Xbox Overlay
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sendCommand('DownloadNewGame', { appId: game.appId });
+                          }}
+                          className="bg-accent-blue hover:bg-opacity-80 text-white px-2 py-1 rounded text-xs transition"
+                        >
+                          Download
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}

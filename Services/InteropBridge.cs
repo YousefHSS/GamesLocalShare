@@ -528,6 +528,9 @@ public class InteropBridge : IDisposable
                     {
                         var game = _viewModel.AvailableFromPeers.FirstOrDefault(g => g.AppId == peerGameAppId.GetString());
                         _viewModel.SelectedPeerGame = game;
+                        // Selections are excluded from the debounced push, so push explicitly.
+                        var selJson = JsonSerializer.Serialize(new { selectedPeerGame = game }, JsonOptions);
+                        await ExecuteJavaScriptAsync($"window.__updateState({selJson});");
                     }
                     break;
 
