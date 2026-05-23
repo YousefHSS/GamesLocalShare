@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppState } from '../store';
+import { useAppState, type NetworkPeer, type GameInfo } from '../store';
 import { sendCommand } from '../bridge';
 import {
   X,
@@ -11,7 +11,9 @@ import {
   CheckCircle,
   Loader2,
   ArrowRight,
+  ArrowLeft,
   FolderOpen,
+  Monitor,
 } from 'lucide-react';
 
 type FlowMode = 'sender' | 'receiver';
@@ -19,15 +21,18 @@ type FlowMode = 'sender' | 'receiver';
 interface XboxTransferModalProps {
   onClose: () => void;
   mode?: FlowMode;
+  initialPeer?: NetworkPeer;
+  initialGame?: GameInfo;
 }
 
-// Wizard step ids. Negative-free numbering; the working/result views are
-// driven entirely by the backend xboxTransfer state once `launched` is set.
+// Wizard step ids
 const STEP_CHOOSE = 0;
 const STEP_ELEVATION = 1;
-const STEP_SELECT_SOURCE = 2; // receiver only
-const STEP_INSTRUCTIONS = 3; // receiver only
-const STEP_SELECT_DEST = 10; // sender only
+const STEP_SELECT_SOURCE = 2;  // receiver: pick staged folder (drive mode)
+const STEP_INSTRUCTIONS = 3;   // receiver: install/pause instructions
+const STEP_SELECT_DEST = 10;   // sender: pick drive destination
+const STEP_SELECT_PEER = 20;   // receiver: pick a network peer
+const STEP_NETWORK_SENDER = 30; // sender: staging + waiting for receiver
 
 function baseName(p: string): string {
   if (!p) return '';
@@ -35,7 +40,7 @@ function baseName(p: string): string {
   return parts[parts.length - 1] || p;
 }
 
-export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTransferModalProps) {
+export default function XboxTransferModal({ onClose, mode = 'sender', initialPeer, initialGame }: XboxTransferModalProps) {
   const selectedLocalGame = useAppState((s) => s.selectedLocalGame);
   const xboxTransfer = useAppState((s) => s.xboxTransfer);
   const isElevated = useAppState((s) => s.isElevated);
@@ -43,12 +48,22 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   const xboxDestinationPath = useAppState((s) => s.xboxDestinationPath);
   const xboxSourcePath = useAppState((s) => s.xboxSourcePath);
   const xboxRootPath = useAppState((s) => s.xboxRootPath);
+  const networkPeers = useAppState((s) => s.networkPeers);
   const updateState = useAppState((s) => s.updateState);
 
-  const [step, setStep] = useState(STEP_CHOOSE);
+  const [step, setStep] = useState(() => {
+    // If opened from PeersPanel with a pre-selected peer, skip to instructions
+    if (mode === 'receiver' && initialPeer && initialGame) {
+      return isElevated ? STEP_INSTRUCTIONS : STEP_ELEVATION;
+    }
+    return STEP_CHOOSE;
+  });
   const [launched, setLaunched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [force, setForce] = useState(false);
+  const [isNetworkMode, setIsNetworkMode] = useState(!!initialPeer);
+  const [selectedNetworkPeer, setSelectedNetworkPeer] = useState<NetworkPeer | null>(initialPeer ?? null);
+  const [selectedNetworkGame, setSelectedNetworkGame] = useState<GameInfo | null>(initialGame ?? null);
 
   const game = mode === 'sender' ? selectedLocalGame : null;
   const isXboxOverlayGame = game?.platform === 'Xbox' && game?.isOverlaySupported;
@@ -56,14 +71,30 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   const transferStep = xboxTransfer?.currentStep;
   const finished = transferStep === 'Complete' || transferStep === 'Failed';
   const awaitingResume = transferStep === 'WaitingForResume';
+  const waitingForReceiver = transferStep === 'WaitingForReceiver';
 
   const handleChooseDrive = () => {
     setError(null);
+    setIsNetworkMode(false);
     if (!isElevated) {
       setStep(STEP_ELEVATION);
       return;
     }
     setStep(mode === 'sender' ? STEP_SELECT_DEST : STEP_SELECT_SOURCE);
+  };
+
+  const handleChooseNetwork = () => {
+    setError(null);
+    setIsNetworkMode(true);
+    if (!isElevated) {
+      setStep(STEP_ELEVATION);
+      return;
+    }
+    if (mode === 'sender') {
+      setStep(STEP_NETWORK_SENDER);
+    } else {
+      setStep(STEP_SELECT_PEER);
+    }
   };
 
   const handleRequestElevation = () => sendCommand('RequestElevation');
@@ -88,6 +119,21 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     }, 500);
   };
 
+  const handleStartSenderNetwork = () => {
+    if (!game?.installPath) {
+      setError('No game selected or game has no install path.');
+      return;
+    }
+    setError(null);
+    setLaunched(true);
+    sendCommand('PrepareXboxNetwork', { sourcePath: game.installPath });
+  };
+
+  const handleStopNetwork = () => {
+    sendCommand('StopXboxNetwork');
+    setLaunched(false);
+  };
+
   const handleStartReceiver = () => {
     if (!xboxSourcePath) {
       setError('Please select the staged game folder.');
@@ -97,6 +143,22 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     setLaunched(true);
     sendCommand('StartXboxTransfer', {
       sourcePath: xboxSourcePath,
+      xboxRoot: xboxRootPath.trim() || undefined,
+      force,
+    });
+  };
+
+  const handleStartNetworkReceiver = () => {
+    if (!selectedNetworkPeer) {
+      setError('No peer selected.');
+      return;
+    }
+    setError(null);
+    setLaunched(true);
+    sendCommand('StartXboxNetworkTransfer', {
+      peerHost: selectedNetworkPeer.ipAddress,
+      peerPort: selectedNetworkPeer.xboxOverlayPort,
+      gameAppId: selectedNetworkGame?.appId ?? '',
       xboxRoot: xboxRootPath.trim() || undefined,
       force,
     });
@@ -129,25 +191,18 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     </div>
   );
 
-  const networkButton = (
-    <div className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-item border border-gray-800 opacity-50 cursor-not-allowed">
-      <Wifi className="text-gray-500" size={24} />
-      <div className="text-left">
-        <div className="text-gray-400 font-medium">
-          {mode === 'sender' ? 'Stream to Peer' : 'Network Peer'}
-          <span className="ml-2 text-xs text-gray-500">(coming soon)</span>
-        </div>
-        <div className="text-gray-600 text-xs">
-          LAN streaming is not available yet for Xbox titles.
-        </div>
-      </div>
-    </div>
-  );
-
   // ---- Working / result view (backend-driven) ------------------------------
 
-  // Step-specific user guidance: tells the user what THEY need to do right now.
+  // Step-specific user guidance
   const stepGuidance: Record<string, { hint: string; action?: 'wait' | 'resume' }> = {
+    DownloadingFromPeer: {
+      hint: 'Downloading game files from peer. Do not close either app.',
+      action: 'wait',
+    },
+    WaitingForReceiver: {
+      hint: 'TCP server is ready. Tell the receiver to connect from their app.',
+      action: 'wait',
+    },
     PollingForFolder: {
       hint: 'Keep the Xbox app open with the install paused. The script is searching for the download folder on disk.',
       action: 'wait',
@@ -166,6 +221,14 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
     },
     Monitoring: {
       hint: 'Monitoring network traffic after Resume. Wait for it to finish.',
+      action: 'wait',
+    },
+    CopyingFiles: {
+      hint: 'Staging game files. This may take several minutes for large titles.',
+      action: 'wait',
+    },
+    ValidatingSource: {
+      hint: 'Validating staged files...',
       action: 'wait',
     },
   };
@@ -218,6 +281,29 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
       );
     }
 
+    // Sender network: waiting for receiver — show stop button
+    if (waitingForReceiver && mode === 'sender') {
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-green-400 font-semibold">
+            <Wifi size={20} className="animate-pulse" />
+            Waiting for Receiver
+          </div>
+          <p className="text-gray-300 text-sm">{xboxTransfer?.statusMessage}</p>
+          <div className="bg-gray-800/60 border border-gray-700 rounded p-3 text-sm text-gray-300">
+            The staged game is ready to stream. On the receiver PC, open the app
+            and use <strong>Receive Xbox Game &gt; Network Peer</strong> to connect.
+          </div>
+          <button
+            onClick={handleStopNetwork}
+            className="w-full bg-red-600 hover:bg-red-500 text-white py-2 rounded font-semibold transition"
+          >
+            Stop Serving
+          </button>
+        </div>
+      );
+    }
+
     const guidance = transferStep ? stepGuidance[transferStep] : undefined;
 
     return (
@@ -257,7 +343,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
           </div>
         )}
 
-        {mode === 'receiver' && (xboxTransfer?.networkReceivedMB ?? 0) > 0 && (
+        {(xboxTransfer?.networkReceivedMB ?? 0) > 0 && (
           <div className="text-gray-400 text-xs">
             Downloaded so far: {xboxTransfer?.networkReceivedMB?.toFixed(1)} MB
           </div>
@@ -282,6 +368,99 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
   };
 
   // ---- Wizard views --------------------------------------------------------
+
+  const renderPeerSelection = () => {
+    const peersWithXbox = networkPeers.filter(p =>
+      p.isOnline && p.games.some(g => g.platform === 'Xbox' && g.isOverlaySupported)
+    );
+
+    // Sub-step: pick a specific game from a selected peer
+    if (selectedNetworkPeer) {
+      const xboxGames = selectedNetworkPeer.games.filter(
+        g => g.platform === 'Xbox' && g.isOverlaySupported
+      );
+      return (
+        <div className="space-y-4">
+          <button
+            onClick={() => { setSelectedNetworkPeer(null); setSelectedNetworkGame(null); }}
+            className="flex items-center gap-1 text-gray-400 hover:text-white text-sm transition"
+          >
+            <ArrowLeft size={14} />
+            Back to peers
+          </button>
+          <h3 className="text-lg font-semibold text-white">
+            Xbox Games on {selectedNetworkPeer.displayName}
+          </h3>
+          {xboxGames.length === 0 ? (
+            <p className="text-gray-400 text-sm">No Xbox overlay games found on this peer.</p>
+          ) : (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {xboxGames.map((g) => (
+                <button
+                  key={g.appId}
+                  onClick={() => {
+                    setSelectedNetworkGame(g);
+                    setStep(STEP_INSTRUCTIONS);
+                  }}
+                  className={`w-full text-left p-3 rounded-lg border transition ${
+                    selectedNetworkGame?.appId === g.appId
+                      ? 'bg-accent-blue bg-opacity-20 border-blue-500'
+                      : 'bg-dark-item border-gray-700 hover:bg-[#4a4a4a]'
+                  }`}
+                >
+                  <p className="text-white font-medium text-sm truncate">{g.name}</p>
+                  <p className="text-gray-400 text-xs">{g.formattedSize}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Main: pick a peer
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-white">Select Network Peer</h3>
+        <p className="text-gray-400 text-sm">
+          Choose a peer that has Xbox games staged for streaming.
+        </p>
+        {peersWithXbox.length === 0 ? (
+          <div className="bg-gray-800/60 border border-gray-700 rounded p-4 text-center">
+            <Monitor className="mx-auto mb-2 text-gray-500" size={32} />
+            <p className="text-gray-400 text-sm">No peers with Xbox games found.</p>
+            <p className="text-gray-500 text-xs mt-1">
+              Make sure the sender has started &quot;Stream to Peer&quot; and both PCs are on the same network.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {peersWithXbox.map((peer) => {
+              const xboxCount = peer.games.filter(
+                g => g.platform === 'Xbox' && g.isOverlaySupported
+              ).length;
+              return (
+                <button
+                  key={peer.peerId}
+                  onClick={() => setSelectedNetworkPeer(peer)}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg bg-dark-item hover:bg-[#4a4a4a] border border-gray-700 transition text-left"
+                >
+                  <Monitor className="text-green-400 flex-shrink-0" size={20} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-medium text-sm truncate">{peer.displayName}</p>
+                    <p className="text-gray-400 text-xs">{peer.ipAddress}</p>
+                  </div>
+                  <span className="bg-green-600/20 text-green-400 text-xs px-2 py-1 rounded">
+                    {xboxCount} Xbox
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderWizard = () => {
     if (step === STEP_ELEVATION) return elevationGate;
@@ -310,12 +489,53 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
               </div>
             </div>
           </button>
-          {networkButton}
+          <button
+            onClick={handleChooseNetwork}
+            className="w-full flex items-center gap-3 p-4 rounded-lg bg-dark-item hover:bg-[#4a4a4a] border border-gray-700 transition"
+          >
+            <Wifi className="text-green-400" size={24} />
+            <div className="text-left">
+              <div className="text-white font-medium">
+                {mode === 'sender' ? 'Stream to Peer' : 'Network Peer'}
+              </div>
+              <div className="text-gray-400 text-xs">
+                {mode === 'sender'
+                  ? 'Stage locally, then stream over LAN to a receiver'
+                  : 'Download from a peer on your local network'}
+              </div>
+            </div>
+          </button>
         </div>
       );
     }
 
-    // Sender: pick destination and start.
+    // Sender: network staging + serving
+    if (mode === 'sender' && step === STEP_NETWORK_SENDER) {
+      return (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-white">Stream to Peer</h3>
+          <p className="text-gray-400 text-sm">
+            The game will be staged to a temp folder (to rescue protected executables),
+            then served over the network. The receiver can connect from their app.
+          </p>
+          <button
+            onClick={handleStartSenderNetwork}
+            disabled={!game?.installPath}
+            className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
+          >
+            <Wifi size={18} />
+            Start Staging & Serve
+          </button>
+          <p className="text-gray-500 text-xs">
+            This stops Gaming Services briefly and rescues content-protected
+            executables. It can take several minutes for large titles. After staging,
+            the TCP server starts automatically.
+          </p>
+        </div>
+      );
+    }
+
+    // Sender: pick destination and start (drive mode).
     if (mode === 'sender' && step === STEP_SELECT_DEST) {
       return (
         <div className="space-y-4">
@@ -355,7 +575,12 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
       );
     }
 
-    // Receiver: select the staged source folder.
+    // Receiver: select a network peer
+    if (mode === 'receiver' && step === STEP_SELECT_PEER) {
+      return renderPeerSelection();
+    }
+
+    // Receiver: select the staged source folder (drive mode).
     if (mode === 'receiver' && step === STEP_SELECT_SOURCE) {
       return (
         <div className="space-y-4">
@@ -435,20 +660,69 @@ export default function XboxTransferModal({ onClose, mode = 'sender' }: XboxTran
 
     // Receiver: install + pause instructions, then launch.
     if (mode === 'receiver' && step === STEP_INSTRUCTIONS) {
+      const gameName = isNetworkMode
+        ? (selectedNetworkGame?.name || 'the game')
+        : (baseName(xboxSourcePath) || 'the game');
+
       return (
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-white">Install in the Xbox App</h3>
+
+          {isNetworkMode && selectedNetworkPeer && (
+            <div className="bg-green-900/30 border border-green-700 rounded p-3 text-sm text-green-300 flex items-center gap-2">
+              <Wifi size={16} />
+              Receiving from {selectedNetworkPeer.displayName} ({selectedNetworkPeer.ipAddress})
+            </div>
+          )}
+
           <ol className="text-gray-300 text-sm list-decimal list-inside space-y-2">
             <li>Open the Xbox app on this PC.</li>
             <li>
-              Find <strong>{baseName(xboxSourcePath) || 'the game'}</strong> and
+              Find <strong>{gameName}</strong> and
               click <strong>Install</strong>.
             </li>
             <li>Wait ~10 seconds for the download to start, then click <strong>Pause</strong>.</li>
             <li>Leave the Xbox app open and click the button below.</li>
           </ol>
+
+          {isNetworkMode && (
+            <div className="space-y-2 border-t border-gray-700 pt-3">
+              <label className="block text-xs text-gray-400">
+                Xbox install drive (optional)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={xboxRootPath}
+                  onChange={(e) => {
+                    updateState({ xboxRootPath: e.target.value });
+                    sendCommand('SetXboxPath', { xboxRootPath: e.target.value });
+                  }}
+                  placeholder="e.g. D:\XboxGames - leave blank to auto-detect"
+                  className="flex-1 bg-dark-item border border-gray-600 rounded px-3 py-2 text-sm text-white placeholder-gray-500"
+                />
+                <button
+                  onClick={() => sendCommand('BrowseXboxRoot')}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded transition"
+                  title="Browse for the Xbox install folder"
+                >
+                  <FolderOpen size={18} />
+                </button>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={force}
+                  onChange={(e) => setForce(e.target.checked)}
+                  className="accent-yellow-500"
+                />
+                Force overlay even if safety checks fail (may corrupt the install)
+              </label>
+            </div>
+          )}
+
           <button
-            onClick={handleStartReceiver}
+            onClick={isNetworkMode ? handleStartNetworkReceiver : handleStartReceiver}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
           >
             <ArrowRight size={18} />

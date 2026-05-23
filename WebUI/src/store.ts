@@ -103,7 +103,7 @@ export interface ExternalLibrary {
   scanSubfolders: boolean;
 }
 
-export type XboxTransferStep = 'SelectGame' | 'SelectDestination' | 'ValidatingSource' | 'CopyingFiles' | 'ChooseSource' | 'ElevationGate' | 'InstallInXboxApp' | 'WaitingForInstallPause' | 'PollingForFolder' | 'Overlaying' | 'ResettingAcls' | 'WaitingForResume' | 'Monitoring' | 'Complete' | 'Failed';
+export type XboxTransferStep = 'SelectGame' | 'SelectDestination' | 'ValidatingSource' | 'CopyingFiles' | 'WaitingForReceiver' | 'DownloadingFromPeer' | 'ChooseSource' | 'ElevationGate' | 'InstallInXboxApp' | 'WaitingForInstallPause' | 'PollingForFolder' | 'Overlaying' | 'ResettingAcls' | 'WaitingForResume' | 'Monitoring' | 'Complete' | 'Failed';
 
 export type XboxTransferVerdict = 'Pending' | 'FullSkip' | 'DeltaOnly' | 'FullRedownload' | 'StillPaused' | 'Error';
 
@@ -304,4 +304,12 @@ declare global {
 (window as any).__updateState = (patch: Partial<AppState>) => {
   useAppState.setState(patch);
 };
+
+// Signal to the C# backend that the WebUI is mounted and ready to receive state.
+// This replaces the fragile 500ms delay with a reliable handshake.
+try {
+  if ((window as any).chrome?.webview) {
+    (window as any).chrome.webview.postMessage(JSON.stringify({ cmd: 'WebUIReady' }));
+  }
+} catch { /* not running inside WebView (e.g. dev server / tests) */ }
 

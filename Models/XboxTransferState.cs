@@ -54,6 +54,10 @@ public enum XboxTransferStep
     SelectDestination,
     ValidatingSource,
     CopyingFiles,
+    WaitingForReceiver,
+
+    // Network transfer steps
+    DownloadingFromPeer,
 
     // Common
     Complete,

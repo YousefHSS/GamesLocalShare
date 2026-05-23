@@ -328,6 +328,13 @@ public class InteropBridge : IDisposable
         {
             switch (cmd)
             {
+                // WebUI readiness handshake — push the full initial state
+                // as soon as the React app signals it has mounted and can
+                // receive data.  This replaces the fragile 500 ms delay.
+                case "WebUIReady":
+                    await PushInitialStateAsync();
+                    break;
+
                 // Toolbar commands
                 case "ScanLocalGames":
                     if (_viewModel.ScanLocalGamesCommand.CanExecute(null))
@@ -752,7 +759,12 @@ public class InteropBridge : IDisposable
                         payload?.TryGetProperty("peerPort", out var peerPortEl) == true &&
                         payload?.TryGetProperty("gameAppId", out var gameAppIdEl) == true)
                     {
-                        var netArgs = (peerHostEl.GetString() ?? "", peerPortEl.GetInt32(), gameAppIdEl.GetString() ?? "");
+                        string? netXboxRoot = payload?.TryGetProperty("xboxRoot", out var nxrEl) == true
+                            ? nxrEl.GetString() : null;
+                        bool netForce = payload?.TryGetProperty("force", out var nfEl) == true &&
+                                        nfEl.ValueKind == JsonValueKind.True;
+                        var netArgs = (peerHostEl.GetString() ?? "", peerPortEl.GetInt32(),
+                                       gameAppIdEl.GetString() ?? "", netXboxRoot, netForce);
                         if (_viewModel.StartXboxNetworkTransferCommand.CanExecute(netArgs))
                             await _viewModel.StartXboxNetworkTransferCommand.ExecuteAsync(netArgs);
                     }

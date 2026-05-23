@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle, Info } from 'lucide-react';
+import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle, Info, Search, X } from 'lucide-react';
 import { useAppState, type CrossLocationGame, type ExternalLibrary, type DriveCandidate } from '../store';
 import { sendCommand } from '../bridge';
 import PlatformIcon from './PlatformIcon';
@@ -42,6 +42,7 @@ export default function DrivesPanel() {
   // the list once compared, so they're hidden by default. The user can opt in
   // when they actually want to see what's missing from a drive.
   const [showDeviceOnly, setShowDeviceOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Keep local state in sync with store
   useEffect(() => {
@@ -136,10 +137,14 @@ export default function DrivesPanel() {
     [crossGames],
   );
 
-  const visibleCrossGames = useMemo(
-    () => (showDeviceOnly ? crossGames : crossGames.filter(g => g.direction !== 'OnlyOnDevice')),
-    [crossGames, showDeviceOnly],
-  );
+  const visibleCrossGames = useMemo(() => {
+    let filtered = showDeviceOnly ? crossGames : crossGames.filter(g => g.direction !== 'OnlyOnDevice');
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter(g => g.displayName.toLowerCase().includes(q));
+    }
+    return filtered;
+  }, [crossGames, showDeviceOnly, searchQuery]);
 
   // Group cross-location games by library, both filtered and unfiltered. The
   // unfiltered map lets us distinguish "no comparison done yet" from "everything
@@ -228,10 +233,25 @@ export default function DrivesPanel() {
         </div>
       </div>
 
-      {/* Terminology hint */}
+      {/* Terminology hint + search */}
       <div className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] text-slate-500 border-b border-slate-700/30 flex-shrink-0">
         <Info className="w-3 h-3 flex-shrink-0" />
         <span>"Device" means this PC's internal drives (where Steam, Epic, etc. install games). External libraries are listed below.</span>
+        <div className="relative ml-auto flex-shrink-0">
+          <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search games..."
+            className="bg-slate-900 border border-slate-700 rounded pl-7 pr-6 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 w-44"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Pending add-library confirmation */}
@@ -292,11 +312,13 @@ export default function DrivesPanel() {
                 {/* Games in this library */}
                 {gamesForLib.length === 0 ? (
                   <div className="px-4 py-3 text-xs text-slate-500 italic">
-                    {hiddenDeviceOnly > 0
-                      ? `${hiddenDeviceOnly} device-only game${hiddenDeviceOnly === 1 ? '' : 's'} hidden — toggle "Show device-only games" to view`
-                      : connected
-                        ? 'Click "Compare Locations" to see games'
-                        : 'Drive not connected'}
+                    {searchQuery.trim()
+                      ? `No games matching "${searchQuery.trim()}"`
+                      : hiddenDeviceOnly > 0
+                        ? `${hiddenDeviceOnly} device-only game${hiddenDeviceOnly === 1 ? '' : 's'} hidden — toggle "Show device-only games" to view`
+                        : connected
+                          ? 'Click "Compare Locations" to see games'
+                          : 'Drive not connected'}
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-700/30">

@@ -376,6 +376,84 @@ public class XboxSenderService
         return Task.FromResult(manifest);
     }
 
+    /// <summary>
+    /// Builds an overlay manifest from an already-staged folder (output of
+    /// <see cref="StageToFolderAsync"/>). Unlike <see cref="PrepareForNetworkAsync"/>
+    /// which reads from the raw install, this enumerates ALL files in the staged
+    /// folder (Content\, .xvi, transfer-summary.json) so the receiver can
+    /// reconstruct a complete staged copy over the network.
+    /// </summary>
+    public Task<XboxOverlayManifest> PrepareForNetworkFromStagedAsync(
+        string stagedFolderPath, CancellationToken ct = default)
+    {
+        var summaryPath = Path.Combine(stagedFolderPath, "transfer-summary.json");
+        if (!File.Exists(summaryPath))
+            throw new InvalidOperationException(
+                $"transfer-summary.json not found in {stagedFolderPath} — not a valid staged copy");
+
+        var xviFiles = Directory.GetFiles(stagedFolderPath, "*.xvi");
+        if (xviFiles.Length == 0)
+            throw new InvalidOperationException(
+                $"No .xvi envelope file found in {stagedFolderPath} — not a valid staged copy");
+
+        string contentGuid = Path.GetFileNameWithoutExtension(xviFiles[0]);
+        string pfn = string.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(summaryPath));
+            var root = doc.RootElement;
+            if (root.TryGetProperty("PackageFamilyName", out var pfnEl) &&
+                pfnEl.ValueKind == JsonValueKind.String)
+            {
+                pfn = pfnEl.GetString() ?? string.Empty;
+            }
+            if (root.TryGetProperty("GameName", out var gnEl) &&
+                gnEl.ValueKind == JsonValueKind.String)
+            {
+                _state.GameName = gnEl.GetString() ?? _state.GameName;
+            }
+        }
+        catch { /* best effort */ }
+
+        var entries = new List<XboxOverlayManifestEntry>();
+        long totalBytes = 0;
+        int totalFiles = 0;
+
+        foreach (var file in new DirectoryInfo(stagedFolderPath)
+                     .EnumerateFiles("*", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            entries.Add(new XboxOverlayManifestEntry
+            {
+                RelativePath = Path.GetRelativePath(stagedFolderPath, file.FullName),
+                Size = file.Length,
+                LastModifiedUtc = file.LastWriteTimeUtc,
+            });
+            totalBytes += file.Length;
+            totalFiles++;
+        }
+
+        var manifest = new XboxOverlayManifest
+        {
+            ContentGuid = contentGuid,
+            PackageFamilyName = pfn,
+            SourcePath = stagedFolderPath,
+            TotalFiles = totalFiles,
+            TotalBytes = totalBytes,
+            Entries = entries,
+        };
+
+        _state.IsNetwork = true;
+        _state.ContentGuid = contentGuid;
+        _state.PackageFamilyName = pfn;
+        _state.SourceFileCount = totalFiles;
+        _state.SourceBytes = totalBytes;
+        RaiseStateChanged();
+
+        return Task.FromResult(manifest);
+    }
+
     public void Cancel() => _cts?.Cancel();
 
     public void Reset()

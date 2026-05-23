@@ -92,83 +92,10 @@ public class XboxTransferService
         // phases with margin; if we're still running after that something
         // is stuck (PsExec download hang, SYSTEM child never started, etc).
         _cts.CancelAfter(TimeSpan.FromMinutes(10));
-        var token = _cts.Token;
 
         try
         {
-            _state.CurrentStep = XboxTransferStep.PollingForFolder;
-            _state.OverlayProgress = 0;
-            _state.StatusMessage = "Starting overlay transfer...";
-            _overlayDestPath = null;
-            _overlayBaselineBytes = -1;
-            RaiseStateChanged();
-
-            XboxScriptHost host;
-            try
-            {
-                host = XboxScriptHost.Deploy();
-            }
-            catch (Exception ex)
-            {
-                return Fail($"Could not deploy transfer scripts: {ex.Message}");
-            }
-
-            var args = new List<string> { "-Source", _state.SourcePath };
-            if (!string.IsNullOrWhiteSpace(xboxRoot))
-            {
-                args.Add("-XboxRoot");
-                args.Add(xboxRoot!);
-            }
-            if (force)
-                args.Add("-Force");
-            args.Add("-AutoConfirm");
-
-            // Launch the script in a visible PowerShell window so the user
-            // can follow all output (robocopy, ACL reset, "click Resume"
-            // prompt) with full colors.  Progress in the UI is driven by
-            // tailing the SYSTEM-phase log file that the script writes to
-            // disk — this avoids the PsExec stdout-piping issues that made
-            // the hidden-process approach unreliable.
-            _state.StatusMessage = "Script running in PowerShell window...";
-            RaiseStateChanged();
-
-            var transferStartedAt = DateTime.UtcNow;
-            using var logPollCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var logPollTask = PollSystemLogAsync(host.RunsDir, transferStartedAt, logPollCts.Token);
-            var progressTask = PollOverlayProgressAsync(logPollCts.Token);
-
-            int exitCode = await host.RunVisibleAsync(
-                host.ReceiverScript, args, ct: token);
-
-            logPollCts.Cancel();
-            try { await logPollTask; } catch { }
-            try { await progressTask; } catch { }
-
-            Log($"Receiver script exit code: {exitCode}");
-
-            string Detail()
-            {
-                var err = host.LatestSystemError("receiver-overlay");
-                return err == null ? "" : $"\n\nScript output:\n{err}";
-            }
-
-            return exitCode switch
-            {
-                0 => ApplyVerdict(host.LatestVerdictFile()),
-                2 => Fail("The Xbox install folder never appeared. Make sure you clicked " +
-                          "Install in the Xbox app on this PC, and that the title is an " +
-                          "MSIXVC game (its Manage > Files menu shows an install-drive " +
-                          "picker). If it installs to a non-system drive, set the Xbox " +
-                          "install drive in Advanced options."),
-                11 => Fail("The staged copy is incomplete - the sender's integrity check " +
-                           "failed. Re-stage the game on the sender PC, or enable 'Force " +
-                           "overlay' to proceed anyway."),
-                12 => Fail("Some protected executables have not downloaded yet. In the Xbox " +
-                           "app: click Resume, let the install grow a few hundred MB, click " +
-                           "Pause, then retry - or enable 'Force overlay' to proceed anyway."),
-                99 => Fail("Elevation error. Restart the app as Administrator and retry."),
-                _ => Fail($"Receiver script exited with code {exitCode}.{Detail()}"),
-            };
+            return await RunOverlayScriptAsync(xboxRoot, force, _cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -185,16 +112,174 @@ public class XboxTransferService
     }
 
     /// <summary>
-    /// Network (LAN peer) overlay. Deferred to a later phase - see
-    /// UI-INTEGRATION.md. Raw streaming of Content files cannot transfer
-    /// content-protected executables; it needs the package-context rescue first.
+    /// Network (LAN peer) overlay. Downloads the staged game from a peer over
+    /// TCP, then runs the same overlay script as the drive-based flow.
+    /// The sender must have staged the game first (to rescue content-protected
+    /// executables) and be serving it via <see cref="XboxNetworkSender"/>.
     /// </summary>
-    public Task<XboxTransferVerdict> RunNetworkOverlayAsync(
-        string peerHost, int peerPort, CancellationToken ct = default)
+    public async Task<XboxTransferVerdict> RunNetworkOverlayAsync(
+        string peerHost, int peerPort, string? xboxRoot = null,
+        bool force = false, CancellationToken ct = default)
     {
-        return Task.FromResult(Fail(
-            "Network (peer) Xbox transfer is not available yet. Use a staged copy " +
-            "on a drive or shared folder instead."));
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Network downloads can be slow on WiFi; 60-minute timeout.
+        _cts.CancelAfter(TimeSpan.FromMinutes(60));
+        var token = _cts.Token;
+
+        string? tempFolder = null;
+        try
+        {
+            // Phase 1: Download from peer
+            _state.CurrentStep = XboxTransferStep.DownloadingFromPeer;
+            _state.IsNetwork = true;
+            _state.OverlayProgress = 0;
+            _state.StatusMessage = $"Connecting to {peerHost}:{peerPort}...";
+            RaiseStateChanged();
+
+            tempFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GamesLocalShare", "xbox-network-download",
+                DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+            Directory.CreateDirectory(tempFolder);
+
+            var receiver = new XboxNetworkReceiver();
+            receiver.ProgressChanged += (_, pct) =>
+            {
+                _state.OverlayProgress = pct;
+                _state.StatusMessage = $"Downloading from peer: {pct:N1}%";
+                RaiseStateChanged();
+            };
+            receiver.BytesReceivedChanged += (_, bytes) =>
+            {
+                _state.NetworkReceivedMB = bytes / 1024.0 / 1024.0;
+            };
+            receiver.LogMessage += (_, msg) => Log(msg);
+
+            await receiver.ReceiveAsync(peerHost, peerPort, tempFolder, token);
+
+            Log($"Network download complete: {receiver.BytesReceived} bytes to {tempFolder}");
+
+            // Phase 2: Validate downloaded folder (sets _state.SourcePath etc.)
+            _state.StatusMessage = "Validating downloaded files...";
+            RaiseStateChanged();
+
+            var validationError = ValidateSource(tempFolder);
+            if (validationError != null)
+                return Fail($"Downloaded files invalid: {validationError}");
+
+            // Phase 3: Run the same overlay script as drive-based transfer
+            return await RunOverlayScriptAsync(xboxRoot, force, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return Fail(ct.IsCancellationRequested
+                ? "Transfer cancelled."
+                : "Network transfer timed out. Check that the sender is still " +
+                  "running and both PCs are on the same network.");
+        }
+        catch (IOException ex)
+        {
+            return Fail($"Connection error: {ex.Message}. Make sure the sender is " +
+                        "still running and the firewall allows port {peerPort}.");
+        }
+        catch (Exception ex)
+        {
+            return Fail($"Network transfer error: {ex.Message}");
+        }
+        finally
+        {
+            // Clean up temp folder on success
+            if (tempFolder != null &&
+                _state.Verdict is XboxTransferVerdict.FullSkip or XboxTransferVerdict.DeltaOnly)
+            {
+                try { Directory.Delete(tempFolder, true); }
+                catch { Log($"Could not clean up temp folder: {tempFolder}"); }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Core overlay script execution shared by <see cref="RunOverlayAsync"/> and
+    /// <see cref="RunNetworkOverlayAsync"/>. Expects <see cref="_state"/> to
+    /// already have SourcePath, GameName, ContentGuid populated (via
+    /// <see cref="ValidateSource"/>).
+    /// </summary>
+    private async Task<XboxTransferVerdict> RunOverlayScriptAsync(
+        string? xboxRoot, bool force, CancellationToken token)
+    {
+        _state.CurrentStep = XboxTransferStep.PollingForFolder;
+        _state.OverlayProgress = 0;
+        _state.StatusMessage = "Starting overlay transfer...";
+        _overlayDestPath = null;
+        _overlayBaselineBytes = -1;
+        RaiseStateChanged();
+
+        XboxScriptHost host;
+        try
+        {
+            host = XboxScriptHost.Deploy();
+        }
+        catch (Exception ex)
+        {
+            return Fail($"Could not deploy transfer scripts: {ex.Message}");
+        }
+
+        var args = new List<string> { "-Source", _state.SourcePath };
+        if (!string.IsNullOrWhiteSpace(xboxRoot))
+        {
+            args.Add("-XboxRoot");
+            args.Add(xboxRoot!);
+        }
+        if (force)
+            args.Add("-Force");
+        args.Add("-AutoConfirm");
+
+        // Launch the script in a visible PowerShell window so the user
+        // can follow all output (robocopy, ACL reset, "click Resume"
+        // prompt) with full colors.  Progress in the UI is driven by
+        // tailing the SYSTEM-phase log file that the script writes to
+        // disk — this avoids the PsExec stdout-piping issues that made
+        // the hidden-process approach unreliable.
+        _state.StatusMessage = "Script running in PowerShell window...";
+        RaiseStateChanged();
+
+        var transferStartedAt = DateTime.UtcNow;
+        using var logPollCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var logPollTask = PollSystemLogAsync(host.RunsDir, transferStartedAt, logPollCts.Token);
+        var progressTask = PollOverlayProgressAsync(logPollCts.Token);
+
+        int exitCode = await host.RunVisibleAsync(
+            host.ReceiverScript, args, ct: token);
+
+        logPollCts.Cancel();
+        try { await logPollTask; } catch { }
+        try { await progressTask; } catch { }
+
+        Log($"Receiver script exit code: {exitCode}");
+
+        string Detail()
+        {
+            var err = host.LatestSystemError("receiver-overlay");
+            return err == null ? "" : $"\n\nScript output:\n{err}";
+        }
+
+        return exitCode switch
+        {
+            0 => ApplyVerdict(host.LatestVerdictFile()),
+            2 => Fail("The Xbox install folder never appeared. Make sure you clicked " +
+                      "Install in the Xbox app on this PC, and that the title is an " +
+                      "MSIXVC game (its Manage > Files menu shows an install-drive " +
+                      "picker). If it installs to a non-system drive, set the Xbox " +
+                      "install drive in Advanced options."),
+            11 => Fail("The staged copy is incomplete - the sender's integrity check " +
+                       "failed. Re-stage the game on the sender PC, or enable 'Force " +
+                       "overlay' to proceed anyway."),
+            12 => Fail("Some protected executables have not downloaded yet. In the Xbox " +
+                       "app: click Resume, let the install grow a few hundred MB, click " +
+                       "Pause, then retry - or enable 'Force overlay' to proceed anyway."),
+            99 => Fail("Elevation error. Restart the app as Administrator and retry."),
+            _ => Fail($"Receiver script exited with code {exitCode}.{Detail()}"),
+        };
     }
 
     private XboxTransferVerdict ApplyVerdict(string? verdictPath)

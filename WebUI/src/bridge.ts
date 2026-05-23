@@ -13,6 +13,7 @@ declare global {
 }
 
 export type CommandName =
+  | 'WebUIReady'
   | 'ScanLocalGames'
   | 'StartNetwork'
   | 'StopNetwork'

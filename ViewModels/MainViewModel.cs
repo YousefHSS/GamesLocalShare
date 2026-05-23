@@ -2255,9 +2255,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public Task AddExternalLibraryAsync(string rootPath, string displayName)
     {
+        // Normalise the path so that "E:\stage" and "E:\stage\" are treated as the same library.
+        var normPath = rootPath.TrimEnd('\\', '/');
+
+        // Prevent duplicates: skip if a library with the same root already exists.
+        if (_settings.ExternalLibraries.Any(l =>
+                string.Equals(l.RootPath.TrimEnd('\\', '/'), normPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            AddLog($"External library already exists: {rootPath}", LogMessageType.Warning);
+            return Task.CompletedTask;
+        }
+
         var lib = new ExternalLibrary
         {
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? System.IO.Path.GetFileName(rootPath.TrimEnd('\\', '/')) : displayName,
+            DisplayName = string.IsNullOrWhiteSpace(displayName) ? System.IO.Path.GetFileName(normPath) : displayName,
             RootPath = rootPath,
             DriveSerial = rootPath.Length >= 2 ? rootPath[..2] : string.Empty,
             IsRemovable = false,
@@ -2560,6 +2571,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!ElevationHelper.IsElevated())
+        {
+            const string msg = "Xbox network streaming requires the app to run as Administrator. " +
+                "Use 'Restart as Administrator' first.";
+            AddLog(msg, LogMessageType.Error);
+            LastError = msg;
+            return;
+        }
+
         _xboxSenderService.Reset();
         var error = _xboxSenderService.ValidateSource(sourcePath);
         if (error != null)
@@ -2569,17 +2589,50 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        IsXboxTransferActive = true;
+        XboxTransfer = _xboxSenderService.State;
+        _xboxSenderService.StateChanged += OnXboxTransferStateChanged;
+        _xboxSenderService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+
         try
         {
-            var manifest = await _xboxSenderService.PrepareForNetworkAsync();
+            // Phase 1: Stage to a temp folder (rescues protected executables)
+            var tempStageDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GamesLocalShare", "xbox-network-stage");
+            Directory.CreateDirectory(tempStageDir);
+
+            AddLog($"Xbox network: staging {_xboxSenderService.State.GameName} to temp folder...", LogMessageType.Info);
+            await _xboxSenderService.StageToFolderAsync(tempStageDir);
+
+            if (_xboxSenderService.State.CurrentStep != XboxTransferStep.Complete)
+            {
+                LastError = _xboxSenderService.State.ErrorMessage ?? "Staging failed";
+                return;
+            }
+
+            var stagedGameDir = _xboxSenderService.State.DestinationPath;
+            AddLog($"Xbox network: staging complete at {stagedGameDir}", LogMessageType.Info);
+
+            // Phase 2: Build manifest from staged folder and start TCP server
+            var manifest = await _xboxSenderService.PrepareForNetworkFromStagedAsync(stagedGameDir);
             _xboxNetworkSender.SetManifest(manifest);
             _xboxNetworkSender.Start();
-            AddLog($"Xbox network sender ready on port {_xboxNetworkSender.Port}: {manifest.TotalFiles} files, {manifest.TotalBytes / 1024 / 1024} MB", LogMessageType.Info);
+
+            _xboxSenderService.State.CurrentStep = XboxTransferStep.WaitingForReceiver;
+            _xboxSenderService.State.StatusMessage =
+                $"Ready! Waiting for receiver on port {_xboxNetworkSender.Port}...";
+            OnXboxTransferStateChanged(this, _xboxSenderService.State);
+
+            AddLog($"Xbox network sender ready on port {_xboxNetworkSender.Port}: " +
+                   $"{manifest.TotalFiles} files, {manifest.TotalBytes / 1024 / 1024} MB", LogMessageType.Info);
         }
         catch (Exception ex)
         {
             AddLog($"Xbox network prep error: {ex.Message}", LogMessageType.Error);
             LastError = ex.Message;
+            IsXboxTransferActive = false;
+            _xboxSenderService.StateChanged -= OnXboxTransferStateChanged;
         }
     }
 
@@ -2587,6 +2640,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void StopXboxNetwork()
     {
         _xboxNetworkSender.Stop();
+        IsXboxTransferActive = false;
+        _xboxSenderService.StateChanged -= OnXboxTransferStateChanged;
+        StatusMessage = "Xbox network sender stopped";
         AddLog("Xbox network sender stopped", LogMessageType.Info);
     }
 
@@ -2673,12 +2729,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task StartXboxNetworkTransferAsync((string peerHost, int peerPort, string gameAppId) args)
+    private async Task StartXboxNetworkTransferAsync((string peerHost, int peerPort, string gameAppId, string? xboxRoot, bool force) args)
     {
-        var (peerHost, peerPort, gameAppId) = args;
+        var (peerHost, peerPort, gameAppId, xboxRoot, force) = args;
         if (string.IsNullOrWhiteSpace(peerHost))
         {
             AddLog("Xbox network transfer: no peer host provided", LogMessageType.Error);
+            return;
+        }
+
+        if (!ElevationHelper.IsElevated())
+        {
+            const string msg = "Xbox network transfer requires the app to run as Administrator. " +
+                "Use 'Restart as Administrator' first.";
+            AddLog(msg, LogMessageType.Error);
+            LastError = msg;
             return;
         }
 
@@ -2693,7 +2758,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            var verdict = await _xboxTransferService.RunNetworkOverlayAsync(peerHost, peerPort);
+            var verdict = await _xboxTransferService.RunNetworkOverlayAsync(
+                peerHost, peerPort, xboxRoot, force);
             switch (verdict)
             {
                 case XboxTransferVerdict.FullSkip:

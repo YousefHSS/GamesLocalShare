@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppState } from '../../store';
+import { useAppState, type NetworkPeer, type GameInfo } from '../../store';
 import { sendCommand } from '../../bridge';
 import XboxTransferModal from '../XboxTransferModal';
 
@@ -11,6 +11,8 @@ export default function PeersPanel() {
   const manualPeerIp = useAppState((state) => state.manualPeerIp);
   const isNetworkActive = useAppState((state) => state.isNetworkActive);
   const [showReceiverModal, setShowReceiverModal] = useState(false);
+  const [receiverPeer, setReceiverPeer] = useState<NetworkPeer | undefined>();
+  const [receiverGame, setReceiverGame] = useState<GameInfo | undefined>();
 
   return (
     <div className="bg-dark-panel rounded flex flex-col h-full overflow-hidden">
@@ -113,7 +115,16 @@ export default function PeersPanel() {
                   <p className="text-gray-400">{game.buildId} • {game.formattedSize}</p>
                   {selectedPeerGame?.appId === game.appId && game.platform === 'Xbox' && game.isOverlaySupported && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); setShowReceiverModal(true); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Find the peer that owns this game
+                        const ownerPeer = networkPeers.find(p =>
+                          p.games.some(g => g.appId === game.appId)
+                        );
+                        setReceiverPeer(ownerPeer);
+                        setReceiverGame(game);
+                        setShowReceiverModal(true);
+                      }}
                       className="mt-1 bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded text-xs transition"
                     >
                       Receive via Xbox Overlay
@@ -128,7 +139,13 @@ export default function PeersPanel() {
       {showReceiverModal && (
         <XboxTransferModal
           mode="receiver"
-          onClose={() => setShowReceiverModal(false)}
+          initialPeer={receiverPeer}
+          initialGame={receiverGame}
+          onClose={() => {
+            setShowReceiverModal(false);
+            setReceiverPeer(undefined);
+            setReceiverGame(undefined);
+          }}
         />
       )}
     </div>

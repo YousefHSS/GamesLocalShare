@@ -57,8 +57,10 @@ public partial class MainWindow : Window
                 webView.HtmlContent = $"<html><body style='background:#1E1E1E;color:#fff;font-family:sans-serif;padding:24px;'><h1>Web UI not found</h1><p>Expected at:<br><code>{System.Net.WebUtility.HtmlEncode(webUiPath)}</code></p></body></html>";
             }
 
-            // Initialize the bridge after a short delay to allow WebView to load
-            await Task.Delay(500);
+            // Initialize the bridge — subscribes to ViewModel changes.
+            // The initial state push now happens in response to the
+            // "WebUIReady" command sent by the React app once it mounts,
+            // so we no longer rely on an arbitrary delay here.
             await _bridge.InitializeAsync();
         }
 
