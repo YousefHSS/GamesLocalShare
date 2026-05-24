@@ -224,6 +224,12 @@ if ($PSCmdlet.ParameterSetName -eq 'System') {
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 Write-Host "[SYSTEM phase] Identity: $identity"
 
+# Let the unelevated GUI cancel this SYSTEM-owned phase by dropping a
+# sentinel file. The watcher kills our robocopy child and exits the process.
+$cancelSentinel = Join-Path $runsDir 'cancel-receiver-overlay.sentinel'
+Start-CancelWatcher -SentinelPath $cancelSentinel | Out-Null
+Write-Host "[SYSTEM phase] Cancel sentinel: $cancelSentinel"
+
 $summary  = Get-Content -LiteralPath (Join-Path $Source 'transfer-summary.json') -Raw | ConvertFrom-Json
 $gameName = $summary.GameName
 $pfn      = $summary.PackageFamilyName
@@ -528,13 +534,20 @@ if ($contentGuid) {
         $destSize = $destXviItem.Length
         if ($srcSize -ne $destSize) {
             Write-Host ""
-            Write-Host "WARNING: .xvi size mismatch - game versions differ!" -ForegroundColor Red
-            Write-Host ("  Source .xvi : {0} bytes  (sender game version)" -f $srcSize) -ForegroundColor Yellow
-            Write-Host ("  Dest   .xvi : {0} bytes  (receiver downloading newer version)" -f $destSize) -ForegroundColor Yellow
-            Write-Host "  Excluding MSIXVC metadata from overlay to avoid block-map corruption." -ForegroundColor Yellow
-            Write-Host "  ACTION: Update the sender's game to the latest version, re-stage, then retry." -ForegroundColor Cyan
-            Write-Host ""
-            $msixvcExcludes = @('/XF','*.xvi','/XF','*.xct','/XF','*.xvs','/XF','*.smd','/XF','*.xsp')
+            Write-Host "WARNING: .xvi size mismatch - game versions may differ!" -ForegroundColor Red
+            Write-Host ("  Source .xvi : {0} bytes" -f $srcSize) -ForegroundColor Yellow
+            Write-Host ("  Dest   .xvi : {0} bytes" -f $destSize) -ForegroundColor Yellow
+            if ($Force) {
+                Write-Host "  -Force set: INCLUDING MSIXVC metadata anyway. If Gaming Services" -ForegroundColor Yellow
+                Write-Host "  rejects the install or re-downloads, the versions truly differ." -ForegroundColor Yellow
+                Write-Host ""
+            } else {
+                Write-Host "  Excluding MSIXVC metadata from overlay to avoid block-map corruption." -ForegroundColor Yellow
+                Write-Host "  ACTION: Update the sender's game to the latest version, re-stage, then retry." -ForegroundColor Cyan
+                Write-Host "          Or re-run with -Force to overlay the metadata anyway." -ForegroundColor Cyan
+                Write-Host ""
+                $msixvcExcludes = @('/XF','*.xvi','/XF','*.xct','/XF','*.xvs','/XF','*.smd','/XF','*.xsp')
+            }
         } else {
             Write-Host ("[SYSTEM phase] .xvi size match ({0} bytes) - same version, including MSIXVC metadata in overlay." -f $srcSize) -ForegroundColor Green
         }

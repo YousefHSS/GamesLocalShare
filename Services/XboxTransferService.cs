@@ -87,11 +87,10 @@ public class XboxTransferService
         string? xboxRoot = null, bool force = false, CancellationToken ct = default)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        // Overall timeout: the script has a 90s polling phase, a robocopy
-        // phase, and up to 300s of NIC observation. 10 minutes covers all
-        // phases with margin; if we're still running after that something
-        // is stuck (PsExec download hang, SYSTEM child never started, etc).
-        _cts.CancelAfter(TimeSpan.FromMinutes(10));
+        // Safety-net timeout only — large titles (50+ GB) can take a long
+        // time to robocopy, so this is generous. Cancel via the UI if the
+        // script is actually wedged.
+        _cts.CancelAfter(TimeSpan.FromHours(6));
 
         try
         {
@@ -101,9 +100,9 @@ public class XboxTransferService
         {
             return Fail(ct.IsCancellationRequested
                 ? "Transfer cancelled."
-                : "Transfer timed out. The script may be stuck (check network " +
-                  "connectivity for PsExec download, or verify the Xbox app " +
-                  "install was started and paused).");
+                : "Transfer exceeded the 6-hour safety timeout. If the PowerShell " +
+                  "window is still making progress, re-run with a larger window; " +
+                  "otherwise check the script log for the actual stall point.");
         }
         catch (Exception ex)
         {
@@ -249,7 +248,8 @@ public class XboxTransferService
         var progressTask = PollOverlayProgressAsync(logPollCts.Token);
 
         int exitCode = await host.RunVisibleAsync(
-            host.ReceiverScript, args, ct: token);
+            host.ReceiverScript, args, ct: token,
+            cancelSentinelName: "cancel-receiver-overlay.sentinel");
 
         logPollCts.Cancel();
         try { await logPollTask; } catch { }

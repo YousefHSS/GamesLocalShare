@@ -1,0 +1,79 @@
+﻿{
+    "StartedAtUtc":  "2026-05-24T06:32:22.3506260Z",
+    "ReceiverHost":  "DESKTOP-FHVD1S8",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "G:\\stage\\Forza Horizon 6",
+    "Deploy":  "F:\\Games\\AB03F40C-E85D-467B-8C67-3870B89BD2D1",
+    "GameName":  "Forza Horizon 6",
+    "PackageFamilyName":  "Microsoft.ForteBaseGame_8wekyb3d8bbwe",
+    "SourceBytes":  157214420120,
+    "SourceFileCount":  14541,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  14539,
+    "PreOverlayBytes":  157212421266,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  14541,
+    "PostOverlayBytes":  157214420120,
+    "RobocopyExit":  1,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  4982405707,
+                     "SentBytes":  456462556,
+                     "Time":  "\/Date(1779604280744)\/"
+                 },
+    "ObserveSeconds":  300,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  2.96,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  12.45,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  14.99,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\Microsoft.ForteBaseGame_3.360.259.0_x64__8wekyb3d8bbwe",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  15.13,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\Microsoft.ForteBaseGame_3.360.259.0_x64__8wekyb3d8bbwe",
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "SignatureKind":  "Store",
+                       "Status":  "Ok",
+                       "InstallLocation":  "C:\\Program Files\\WindowsApps\\Microsoft.ForteBaseGame_3.360.259.0_x64__8wekyb3d8bbwe",
+                       "PackageFullName":  "Microsoft.ForteBaseGame_3.360.259.0_x64__8wekyb3d8bbwe",
+                       "Installed":  true
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  15869053,
+                       "SentBytes":  749722,
+                       "ReceivedMB":  15.13,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  15.13,
+    "Hypothesis":  "H1_FULL_SKIP"
+}

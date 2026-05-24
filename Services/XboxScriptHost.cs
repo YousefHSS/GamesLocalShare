@@ -107,7 +107,8 @@ public sealed class XboxScriptHost
         IReadOnlyList<string> args,
         Action<string> onOutput,
         bool confirmPausePrompt = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? cancelSentinelName = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -140,6 +141,18 @@ public sealed class XboxScriptHost
                 onOutput(e.Data);
         };
 
+        string? sentinelPath = null;
+        if (!string.IsNullOrEmpty(cancelSentinelName))
+        {
+            sentinelPath = Path.Combine(RunsDir, cancelSentinelName);
+            try
+            {
+                Directory.CreateDirectory(RunsDir);
+                if (File.Exists(sentinelPath)) File.Delete(sentinelPath);
+            }
+            catch { }
+        }
+
         if (!proc.Start())
             throw new InvalidOperationException("Failed to start powershell.exe");
 
@@ -156,6 +169,13 @@ public sealed class XboxScriptHost
 
         using var reg = ct.Register(() =>
         {
+            // Sentinel first so the SYSTEM child (unkillable from an
+            // unelevated process) self-terminates; then kill the visible tree.
+            if (sentinelPath != null)
+            {
+                try { File.WriteAllText(sentinelPath, DateTime.UtcNow.ToString("o")); }
+                catch { }
+            }
             try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
             catch { }
         });
@@ -174,7 +194,8 @@ public sealed class XboxScriptHost
     public async Task<int> RunVisibleAsync(
         string scriptPath,
         IReadOnlyList<string> args,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? cancelSentinelName = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -191,6 +212,20 @@ public sealed class XboxScriptHost
         foreach (var a in args)
             psi.ArgumentList.Add(a);
 
+        // Clear any stale sentinel from a previous run before we launch,
+        // otherwise the new SYSTEM child would see it and exit immediately.
+        string? sentinelPath = null;
+        if (!string.IsNullOrEmpty(cancelSentinelName))
+        {
+            sentinelPath = Path.Combine(RunsDir, cancelSentinelName);
+            try
+            {
+                Directory.CreateDirectory(RunsDir);
+                if (File.Exists(sentinelPath)) File.Delete(sentinelPath);
+            }
+            catch { }
+        }
+
         using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
         if (!proc.Start())
@@ -198,6 +233,14 @@ public sealed class XboxScriptHost
 
         using var reg = ct.Register(() =>
         {
+            // Drop the sentinel FIRST so the SYSTEM child (which we cannot
+            // kill from an unelevated process) self-terminates. Then kill
+            // the visible powershell tree we own directly.
+            if (sentinelPath != null)
+            {
+                try { File.WriteAllText(sentinelPath, DateTime.UtcNow.ToString("o")); }
+                catch { }
+            }
             try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
             catch { }
         });

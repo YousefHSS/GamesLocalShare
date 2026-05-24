@@ -135,7 +135,9 @@ public class XboxSenderService
             using var progressCts = CancellationTokenSource.CreateLinkedTokenSource(token);
             var progressTask = PollStagingProgressAsync(stagedDir, progressCts.Token);
 
-            int exitCode = await host.RunAsync(host.SenderScript, args, line =>
+            int exitCode = await host.RunAsync(host.SenderScript, args,
+                cancelSentinelName: "cancel-sender.sentinel",
+                onOutput: line =>
             {
                 Log(line);
                 var scan = SourceScanLine.Match(line);

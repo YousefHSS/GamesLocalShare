@@ -424,3 +424,43 @@ foreach ($rel in @($a.Files)) {
         Files    = $files
     }
 }
+
+function Start-CancelWatcher {
+    <#
+        Spawns a background runspace that polls $SentinelPath every second.
+        When the file appears (the C# host writes it on cancel/timeout), the
+        watcher kills any robocopy.exe children of $PID and force-exits the
+        current process. Lets the unelevated GUI cancel a SYSTEM-owned copy
+        that it cannot kill directly.
+    #>
+    param(
+        [Parameter(Mandatory)][string] $SentinelPath
+    )
+    # Remove any stale sentinel from a previous run.
+    if (Test-Path -LiteralPath $SentinelPath) {
+        Remove-Item -LiteralPath $SentinelPath -Force -ErrorAction SilentlyContinue
+    }
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = 'STA'
+    $rs.ThreadOptions  = 'ReuseThread'
+    $rs.Open()
+    $ps = [powershell]::Create()
+    $ps.Runspace = $rs
+    [void]$ps.AddScript({
+        param($sentinel, $parentPid)
+        while ($true) {
+            Start-Sleep -Seconds 1
+            if (Test-Path -LiteralPath $sentinel) {
+                try {
+                    $kids = Get-CimInstance Win32_Process -Filter "ParentProcessId=$parentPid" -ErrorAction SilentlyContinue
+                    foreach ($k in $kids) {
+                        try { Stop-Process -Id $k.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+                    }
+                } catch {}
+                [Environment]::Exit(99)
+            }
+        }
+    }).AddArgument($SentinelPath).AddArgument($PID)
+    [void]$ps.BeginInvoke()
+    return [pscustomobject]@{ Runspace = $rs; PowerShell = $ps; Sentinel = $SentinelPath }
+}

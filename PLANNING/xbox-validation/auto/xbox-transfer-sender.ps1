@@ -177,6 +177,12 @@ if (-not (Test-IsSystem)) {
     Write-Host "WARNING: expected NT AUTHORITY\SYSTEM, got $identity" -ForegroundColor Yellow
 }
 
+# Cancel sentinel: GUI (or any caller) can drop this file to abort the
+# SYSTEM-owned copy. The watcher kills robocopy and exits.
+$cancelSentinel = Join-Path $runsDir 'cancel-sender.sentinel'
+Start-CancelWatcher -SentinelPath $cancelSentinel | Out-Null
+Write-Host "[SYSTEM phase] Cancel sentinel: $cancelSentinel"
+
 if (-not (Test-Path -LiteralPath $GameFolder)) { throw "GameFolder not found: $GameFolder" }
 
 # ---------------------------------------------------------------------------
@@ -236,7 +242,12 @@ $allFiles    = @(Get-ChildItem -LiteralPath $GameFolder -Recurse -File -Force -E
 $totalBytes  = ($allFiles | Measure-Object -Sum Length).Sum
 $totalCount  = $allFiles.Count
 $unreadable  = @()
-foreach ($f in $allFiles) {
+# Only executables can be SYSAPPID-locked (MSIXVC encrypts .exe/.dll, never
+# data files). Probing every asset on a 50+ GB title costs tens of thousands
+# of synchronous opens for no signal — restrict the probe to executables.
+$probeExts = @('.exe', '.dll')
+$probeTargets = $allFiles | Where-Object { $probeExts -contains $_.Extension.ToLowerInvariant() }
+foreach ($f in $probeTargets) {
     try {
         $fs = [System.IO.File]::Open($f.FullName,'Open','Read','ReadWrite')
         $fs.Close()
@@ -244,14 +255,14 @@ foreach ($f in $allFiles) {
         $unreadable += $f.FullName
     }
 }
-Write-Host ("[SYSTEM phase] Files: {0}, Bytes: {1:N0} ({2:N1} MB), Unreadable: {3}" -f `
-    $totalCount, $totalBytes, ($totalBytes/1MB), $unreadable.Count)
+Write-Host ("[SYSTEM phase] Files: {0}, Bytes: {1:N0} ({2:N1} MB), Probed: {3}, Unreadable: {4}" -f `
+    $totalCount, $totalBytes, ($totalBytes/1MB), $probeTargets.Count, $unreadable.Count)
 
 # Robocopy
 $stamp     = (Get-Date).ToString('yyyyMMdd-HHmmss')
 $rcLog     = Join-Path $runsDir "sender-robocopy-$stamp.log"
 $rcArgs    = @(
-    "`"$GameFolder`"", "`"$destGame`"", '/E','/COPYALL','/B','/DCOPY:DAT',
+    "`"$GameFolder`"", "`"$destGame`"", '/E','/COPYALL','/B','/J','/DCOPY:DAT',
     '/R:1','/W:2','/MT:8','/NP','/NDL','/TEE',
     "/LOG+:$rcLog"
 )
