@@ -8,7 +8,6 @@ export default function PeersPanel() {
   const selectedPeerGame = useAppState((state) => state.selectedPeerGame);
   const manualPeerIp = useAppState((state) => state.manualPeerIp);
   const isNetworkActive = useAppState((state) => state.isNetworkActive);
-  const isElevated = useAppState((state) => state.isElevated);
   const xboxRootPath = useAppState((state) => state.xboxRootPath);
 
   return (
@@ -116,14 +115,13 @@ export default function PeersPanel() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!isElevated) {
-                              sendCommand('RequestElevation');
-                              return;
-                            }
                             const ownerPeer = networkPeers.find(p =>
                               p.games.some(g => g.appId === game.appId)
                             );
-                            if (!ownerPeer) return;
+                            if (!ownerPeer) {
+                              alert(`Could not find peer for game ${game.name} (${game.appId}). Peers: ${networkPeers.length}`);
+                              return;
+                            }
                             sendCommand('StartXboxNetworkTransfer', {
                               peerHost: ownerPeer.ipAddress,
                               peerPort: ownerPeer.xboxOverlayPort,

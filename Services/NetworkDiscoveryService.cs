@@ -90,6 +90,14 @@ public class NetworkDiscoveryService : IDisposable
     /// </summary>
     public event EventHandler? GamesRequestedButEmpty;
 
+    /// <summary>
+    /// Event raised when a remote peer requests Xbox game streaming preparation.
+    /// The subscriber should call PrepareForDirectNetworkAsync, set the manifest
+    /// on XboxNetworkSender, start the sender, and call the provided callback
+    /// with (success, errorMessage).
+    /// </summary>
+    public event Func<string, Task<(bool Success, string? Error)>>? XboxStreamingRequested;
+
     public NetworkDiscoveryService()
     {
         LocalPeer = new NetworkPeer
@@ -540,6 +548,62 @@ public class NetworkDiscoveryService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Asks a remote peer to prepare an Xbox game for streaming.
+    /// Returns (success, xboxOverlayPort, errorMessage).
+    /// </summary>
+    public async Task<(bool Success, int Port, string? Error)> RequestXboxStreamingAsync(
+        NetworkPeer peer, string gameAppId, CancellationToken ct = default)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            client.ReceiveTimeout = 60000; // 60s — preparation can take time (rescue exe)
+            client.SendTimeout = 5000;
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromMinutes(2));
+
+            await client.ConnectAsync(peer.IpAddress, peer.Port, cts.Token);
+            using var stream = client.GetStream();
+            using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var request = new NetworkMessage
+            {
+                Type = MessageType.PrepareXboxStreaming,
+                SenderId = LocalPeer.PeerId,
+                SenderName = LocalPeer.DisplayName,
+                SenderPort = LocalPeer.Port,
+                GameAppId = gameAppId,
+            };
+            await writer.WriteLineAsync(
+                JsonSerializer.Serialize(request, NetworkMessageJsonContext.Default.NetworkMessage));
+
+            var responseLine = await reader.ReadLineAsync(cts.Token);
+            if (string.IsNullOrEmpty(responseLine))
+                return (false, 0, "Empty response from sender");
+
+            var response = JsonSerializer.Deserialize(
+                responseLine, NetworkMessageJsonContext.Default.NetworkMessage);
+            if (response == null)
+                return (false, 0, "Invalid response from sender");
+
+            if (response.Type == MessageType.XboxStreamingReady)
+                return (true, response.SenderXboxOverlayPort, null);
+
+            return (false, 0, response.ErrorMessage ?? "Sender refused streaming");
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, 0, "Request timed out — sender may be busy");
+        }
+        catch (Exception ex)
+        {
+            return (false, 0, ex.Message);
+        }
+    }
+
     private async Task ListenForDiscoveryAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -813,6 +877,45 @@ public class NetworkDiscoveryService : IDisposable
                         
                         await writer.WriteLineAsync(responseJson);
                         System.Diagnostics.Debug.WriteLine($"  Sent response with {LocalPeer.Games.Count} games to {request.SenderName}");
+                        break;
+
+                    case MessageType.PrepareXboxStreaming:
+                        System.Diagnostics.Debug.WriteLine($"Peer {request.SenderName} requesting Xbox streaming for appId: {request.GameAppId}");
+                        var xboxResponse = new NetworkMessage
+                        {
+                            SenderId = LocalPeer.PeerId,
+                            SenderName = LocalPeer.DisplayName,
+                            SenderPort = LocalPeer.Port,
+                            SenderXboxOverlayPort = LocalXboxOverlayPort,
+                        };
+                        try
+                        {
+                            var handler = XboxStreamingRequested;
+                            if (handler != null && !string.IsNullOrEmpty(request.GameAppId))
+                            {
+                                var (ok, err) = await handler.Invoke(request.GameAppId);
+                                if (ok)
+                                {
+                                    xboxResponse.Type = MessageType.XboxStreamingReady;
+                                }
+                                else
+                                {
+                                    xboxResponse.Type = MessageType.XboxStreamingFailed;
+                                    xboxResponse.ErrorMessage = err ?? "Unknown error";
+                                }
+                            }
+                            else
+                            {
+                                xboxResponse.Type = MessageType.XboxStreamingFailed;
+                                xboxResponse.ErrorMessage = "Sender does not support Xbox streaming";
+                            }
+                        }
+                        catch (Exception xex)
+                        {
+                            xboxResponse.Type = MessageType.XboxStreamingFailed;
+                            xboxResponse.ErrorMessage = xex.Message;
+                        }
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(xboxResponse, NetworkMessageJsonContext.Default.NetworkMessage));
                         break;
 
                     case MessageType.GameList:
@@ -1123,7 +1226,10 @@ public enum MessageType
     RequestGameList,
     GameList,
     RequestFileTransfer,
-    FileTransferResponse
+    FileTransferResponse,
+    PrepareXboxStreaming,
+    XboxStreamingReady,
+    XboxStreamingFailed
 }
 
 public class NetworkMessage
@@ -1136,4 +1242,5 @@ public class NetworkMessage
     public int SenderXboxOverlayPort { get; set; } = 45680;
     public ObservableCollection<GameInfo>? Games { get; set; }
     public string? GameAppId { get; set; }
+    public string? ErrorMessage { get; set; }
 }

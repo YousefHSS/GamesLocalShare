@@ -309,12 +309,11 @@ export default function App() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (!s.isElevated) {
-                                    sendCommand('RequestElevation');
+                                  const peer = s.networkPeers.find(p => p.games.some(g => g.appId === game.appId));
+                                  if (!peer) {
+                                    alert(`Could not find peer for game ${game.name} (${game.appId}). Peers: ${s.networkPeers.length}`);
                                     return;
                                   }
-                                  const peer = s.networkPeers.find(p => p.games.some(g => g.appId === game.appId));
-                                  if (!peer) return;
                                   sendCommand('StartXboxNetworkTransfer', {
                                     peerHost: peer.ipAddress,
                                     peerPort: peer.xboxOverlayPort,

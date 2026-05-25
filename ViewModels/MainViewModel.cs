@@ -196,6 +196,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _networkService.ScanProgress += OnScanProgress;
         _networkService.ConnectionError += OnConnectionError;
         _networkService.GamesRequestedButEmpty += OnGamesRequestedButEmpty;
+        _networkService.XboxStreamingRequested += OnXboxStreamingRequested;
 
         // Subscribe to transfer events
         _fileTransferService.ProgressChanged += OnTransferProgress;
@@ -2750,11 +2751,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _xboxTransferService.StateChanged += OnXboxTransferStateChanged;
         _xboxTransferService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
 
-        AddLog($"Xbox network transfer started from {peerHost}:{peerPort}", LogMessageType.Info);
-        StatusMessage = $"Xbox network transfer from {peerHost}";
+        // Update UI state early so the bar shows "Requesting..."
+        _xboxTransferService.State.StatusMessage = $"Requesting sender to prepare game...";
+        _xboxTransferService.State.CurrentStep = XboxTransferStep.DownloadingFromPeer;
+        OnXboxTransferStateChanged(this, _xboxTransferService.State);
+
+        AddLog($"Xbox network transfer: requesting {peerHost} to prepare game {gameAppId}", LogMessageType.Info);
+        StatusMessage = $"Xbox: requesting sender to prepare...";
 
         try
         {
+            // Ask the sender to prepare the Xbox game for streaming
+            var senderPeer = NetworkPeers.FirstOrDefault(p =>
+                p.IpAddress == peerHost);
+            if (senderPeer == null)
+            {
+                _xboxTransferService.State.StatusMessage = "Sender peer not found";
+                _xboxTransferService.State.CurrentStep = XboxTransferStep.Failed;
+                _xboxTransferService.State.ErrorMessage = $"Peer {peerHost} not found in network peers";
+                OnXboxTransferStateChanged(this, _xboxTransferService.State);
+                AddLog($"Xbox network transfer: peer {peerHost} not found", LogMessageType.Error);
+                return;
+            }
+
+            var (streamOk, streamPort, streamErr) =
+                await _networkService.RequestXboxStreamingAsync(senderPeer, gameAppId);
+            if (!streamOk)
+            {
+                _xboxTransferService.State.StatusMessage = "Sender could not prepare game";
+                _xboxTransferService.State.CurrentStep = XboxTransferStep.Failed;
+                _xboxTransferService.State.ErrorMessage = $"Sender refused: {streamErr}";
+                OnXboxTransferStateChanged(this, _xboxTransferService.State);
+                AddLog($"Xbox network transfer: sender refused — {streamErr}", LogMessageType.Error);
+                return;
+            }
+
+            // Use the port the sender confirmed
+            if (streamPort > 0) peerPort = streamPort;
+            AddLog($"Xbox network transfer: sender ready on port {peerPort}, starting download...", LogMessageType.Info);
+
             var verdict = await _xboxTransferService.RunNetworkOverlayAsync(
                 peerHost, peerPort, xboxRoot, force);
             switch (verdict)
@@ -2813,6 +2848,62 @@ public partial class MainViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(XboxTransfer));
             StatusMessage = $"Xbox: {state.StatusMessage}";
         });
+    }
+
+    /// <summary>
+    /// Called when a remote peer asks us to prepare an Xbox game for streaming.
+    /// Finds the game by appId, prepares it, and starts the XboxNetworkSender.
+    /// </summary>
+    private async Task<(bool Success, string? Error)> OnXboxStreamingRequested(string gameAppId)
+    {
+        try
+        {
+            // Find the Xbox game in our local library
+            var game = LocalGames.FirstOrDefault(g =>
+                g.AppId.Equals(gameAppId, StringComparison.OrdinalIgnoreCase) &&
+                g.Platform == GamePlatform.Xbox);
+            if (game == null)
+                return (false, $"Game {gameAppId} not found in local Xbox library");
+
+            if (string.IsNullOrEmpty(game.InstallPath) || !Directory.Exists(game.InstallPath))
+                return (false, $"Install path not found for {game.Name}");
+
+            // If already serving this game, just return success
+            if (_xboxNetworkSender.Port > 0 && _xboxSenderService.State.SourcePath == game.InstallPath
+                && _xboxSenderService.State.CurrentStep == XboxTransferStep.Complete)
+            {
+                AddLog($"Xbox streaming: already serving {game.Name}", LogMessageType.Info);
+                return (true, null);
+            }
+
+            AddLog($"Xbox streaming: peer requested {game.Name}, preparing...", LogMessageType.Info);
+
+            // Validate and prepare
+            _xboxSenderService.Reset();
+            var error = _xboxSenderService.ValidateSource(game.InstallPath);
+            if (error != null)
+                return (false, error);
+
+            _xboxSenderService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+
+            var (manifest, pathOverrides) = await _xboxSenderService.PrepareForDirectNetworkAsync();
+
+            _xboxNetworkSender.SetManifest(manifest);
+            if (pathOverrides.Count > 0)
+                _xboxNetworkSender.SetPathOverrides(pathOverrides);
+
+            // Stop any previous listener and start fresh
+            _xboxNetworkSender.Stop();
+            _xboxNetworkSender.Start();
+
+            AddLog($"Xbox streaming: ready to serve {game.Name} on port {_xboxNetworkSender.Port}", LogMessageType.Info);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Xbox streaming preparation failed: {ex.Message}", LogMessageType.Error);
+            return (false, ex.Message);
+        }
     }
 
     public void Dispose()
