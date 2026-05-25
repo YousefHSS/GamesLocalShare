@@ -696,6 +696,11 @@ public class InteropBridge : IDisposable
                         _viewModel.CancelXboxTransferCommand.Execute(null);
                     break;
 
+                case "DismissXboxTransfer":
+                    if (_viewModel.DismissXboxTransferCommand.CanExecute(null))
+                        _viewModel.DismissXboxTransferCommand.Execute(null);
+                    break;
+
                 case "BrowseXboxSource":
                     await HandleBrowseXboxSourceAsync();
                     break;

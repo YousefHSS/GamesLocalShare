@@ -520,43 +520,72 @@ export default function App() {
         </div>
       )}
 
-      {s.isXboxTransferActive && s.xboxTransfer && (
-        <div className="bg-gradient-to-r from-green-900/60 to-emerald-900/60 border-t border-green-700/50 px-3 sm:px-6 py-2.5 animate-slide-up">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
-            <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-white truncate">
-                  {s.xboxTransfer.gameName || 'Xbox Transfer'}
-                  <span className="ml-2 text-[10px] text-green-400 font-mono">XBOX</span>
-                </span>
-                <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
-                  {s.xboxTransfer.networkReceivedMB > 0
-                    ? `${s.xboxTransfer.networkReceivedMB.toFixed(1)} MB received`
-                    : s.xboxTransfer.overlayProgress > 0
-                      ? `${s.xboxTransfer.overlayProgress.toFixed(1)}%`
-                      : ''}
-                </span>
+      {s.isXboxTransferActive && s.xboxTransfer && (() => {
+        const xt = s.xboxTransfer;
+        const failed = xt.currentStep === 'Failed';
+        const done = xt.currentStep === 'Complete';
+        const finished = failed || done;
+        const barColor = failed
+          ? 'from-red-900/60 to-red-800/60 border-red-700/50'
+          : done
+            ? 'from-emerald-900/60 to-green-800/60 border-green-700/50'
+            : 'from-green-900/60 to-emerald-900/60 border-green-700/50';
+        return (
+          <div className={`bg-gradient-to-r ${barColor} border-t px-3 sm:px-6 py-2.5 animate-slide-up`}>
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
+              {failed
+                ? <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                : done
+                  ? <Download className="w-5 h-5 text-green-400 flex-shrink-0" />
+                  : <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
+              }
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-white truncate">
+                    {xt.gameName || 'Xbox Transfer'}
+                    <span className="ml-2 text-[10px] text-green-400 font-mono">XBOX</span>
+                  </span>
+                  <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
+                    {xt.networkReceivedMB > 0
+                      ? `${xt.networkReceivedMB.toFixed(1)} MB received`
+                      : xt.overlayProgress > 0
+                        ? `${xt.overlayProgress.toFixed(1)}%`
+                        : ''}
+                  </span>
+                </div>
+                {!finished && (
+                  <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all"
+                      style={{ width: `${Math.min(xt.overlayProgress, 100)}%` }}
+                    />
+                  </div>
+                )}
+                <p className={`text-[10px] mt-1 truncate ${failed ? 'text-red-300' : 'text-slate-400'}`}>
+                  {xt.errorMessage || xt.statusMessage}
+                </p>
               </div>
-              <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all"
-                  style={{ width: `${Math.min(s.xboxTransfer.overlayProgress, 100)}%` }}
-                />
+              <div className="flex gap-1 flex-shrink-0">
+                {finished ? (
+                  <button
+                    onClick={() => sendCommand('DismissXboxTransfer')}
+                    className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-xs font-medium flex items-center gap-1"
+                  >
+                    <X className="w-3 h-3" /> Dismiss
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { if (confirm('Cancel Xbox transfer?')) sendCommand('CancelXboxTransfer'); }}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center gap-1"
+                  >
+                    <Square className="w-3 h-3" /> Cancel
+                  </button>
+                )}
               </div>
-              <p className="text-[10px] text-slate-400 mt-1 truncate">{s.xboxTransfer.statusMessage}</p>
-            </div>
-            <div className="flex gap-1 flex-shrink-0">
-              <button
-                onClick={() => { if (confirm('Cancel Xbox transfer?')) sendCommand('CancelXboxTransfer'); }}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center gap-1"
-              >
-                <Square className="w-3 h-3" /> Cancel
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="bg-slate-950 border-t border-slate-800 px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-4">

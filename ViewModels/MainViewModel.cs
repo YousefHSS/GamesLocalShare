@@ -2780,8 +2780,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            IsXboxTransferActive = false;
             _xboxTransferService.StateChanged -= OnXboxTransferStateChanged;
+            // Keep bar visible so user sees final state — DismissXboxTransfer hides it
+            OnXboxTransferStateChanged(this, _xboxTransferService.State);
             await ScanLocalGamesAsync();
         }
     }
@@ -2793,6 +2794,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsXboxTransferActive = false;
         StatusMessage = "Xbox transfer cancelled";
         AddLog("Xbox transfer cancelled by user", LogMessageType.Warning);
+    }
+
+    [RelayCommand]
+    private void DismissXboxTransfer()
+    {
+        IsXboxTransferActive = false;
     }
 
     private void OnXboxTransferStateChanged(object? sender, XboxTransferState state)
