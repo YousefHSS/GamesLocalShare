@@ -36,10 +36,9 @@ public class FileTransferService : IDisposable
     private const int MaxParallelFiles = 4;
     private static readonly TimeSpan TimestampComparisonTolerance = TimeSpan.FromSeconds(2);
     
-    // Adaptive buffer sizes - smaller for WiFi, larger for wired
-    // WiFi typically benefits from smaller buffers due to latency/jitter
-    private const int DefaultBufferSize = 256 * 1024; // 256KB - good balance for WiFi
-    private const int DefaultSocketBufferSize = 512 * 1024; // 512KB socket buffer
+    // Buffer sizes - larger buffers reduce syscall overhead and improve throughput
+    private const int DefaultBufferSize = 1 * 1024 * 1024; // 1MB - reduces ops from 4096 to 1024 per GB
+    private const int DefaultSocketBufferSize = 2 * 1024 * 1024; // 2MB socket buffer
     private const int LargeBufferSize = 4 * 1024 * 1024; // 4MB for high-speed wired
     private const int LargeSocketBufferSize = 8 * 1024 * 1024; // 8MB for high-speed wired
 
@@ -611,8 +610,8 @@ public class FileTransferService : IDisposable
                         remaining -= bytesRead;
                         transferredBytes += bytesRead;
 
-                        // Update progress every 1MB for WiFi (more responsive) or 5MB for wired
-                        var progressInterval = IsHighSpeedMode ? 5 * 1024 * 1024 : 1 * 1024 * 1024;
+                        // Update progress every 5MB (default) or 10MB (high-speed) to reduce event overhead
+                        var progressInterval = IsHighSpeedMode ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
                         if (transferredBytes - lastProgressUpdate > progressInterval)
                         {
                             lastProgressUpdate = transferredBytes;
@@ -640,11 +639,11 @@ public class FileTransferService : IDisposable
                             });
                         }
 
-                        // Save state every 50MB
-                        if (transferredBytes % (50 * 1024 * 1024) < _bufferSize)
+                        // Save state every 200MB (async to avoid blocking transfer)
+                        if (transferredBytes % (200 * 1024 * 1024) < _bufferSize)
                         {
                             _currentTransferState.TransferredBytes = transferredBytes;
-                            _currentTransferState.Save();
+                            _ = _currentTransferState.SaveAsync();
                         }
                     }
 
@@ -1282,9 +1281,9 @@ public class FileTransferService : IDisposable
         client.SendBufferSize = _socketBufferSize;
         client.ReceiveBufferSize = _socketBufferSize;
         
-        // For WiFi: enable Nagle to reduce packet overhead
-        // For wired: disable Nagle for lower latency
-        client.NoDelay = IsHighSpeedMode;
+        // Disable Nagle's algorithm always - it adds up to 200ms delay per write
+        // which severely hurts throughput on our binary protocol with small handshake messages
+        client.NoDelay = true;
         
         client.LingerState = new LingerOption(true, 10);
         client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);

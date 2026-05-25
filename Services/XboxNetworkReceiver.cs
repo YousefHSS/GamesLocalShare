@@ -16,6 +16,11 @@ public class XboxNetworkReceiver
 
     public long BytesReceived { get; private set; }
 
+    /// <summary>
+    /// The manifest received from the sender. Available after ReceiveAsync completes.
+    /// </summary>
+    public XboxOverlayManifest? ReceivedManifest { get; private set; }
+
     public event EventHandler<string>? LogMessage;
     public event EventHandler<double>? ProgressChanged;
     public event EventHandler<long>? BytesReceivedChanged;
@@ -34,6 +39,7 @@ public class XboxNetworkReceiver
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _cts.Token;
         BytesReceived = 0;
+        ReceivedManifest = null;
 
         using var client = new TcpClient();
         await client.ConnectAsync(host, port, token);
@@ -49,8 +55,14 @@ public class XboxNetworkReceiver
         if (manifest == null)
             throw new InvalidOperationException("Failed to receive manifest from sender");
 
+        ReceivedManifest = manifest;
         Directory.CreateDirectory(destinationPath);
-        long totalBytes = manifest.TotalBytes;
+
+        // Use streamable bytes for progress (excludes skipped files)
+        long streamableBytes = manifest.Entries.Sum(e => e.Size);
+
+        Log($"Manifest: {manifest.Entries.Count} files to stream ({streamableBytes / 1024 / 1024} MB), " +
+            $"{manifest.SkippedProtectedFiles.Count} skipped exe(s)");
 
         // Request each file
         foreach (var entry in manifest.Entries)
@@ -79,7 +91,7 @@ public class XboxNetworkReceiver
 
             await using var fs = File.Create(destFile);
             var remaining = fileSize;
-            var buffer = ArrayPool<byte>.Shared.Rent(65536);
+            var buffer = ArrayPool<byte>.Shared.Rent(1048576); // 1MB buffer
             try
             {
                 while (remaining > 0)
@@ -100,13 +112,12 @@ public class XboxNetworkReceiver
             }
 
             BytesReceivedChanged?.Invoke(this, BytesReceived);
-            var progress = totalBytes > 0 ? (double)BytesReceived / totalBytes * 100 : 0;
+            var progress = streamableBytes > 0 ? (double)BytesReceived / streamableBytes * 100 : 0;
             ProgressChanged?.Invoke(this, Math.Min(progress, 100));
-            Log($"Received {entry.RelativePath} ({fileSize} bytes)");
         }
 
         await writer.WriteLineAsync("QUIT");
-        Log($"Overlay complete: {BytesReceived} bytes received");
+        Log($"Download complete: {BytesReceived} bytes received");
     }
 
     private static async Task<XboxOverlayManifest?> ReadManifestAsync(StreamReader reader, CancellationToken ct)

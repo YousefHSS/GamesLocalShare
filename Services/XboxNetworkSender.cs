@@ -19,6 +19,7 @@ public class XboxNetworkSender : IDisposable
     private Task? _listenTask;
     private readonly object _manifestLock = new();
     private XboxOverlayManifest? _manifest;
+    private Dictionary<string, string>? _pathOverrides;
 
     public int Port { get; set; } = 45680;
 
@@ -38,6 +39,17 @@ public class XboxNetworkSender : IDisposable
         {
             _manifest = manifest;
         }
+    }
+
+    /// <summary>
+    /// Sets path overrides for files that should be read from a different
+    /// location than manifest.SourcePath (e.g. rescued protected executables
+    /// stored in a temp directory).
+    /// Key = relative path, Value = actual full path on disk.
+    /// </summary>
+    public void SetPathOverrides(Dictionary<string, string> overrides)
+    {
+        _pathOverrides = overrides;
     }
 
     public void Start()
@@ -177,7 +189,11 @@ public class XboxNetworkSender : IDisposable
             return;
         }
 
-        var fullPath = Path.Combine(manifest.SourcePath, relativePath);
+        // Check for path override (e.g. rescued protected exe in temp dir)
+        var fullPath = _pathOverrides != null &&
+                       _pathOverrides.TryGetValue(relativePath, out var overridePath)
+            ? overridePath
+            : Path.Combine(manifest.SourcePath, relativePath);
         if (!File.Exists(fullPath))
         {
             await SendLineAsync(stream, "ERROR File not found on disk", ct);
@@ -188,7 +204,7 @@ public class XboxNetworkSender : IDisposable
         await SendLineAsync(stream, $"FILE {fileInfo.Length}", ct);
 
         await using var fs = File.OpenRead(fullPath);
-        var buffer = ArrayPool<byte>.Shared.Rent(65536);
+        var buffer = ArrayPool<byte>.Shared.Rent(1048576); // 1MB buffer for better throughput
         try
         {
             int read;

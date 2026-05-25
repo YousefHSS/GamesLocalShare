@@ -2596,27 +2596,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Phase 1: Stage to a temp folder (rescues protected executables)
-            var tempStageDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "GamesLocalShare", "xbox-network-stage");
-            Directory.CreateDirectory(tempStageDir);
-
-            AddLog($"Xbox network: staging {_xboxSenderService.State.GameName} to temp folder...", LogMessageType.Info);
-            await _xboxSenderService.StageToFolderAsync(tempStageDir);
+            // Scan install folder directly, rescue protected exe/dll if possible,
+            // and build a manifest — no full staging step needed.
+            AddLog($"Xbox network: preparing {_xboxSenderService.State.GameName} for direct streaming...", LogMessageType.Info);
+            var (manifest, pathOverrides) = await _xboxSenderService.PrepareForDirectNetworkAsync();
 
             if (_xboxSenderService.State.CurrentStep != XboxTransferStep.Complete)
             {
-                LastError = _xboxSenderService.State.ErrorMessage ?? "Staging failed";
+                LastError = _xboxSenderService.State.ErrorMessage ?? "Preparation failed";
                 return;
             }
 
-            var stagedGameDir = _xboxSenderService.State.DestinationPath;
-            AddLog($"Xbox network: staging complete at {stagedGameDir}", LogMessageType.Info);
-
-            // Phase 2: Build manifest from staged folder and start TCP server
-            var manifest = await _xboxSenderService.PrepareForNetworkFromStagedAsync(stagedGameDir);
             _xboxNetworkSender.SetManifest(manifest);
+            if (pathOverrides.Count > 0)
+                _xboxNetworkSender.SetPathOverrides(pathOverrides);
             _xboxNetworkSender.Start();
 
             _xboxSenderService.State.CurrentStep = XboxTransferStep.WaitingForReceiver;

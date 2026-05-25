@@ -22,19 +22,44 @@ public class XboxOverlayManifest
     public string SourcePath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Total number of files in the install.
+    /// Display name of the game (folder name of the install).
+    /// </summary>
+    public string GameName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Hostname of the sender PC.
+    /// </summary>
+    public string SenderHost { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Total number of files in the install (including skipped).
     /// </summary>
     public int TotalFiles { get; set; }
 
     /// <summary>
-    /// Total size in bytes of all files.
+    /// Total size in bytes of all files (including skipped).
     /// </summary>
     public long TotalBytes { get; set; }
 
     /// <summary>
-    /// Per-file metadata.
+    /// Files that will be streamed over TCP.
     /// </summary>
     public List<XboxOverlayManifestEntry> Entries { get; set; } = new();
+
+    /// <summary>
+    /// Protected exe/dll files that could not be rescued and are excluded
+    /// from streaming. The receiver's Xbox app must download these itself.
+    /// </summary>
+    public List<SkippedProtectedFile> SkippedProtectedFiles { get; set; } = new();
+}
+
+/// <summary>
+/// A protected file that the sender could not read and excluded from the transfer.
+/// </summary>
+public class SkippedProtectedFile
+{
+    public string RelativePath { get; set; } = string.Empty;
+    public long ExpectedSize { get; set; }
 }
 
 /// <summary>
@@ -56,4 +81,9 @@ public class XboxOverlayManifestEntry
     /// Last modified timestamp (UTC).
     /// </summary>
     public DateTime LastModifiedUtc { get; set; }
+
+    /// <summary>
+    /// True for .exe/.dll files that needed special handling (rescue via package context).
+    /// </summary>
+    public bool IsProtected { get; set; }
 }

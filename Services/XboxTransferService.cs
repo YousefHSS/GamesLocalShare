@@ -26,7 +26,16 @@ public class XboxTransferService
 
     private CancellationTokenSource? _cts;
     private string? _overlayDestPath;
-    private long _overlayBaselineBytes = -1;
+
+    /// <summary>
+    /// When true, the overlay script runs in a visible PowerShell window
+    /// (useful for debugging). When false (default), the script runs hidden
+    /// and output is captured to the app log.
+    /// </summary>
+    public bool ShowScriptWindow { get; set; }
+#if DEBUG
+        = true;
+#endif
 
     public event EventHandler<XboxTransferState>? StateChanged;
     public event EventHandler<string>? LogMessage;
@@ -158,6 +167,31 @@ public class XboxTransferService
 
             Log($"Network download complete: {receiver.BytesReceived} bytes to {tempFolder}");
 
+            // Generate transfer-summary.json from the received manifest so
+            // ValidateSource and the overlay PS1 script find the metadata they expect.
+            var manifest = receiver.ReceivedManifest;
+            if (manifest != null)
+            {
+                var summary = new Dictionary<string, object>
+                {
+                    ["GameName"] = manifest.GameName,
+                    ["PackageFamilyName"] = manifest.PackageFamilyName,
+                    ["SourceBytes"] = manifest.TotalBytes,
+                    ["SourceFileCount"] = manifest.TotalFiles,
+                    ["FilesCopied"] = manifest.Entries.Count,
+                    ["BytesCopied"] = receiver.BytesReceived,
+                    ["IntegrityOk"] = true,
+                    ["SkippedFiles"] = 0,
+                    ["ReceiverProvidedFiles"] = manifest.SkippedProtectedFiles
+                        .Select(s => s.RelativePath).ToArray(),
+                };
+                var summaryJson = JsonSerializer.Serialize(summary,
+                    new JsonSerializerOptions { WriteIndented = true });
+                await File.WriteAllTextAsync(
+                    Path.Combine(tempFolder, "transfer-summary.json"), summaryJson, token);
+                Log($"Generated transfer-summary.json from manifest");
+            }
+
             // Phase 2: Validate downloaded folder (sets _state.SourcePath etc.)
             _state.StatusMessage = "Validating downloaded files...";
             RaiseStateChanged();
@@ -210,7 +244,6 @@ public class XboxTransferService
         _state.OverlayProgress = 0;
         _state.StatusMessage = "Starting overlay transfer...";
         _overlayDestPath = null;
-        _overlayBaselineBytes = -1;
         RaiseStateChanged();
 
         XboxScriptHost host;
@@ -233,13 +266,9 @@ public class XboxTransferService
             args.Add("-Force");
         args.Add("-AutoConfirm");
 
-        // Launch the script in a visible PowerShell window so the user
-        // can follow all output (robocopy, ACL reset, "click Resume"
-        // prompt) with full colors.  Progress in the UI is driven by
-        // tailing the SYSTEM-phase log file that the script writes to
-        // disk — this avoids the PsExec stdout-piping issues that made
-        // the hidden-process approach unreliable.
-        _state.StatusMessage = "Script running in PowerShell window...";
+        _state.StatusMessage = ShowScriptWindow
+            ? "Script running in PowerShell window..."
+            : "Running overlay script...";
         RaiseStateChanged();
 
         var transferStartedAt = DateTime.UtcNow;
@@ -247,9 +276,22 @@ public class XboxTransferService
         var logPollTask = PollSystemLogAsync(host.RunsDir, transferStartedAt, logPollCts.Token);
         var progressTask = PollOverlayProgressAsync(logPollCts.Token);
 
-        int exitCode = await host.RunVisibleAsync(
-            host.ReceiverScript, args, ct: token,
-            cancelSentinelName: "cancel-receiver-overlay.sentinel");
+        int exitCode;
+        if (ShowScriptWindow)
+        {
+            exitCode = await host.RunVisibleAsync(
+                host.ReceiverScript, args, ct: token,
+                cancelSentinelName: "cancel-receiver-overlay.sentinel");
+        }
+        else
+        {
+            exitCode = await host.RunAsync(
+                host.ReceiverScript, args,
+                onOutput: line => Log(line),
+                confirmPausePrompt: true,
+                ct: token,
+                cancelSentinelName: "cancel-receiver-overlay.sentinel");
+        }
 
         logPollCts.Cancel();
         try { await logPollTask; } catch { }
@@ -425,7 +467,7 @@ public class XboxTransferService
     {
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(1500, ct); }
+            try { await Task.Delay(2000, ct); }
             catch (OperationCanceledException) { return; }
 
             if (_overlayDestPath == null ||
@@ -440,25 +482,28 @@ public class XboxTransferService
                 if (!Directory.Exists(_overlayDestPath))
                     continue;
 
-                long bytes = 0;
+                long completedBytes = 0;
                 foreach (var f in new DirectoryInfo(_overlayDestPath)
                              .EnumerateFiles("*", SearchOption.AllDirectories))
                 {
-                    bytes += f.Length;
+                    // Large files being written by robocopy are pre-allocated
+                    // to their full size instantly. Detect in-progress files
+                    // by checking if another process holds them open.
+                    if (f.Length >= 1024 * 1024 && IsFileBeingWritten(f.FullName))
+                        continue;
+                    completedBytes += f.Length;
                 }
 
-                // First measurement: capture the pre-overlay baseline so
-                // we track only the delta written by robocopy.
-                if (_overlayBaselineBytes < 0)
-                    _overlayBaselineBytes = bytes;
+                // The overlay robocopy uses /IS (include Same) — it re-copies
+                // ALL files, so a baseline delta approach doesn't work (existing
+                // files get locked and drop out of the count temporarily).
+                // Instead, compare completed bytes directly against source total.
+                long total = _state.SourceBytes;
+                if (total <= 0) total = 1;
 
-                long copied = bytes - _overlayBaselineBytes;
-                long total  = _state.SourceBytes - _overlayBaselineBytes;
-                if (total <= 0) total = 1; // avoid div-by-zero
-
-                _state.OverlayProgress = Math.Min(100.0, copied * 100.0 / total);
+                _state.OverlayProgress = Math.Min(100.0, completedBytes * 100.0 / total);
                 _state.StatusMessage =
-                    $"Overlaying: {copied / 1024d / 1024d:N0} / " +
+                    $"Overlaying: {completedBytes / 1024d / 1024d:N0} / " +
                     $"{total / 1024d / 1024d:N0} MB ({_state.OverlayProgress:N0}%)";
                 RaiseStateChanged();
             }
@@ -466,6 +511,30 @@ public class XboxTransferService
             {
                 // Enumeration can race with robocopy writing files; ignore.
             }
+        }
+    }
+
+    /// <summary>
+    /// Returns true if another process (e.g. robocopy) currently holds the
+    /// file open for writing. Robocopy pre-allocates the full file size
+    /// before writing data, so FileInfo.Length is misleading for in-progress
+    /// files — this lock check is the only reliable way to tell.
+    /// </summary>
+    private static bool IsFileBeingWritten(string path)
+    {
+        try
+        {
+            // Request exclusive access — fails if any other process has the file open
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            return false; // Got exclusive access → file is complete
+        }
+        catch (IOException)
+        {
+            return true; // Sharing violation → another process is writing
+        }
+        catch
+        {
+            return false; // Permission error etc. → not a write lock, count normally
         }
     }
 

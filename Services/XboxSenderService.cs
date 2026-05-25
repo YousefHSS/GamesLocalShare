@@ -91,10 +91,17 @@ public class XboxSenderService
     }
 
     /// <summary>
-    /// Stages the Xbox game to a local/shared drive by running
-    /// xbox-transfer-sender.ps1. The script appends the game folder name to
-    /// <paramref name="destinationPath"/> and writes transfer-summary.json
-    /// into the staged folder.
+    /// Extensions that are MSIXVC-protected and need SYSTEM + backup mode to copy.
+    /// Everything else can be copied directly with normal File.Copy.
+    /// </summary>
+    private static readonly HashSet<string> ProtectedExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll" };
+
+    /// <summary>
+    /// Stages the Xbox game to a local/shared drive. Non-exe/dll files are
+    /// copied directly via File.Copy (fast, buffered I/O), then the
+    /// xbox-transfer-sender.ps1 script handles the protected executables
+    /// via SYSTEM + backup mode.
     /// </summary>
     public async Task StageToFolderAsync(string destinationPath, CancellationToken ct = default)
     {
@@ -106,7 +113,24 @@ public class XboxSenderService
             _state.DestinationPath = destinationPath;
             _state.CurrentStep = XboxTransferStep.CopyingFiles;
             _state.OverlayProgress = 0;
-            _state.StatusMessage = "Staging via xbox-transfer-sender.ps1...";
+            RaiseStateChanged();
+
+            var stagedDir = Path.Combine(destinationPath, _state.GameName);
+            _totalSourceBytes = _state.SourceBytes;
+            _stagingBaselineBytes = -1;
+
+            // Phase 1: Fast direct copy of non-protected files
+            _state.StatusMessage = "Copying game assets (fast copy)...";
+            RaiseStateChanged();
+            var preCopyResult = await PreCopyNonProtectedFilesAsync(
+                _state.SourcePath, stagedDir, token);
+            Log($"Fast copy done: {preCopyResult.CopiedFiles} files, " +
+                $"{preCopyResult.CopiedBytes / 1024 / 1024} MB copied, " +
+                $"{preCopyResult.SkippedFiles} skipped (already up to date), " +
+                $"{preCopyResult.FailedFiles} failed (will retry via script)");
+
+            // Phase 2: Run the script for protected exe/dll files + integrity check
+            _state.StatusMessage = "Handling protected executables via script...";
             RaiseStateChanged();
 
             XboxScriptHost host;
@@ -125,10 +149,6 @@ public class XboxSenderService
                 "-GameFolder", _state.SourcePath,
                 "-Destination", destinationPath,
             };
-
-            var stagedDir = Path.Combine(destinationPath, _state.GameName);
-            _totalSourceBytes = _state.SourceBytes;
-            _stagingBaselineBytes = -1;
 
             // Robocopy runs with /NP, so it emits no percentage. Poll the staged
             // folder's size against the source total to drive a real progress bar.
@@ -246,6 +266,101 @@ public class XboxSenderService
         }
     }
 
+    private record PreCopyResult(int CopiedFiles, long CopiedBytes, int SkippedFiles, int FailedFiles);
+
+    /// <summary>
+    /// Copies all non-exe/dll files from source to destination using normal
+    /// File.Copy (buffered I/O). This is much faster than robocopy /B /J for
+    /// large asset files since it uses the filesystem cache.
+    /// Files that already exist with matching size are skipped.
+    /// </summary>
+    private async Task<PreCopyResult> PreCopyNonProtectedFilesAsync(
+        string sourcePath, string destPath, CancellationToken ct)
+    {
+        return await Task.Run(() =>
+        {
+            int copied = 0, skipped = 0, failed = 0;
+            long copiedBytes = 0;
+
+            Directory.CreateDirectory(destPath);
+
+            var sourceDir = new DirectoryInfo(sourcePath);
+            FileInfo[] allFiles;
+            try
+            {
+                allFiles = sourceDir.GetFiles("*", SearchOption.AllDirectories);
+            }
+            catch (Exception ex)
+            {
+                Log($"Could not enumerate source: {ex.Message}");
+                return new PreCopyResult(0, 0, 0, 0);
+            }
+
+            long totalNonProtectedBytes = 0;
+            int totalNonProtected = 0;
+            foreach (var f in allFiles)
+            {
+                if (!ProtectedExtensions.Contains(f.Extension))
+                {
+                    totalNonProtectedBytes += f.Length;
+                    totalNonProtected++;
+                }
+            }
+
+            foreach (var sourceFile in allFiles)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                // Skip exe/dll — those need SYSTEM + backup mode
+                if (ProtectedExtensions.Contains(sourceFile.Extension))
+                    continue;
+
+                var relativePath = Path.GetRelativePath(sourcePath, sourceFile.FullName);
+                var destFile = Path.Combine(destPath, relativePath);
+                var destDir = Path.GetDirectoryName(destFile);
+                if (!string.IsNullOrEmpty(destDir))
+                    Directory.CreateDirectory(destDir);
+
+                // Skip if destination already matches (same size)
+                if (File.Exists(destFile))
+                {
+                    var destInfo = new FileInfo(destFile);
+                    if (destInfo.Length == sourceFile.Length)
+                    {
+                        skipped++;
+                        copiedBytes += sourceFile.Length;
+                        continue;
+                    }
+                }
+
+                try
+                {
+                    File.Copy(sourceFile.FullName, destFile, overwrite: true);
+                    copiedBytes += sourceFile.Length;
+                    copied++;
+                }
+                catch (Exception ex)
+                {
+                    // File might be locked or ACL-protected — the script will handle it
+                    System.Diagnostics.Debug.WriteLine(
+                        $"PreCopy skip {relativePath}: {ex.Message}");
+                    failed++;
+                }
+
+                // Byte-based progress — accurate even with a mix of tiny and huge files
+                if (totalNonProtectedBytes > 0)
+                {
+                    _state.OverlayProgress = (double)copiedBytes / totalNonProtectedBytes * 80; // Reserve 20% for script
+                    _state.StatusMessage =
+                        $"Fast copy: {copiedBytes / 1024 / 1024} / {totalNonProtectedBytes / 1024 / 1024} MB";
+                    RaiseStateChanged();
+                }
+            }
+
+            return new PreCopyResult(copied, copiedBytes, skipped, failed);
+        }, ct);
+    }
+
     /// <summary>
     /// Updates the live status from a notable script output line.
     /// </summary>
@@ -272,6 +387,8 @@ public class XboxSenderService
     /// <summary>
     /// While the sender script copies, periodically measures the staged folder's
     /// size and reports it as a percentage of the source total.
+    /// Files currently being written are excluded via a lock check — their full
+    /// size is pre-allocated on disk but data hasn't been written yet.
     /// </summary>
     private async Task PollStagingProgressAsync(string stagedDir, CancellationToken ct)
     {
@@ -290,6 +407,11 @@ public class XboxSenderService
                 foreach (var f in new DirectoryInfo(stagedDir)
                              .EnumerateFiles("*", SearchOption.AllDirectories))
                 {
+                    // Large files being written are pre-allocated to full
+                    // size instantly — detect via file lock check.
+                    if (f.Length >= 1024 * 1024 && IsFileBeingWritten(f.FullName))
+                        continue;
+
                     bytes += f.Length;
                     files++;
                 }
@@ -376,6 +498,250 @@ public class XboxSenderService
         _state.CurrentStep = XboxTransferStep.Complete;
         RaiseStateChanged();
         return Task.FromResult(manifest);
+    }
+
+    /// <summary>
+    /// Builds a manifest directly from the Xbox install folder for network
+    /// streaming — no full staging step required. Non-exe/dll files are read
+    /// directly. Protected exe/dll files are probed and, if unreadable,
+    /// rescued via the package-context helper into a small temp directory.
+    /// Returns the manifest and a dictionary of path overrides for rescued files.
+    /// </summary>
+    public async Task<(XboxOverlayManifest Manifest, Dictionary<string, string> PathOverrides)>
+        PrepareForDirectNetworkAsync(CancellationToken ct = default)
+    {
+        _state.IsNetwork = true;
+        _state.CurrentStep = XboxTransferStep.CopyingFiles;
+        _state.StatusMessage = "Scanning install folder...";
+        RaiseStateChanged();
+
+        var sourcePath = _state.SourcePath;
+        var entries = new List<XboxOverlayManifestEntry>();
+        var skipped = new List<SkippedProtectedFile>();
+        var pathOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        long totalBytes = 0;
+        int totalFiles = 0;
+
+        // Enumerate all files
+        var allFiles = new DirectoryInfo(sourcePath)
+            .EnumerateFiles("*", SearchOption.AllDirectories).ToList();
+
+        // Separate protected vs normal files and probe readability
+        var protectedUnreadable = new List<(FileInfo File, string RelPath)>();
+
+        foreach (var file in allFiles)
+        {
+            ct.ThrowIfCancellationRequested();
+            var relPath = Path.GetRelativePath(sourcePath, file.FullName);
+            totalBytes += file.Length;
+            totalFiles++;
+
+            bool isProtected = ProtectedExtensions.Contains(file.Extension);
+
+            if (isProtected)
+            {
+                // Probe: can we read this file?
+                bool readable = false;
+                try
+                {
+                    using var fs = File.Open(file.FullName, FileMode.Open,
+                        FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    // Try reading first 2 bytes to verify real access
+                    var buf = new byte[2];
+                    readable = fs.Read(buf, 0, 2) == 2;
+                }
+                catch { }
+
+                if (readable)
+                {
+                    // Exe/dll readable directly (rare but possible)
+                    entries.Add(new XboxOverlayManifestEntry
+                    {
+                        RelativePath = relPath,
+                        Size = file.Length,
+                        LastModifiedUtc = file.LastWriteTimeUtc,
+                        IsProtected = true,
+                    });
+                }
+                else
+                {
+                    protectedUnreadable.Add((file, relPath));
+                }
+            }
+            else
+            {
+                entries.Add(new XboxOverlayManifestEntry
+                {
+                    RelativePath = relPath,
+                    Size = file.Length,
+                    LastModifiedUtc = file.LastWriteTimeUtc,
+                });
+            }
+        }
+
+        Log($"Scan complete: {totalFiles} files, {entries.Count} streamable, " +
+            $"{protectedUnreadable.Count} protected-unreadable");
+
+        // Attempt rescue of unreadable protected files via package context
+        if (protectedUnreadable.Count > 0 && !string.IsNullOrEmpty(_state.PackageFamilyName))
+        {
+            _state.StatusMessage = $"Rescuing {protectedUnreadable.Count} protected executable(s)...";
+            RaiseStateChanged();
+
+            var rescueDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GamesLocalShare", "xbox-network-rescued",
+                _state.GameName);
+            Directory.CreateDirectory(rescueDir);
+
+            var relPaths = protectedUnreadable.Select(p => p.RelPath).ToList();
+            var rescued = await RescueProtectedFilesAsync(
+                _state.PackageFamilyName, sourcePath, rescueDir, relPaths, ct);
+
+            foreach (var (file, relPath) in protectedUnreadable)
+            {
+                var rescuedPath = Path.Combine(rescueDir, relPath);
+                if (rescued.Contains(relPath) && File.Exists(rescuedPath))
+                {
+                    // Rescued successfully — stream from rescue dir
+                    entries.Add(new XboxOverlayManifestEntry
+                    {
+                        RelativePath = relPath,
+                        Size = new FileInfo(rescuedPath).Length,
+                        LastModifiedUtc = file.LastWriteTimeUtc,
+                        IsProtected = true,
+                    });
+                    pathOverrides[relPath] = rescuedPath;
+                    Log($"Rescued: {relPath}");
+                }
+                else
+                {
+                    // Could not rescue — receiver must download via Xbox
+                    skipped.Add(new SkippedProtectedFile
+                    {
+                        RelativePath = relPath,
+                        ExpectedSize = file.Length,
+                    });
+                    Log($"Skipped (receiver must download): {relPath}");
+                }
+            }
+        }
+        else if (protectedUnreadable.Count > 0)
+        {
+            // No PFN — can't rescue, skip all
+            foreach (var (file, relPath) in protectedUnreadable)
+            {
+                skipped.Add(new SkippedProtectedFile
+                {
+                    RelativePath = relPath,
+                    ExpectedSize = file.Length,
+                });
+            }
+            Log($"No PackageFamilyName — {protectedUnreadable.Count} protected files skipped");
+        }
+
+        long streamBytes = entries.Sum(e => e.Size);
+        var manifest = new XboxOverlayManifest
+        {
+            ContentGuid = _state.ContentGuid,
+            PackageFamilyName = _state.PackageFamilyName,
+            SourcePath = sourcePath,
+            GameName = _state.GameName,
+            SenderHost = Environment.MachineName,
+            TotalFiles = totalFiles,
+            TotalBytes = totalBytes,
+            Entries = entries,
+            SkippedProtectedFiles = skipped,
+        };
+
+        _state.SourceFileCount = totalFiles;
+        _state.SourceBytes = totalBytes;
+        _state.CurrentStep = XboxTransferStep.Complete;
+        _state.StatusMessage = $"Ready: {entries.Count} files to stream ({streamBytes / 1024 / 1024} MB)" +
+            (skipped.Count > 0 ? $", {skipped.Count} exe(s) skipped" : "");
+        RaiseStateChanged();
+
+        return (manifest, pathOverrides);
+    }
+
+    /// <summary>
+    /// Rescues protected exe/dll files by shelling out to the proven PS1
+    /// Copy-ProtectedFilesViaPackage helper. Returns the set of relative
+    /// paths that were successfully rescued.
+    /// </summary>
+    private async Task<HashSet<string>> RescueProtectedFilesAsync(
+        string pfn, string gameFolder, string destDir,
+        List<string> relativePaths, CancellationToken ct)
+    {
+        var rescued = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var host = XboxScriptHost.Deploy();
+
+            // Build a small inline PS1 that calls the common helper
+            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            var argsPath = Path.Combine(host.RunsDir, $"rescue-args-{stamp}.json");
+            var resultPath = Path.Combine(host.RunsDir, $"rescue-result-{stamp}.json");
+
+            var argsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                PackageFamilyName = pfn,
+                GameFolder = gameFolder,
+                DestGame = destDir,
+                RelativePaths = relativePaths,
+                RunsDir = host.RunsDir,
+                ResultPath = resultPath,
+            });
+            await File.WriteAllTextAsync(argsPath, argsJson, ct);
+
+            // Inline script that loads _common.ps1 and calls the rescue function
+            var scriptPath = Path.Combine(host.RunsDir, $"rescue-{stamp}.ps1");
+            var script = $@"
+$ErrorActionPreference = 'Stop'
+. (Join-Path '{host.WorkDir.Replace("'", "''")}' '_common.ps1')
+$a = Get-Content -LiteralPath '{argsPath.Replace("'", "''")}' -Raw | ConvertFrom-Json
+$result = Copy-ProtectedFilesViaPackage `
+    -PackageFamilyName $a.PackageFamilyName `
+    -GameFolder $a.GameFolder `
+    -DestGame $a.DestGame `
+    -RelativePaths @($a.RelativePaths) `
+    -RunsDir $a.RunsDir
+$result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $a.ResultPath -Encoding UTF8
+if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
+";
+            await File.WriteAllTextAsync(scriptPath, script, ct);
+
+            var exitCode = await host.RunAsync(scriptPath, Array.Empty<string>(),
+                onOutput: line => Log($"[Rescue] {line}"),
+                ct: ct);
+
+            if (File.Exists(resultPath))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(
+                    await File.ReadAllTextAsync(resultPath, ct));
+                var root = doc.RootElement;
+                if (root.TryGetProperty("Files", out var filesEl) &&
+                    filesEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var f in filesEl.EnumerateArray())
+                    {
+                        var path = f.TryGetProperty("Path", out var p) ? p.GetString() : null;
+                        var copied = f.TryGetProperty("Copied", out var c) &&
+                                     c.ValueKind == System.Text.Json.JsonValueKind.True;
+                        var header = f.TryGetProperty("Header", out var h) ? h.GetString() : "";
+                        if (path != null && copied && header == "4d5a")
+                            rescued.Add(path);
+                    }
+                }
+            }
+
+            Log($"Rescue complete: {rescued.Count}/{relativePaths.Count} succeeded (exit {exitCode})");
+        }
+        catch (Exception ex)
+        {
+            Log($"Rescue failed: {ex.Message}");
+        }
+        return rescued;
     }
 
     /// <summary>
@@ -501,6 +867,27 @@ public class XboxSenderService
             return sddl.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Returns true if another process currently holds the file open for writing.
+    /// Used to detect in-progress copies whose full size is pre-allocated on disk.
+    /// </summary>
+    private static bool IsFileBeingWritten(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            return false;
+        }
+        catch (IOException)
+        {
+            return true; // Sharing violation → another process is writing
+        }
+        catch
+        {
+            return false; // Permission error etc. → not a write lock
+        }
     }
 
     private void Log(string message) => LogMessage?.Invoke(this, $"[Xbox Sender] {message}");

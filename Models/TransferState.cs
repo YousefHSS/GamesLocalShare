@@ -115,7 +115,7 @@ public class TransferState
     }
 
     /// <summary>
-    /// Saves the transfer state to disk
+    /// Saves the transfer state to disk (synchronous, use for critical saves like cancellation)
     /// </summary>
     public void Save()
     {
@@ -130,7 +130,29 @@ public class TransferState
             }
             var json = JsonSerializer.Serialize(this, TransferStateJsonContext.Default.TransferState);
             File.WriteAllText(stateFile, json);
-            System.Diagnostics.Debug.WriteLine($"TransferState.Save: Saved state for {GameName} at {stateFile}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error saving transfer state: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Saves the transfer state to disk asynchronously (non-blocking, use during transfers)
+    /// </summary>
+    public async Task SaveAsync()
+    {
+        try
+        {
+            LastUpdated = DateTime.Now;
+            var stateFile = GetStateFilePath(TargetPath);
+            var directory = Path.GetDirectoryName(stateFile);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            var json = JsonSerializer.Serialize(this, TransferStateJsonContext.Default.TransferState);
+            await File.WriteAllTextAsync(stateFile, json).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
