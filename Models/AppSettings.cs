@@ -79,6 +79,12 @@ public class AppSettings
     public string? XboxStagePath { get; set; }
 
     /// <summary>
+    /// Xbox install root override (e.g. "D:\XboxGames"). When set, the overlay
+    /// script looks for paused installs here instead of the default location.
+    /// </summary>
+    public string? XboxRootPath { get; set; }
+
+    /// <summary>
     /// List of external drive libraries to scan for games
     /// </summary>
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];

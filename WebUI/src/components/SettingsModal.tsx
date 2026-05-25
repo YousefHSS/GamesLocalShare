@@ -12,6 +12,7 @@ const DEFAULTS: AppSettingsForm = {
   startWithWindows: false,
   minimizeToTray: false,
   epicInstallRoot: '',
+  xboxRootPath: '',
 };
 
 export default function SettingsModal({
@@ -180,6 +181,23 @@ export default function SettingsModal({
                   <FolderOpen className="w-3.5 h-3.5" /> Browse...
                 </button>
               </div>
+            </div>
+          </Section>
+
+          {/* Xbox */}
+          <Section title="Xbox Game Pass">
+            <div className="space-y-1.5">
+              <label className="text-sm text-slate-200">Xbox install root</label>
+              <p className="text-xs text-slate-500">
+                Override where Xbox installs games (e.g. D:\XboxGames). Leave blank for default location.
+              </p>
+              <input
+                type="text"
+                value={form.xboxRootPath}
+                onChange={e => set('xboxRootPath', e.target.value)}
+                placeholder="e.g. D:\XboxGames"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
             </div>
           </Section>
 

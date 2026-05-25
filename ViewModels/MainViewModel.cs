@@ -213,6 +213,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         CopyLogMessageCommand = new AsyncRelayCommand<LogMessage>(
             async logMessage => await CopyLogMessageAsync(logMessage));
 
+        // Restore persisted Xbox root path
+        if (!string.IsNullOrWhiteSpace(_settings.XboxRootPath))
+            XboxRootPath = _settings.XboxRootPath;
+
         // Initial log message
         AddLog("Application started", LogMessageType.Info);
 

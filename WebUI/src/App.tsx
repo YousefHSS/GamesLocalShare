@@ -9,7 +9,7 @@ import { sendCommand } from './bridge';
 import SettingsModal from './components/SettingsModal';
 import DrivesPanel from './components/DrivesPanel';
 import PlatformIcon from './components/PlatformIcon';
-import XboxTransferModal from './components/XboxTransferModal';
+
 
 interface GameContextMenu {
   x: number;
@@ -26,7 +26,6 @@ export default function App() {
   const [peerGameFilter, setPeerGameFilter] = useState('');
   const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
   const [showDrives, setShowDrives] = useState(false);
-  const [xboxReceiverGame, setXboxReceiverGame] = useState<GameInfo | null>(null);
 
   useEffect(() => {
     (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
@@ -308,7 +307,22 @@ export default function App() {
                           {selected && (
                             game.platform === 'Xbox' ? (
                               <button
-                                onClick={(e) => { e.stopPropagation(); setXboxReceiverGame(game); }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!s.isElevated) {
+                                    sendCommand('RequestElevation');
+                                    return;
+                                  }
+                                  const peer = s.networkPeers.find(p => p.games.some(g => g.appId === game.appId));
+                                  if (!peer) return;
+                                  sendCommand('StartXboxNetworkTransfer', {
+                                    peerHost: peer.ipAddress,
+                                    peerPort: peer.xboxOverlayPort,
+                                    gameAppId: game.appId,
+                                    xboxRoot: s.xboxRootPath?.trim() || undefined,
+                                    force: false,
+                                  });
+                                }}
                                 className="mt-2 w-full py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
                               >
                                 <Download className="w-3 h-3" /> Receive via Xbox Overlay
@@ -506,6 +520,44 @@ export default function App() {
         </div>
       )}
 
+      {s.isXboxTransferActive && s.xboxTransfer && (
+        <div className="bg-gradient-to-r from-green-900/60 to-emerald-900/60 border-t border-green-700/50 px-3 sm:px-6 py-2.5 animate-slide-up">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
+            <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-white truncate">
+                  {s.xboxTransfer.gameName || 'Xbox Transfer'}
+                  <span className="ml-2 text-[10px] text-green-400 font-mono">XBOX</span>
+                </span>
+                <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
+                  {s.xboxTransfer.networkReceivedMB > 0
+                    ? `${s.xboxTransfer.networkReceivedMB.toFixed(1)} MB received`
+                    : s.xboxTransfer.overlayProgress > 0
+                      ? `${s.xboxTransfer.overlayProgress.toFixed(1)}%`
+                      : ''}
+                </span>
+              </div>
+              <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all"
+                  style={{ width: `${Math.min(s.xboxTransfer.overlayProgress, 100)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1 truncate">{s.xboxTransfer.statusMessage}</p>
+            </div>
+            <div className="flex gap-1 flex-shrink-0">
+              <button
+                onClick={() => { if (confirm('Cancel Xbox transfer?')) sendCommand('CancelXboxTransfer'); }}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center gap-1"
+              >
+                <Square className="w-3 h-3" /> Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-slate-950 border-t border-slate-800 px-3 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-4">
           <button onClick={() => sendCommand('OpenSettings')} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group">
@@ -534,15 +586,6 @@ export default function App() {
 
       {settingsPayload && (
         <SettingsModal payload={settingsPayload} onClose={() => setSettingsPayload(null)} />
-      )}
-
-      {xboxReceiverGame && (
-        <XboxTransferModal
-          mode="receiver"
-          initialPeer={s.networkPeers.find(p => p.games.some(g => g.appId === xboxReceiverGame.appId))}
-          initialGame={xboxReceiverGame}
-          onClose={() => setXboxReceiverGame(null)}
-        />
       )}
 
       {showDrives && (

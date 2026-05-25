@@ -277,6 +277,7 @@ export interface AppSettingsForm {
   startWithWindows: boolean;
   minimizeToTray: boolean;
   epicInstallRoot: string;
+  xboxRootPath: string;
 }
 
 export interface SettingsPayload {

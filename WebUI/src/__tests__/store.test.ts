@@ -81,6 +81,7 @@ describe('useAppState (zustand store)', () => {
       ipAddress: '10.0.0.1',
       port: 45678,
       fileTransferPort: 45679,
+      xboxOverlayPort: 45680,
       games: [],
       lastSeen: '2025-01-01',
       isOnline: true,

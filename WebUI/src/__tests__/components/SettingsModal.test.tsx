@@ -14,6 +14,7 @@ const basePayload: SettingsPayload = {
     startWithWindows: false,
     minimizeToTray: false,
     epicInstallRoot: '',
+    xboxRootPath: '',
   },
   hiddenGames: [],
   externalLibraries: [],

@@ -1,7 +1,5 @@
-import { useState } from 'react';
-import { useAppState, type NetworkPeer, type GameInfo } from '../../store';
+import { useAppState } from '../../store';
 import { sendCommand } from '../../bridge';
-import XboxTransferModal from '../XboxTransferModal';
 
 export default function PeersPanel() {
   const networkPeers = useAppState((state) => state.networkPeers);
@@ -10,9 +8,8 @@ export default function PeersPanel() {
   const selectedPeerGame = useAppState((state) => state.selectedPeerGame);
   const manualPeerIp = useAppState((state) => state.manualPeerIp);
   const isNetworkActive = useAppState((state) => state.isNetworkActive);
-  const [showReceiverModal, setShowReceiverModal] = useState(false);
-  const [receiverPeer, setReceiverPeer] = useState<NetworkPeer | undefined>();
-  const [receiverGame, setReceiverGame] = useState<GameInfo | undefined>();
+  const isElevated = useAppState((state) => state.isElevated);
+  const xboxRootPath = useAppState((state) => state.xboxRootPath);
 
   return (
     <div className="bg-dark-panel rounded flex flex-col h-full overflow-hidden">
@@ -119,12 +116,21 @@ export default function PeersPanel() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (!isElevated) {
+                              sendCommand('RequestElevation');
+                              return;
+                            }
                             const ownerPeer = networkPeers.find(p =>
                               p.games.some(g => g.appId === game.appId)
                             );
-                            setReceiverPeer(ownerPeer);
-                            setReceiverGame(game);
-                            setShowReceiverModal(true);
+                            if (!ownerPeer) return;
+                            sendCommand('StartXboxNetworkTransfer', {
+                              peerHost: ownerPeer.ipAddress,
+                              peerPort: ownerPeer.xboxOverlayPort,
+                              gameAppId: game.appId,
+                              xboxRoot: xboxRootPath?.trim() || undefined,
+                              force: false,
+                            });
                           }}
                           className="bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded text-xs transition"
                         >
@@ -149,18 +155,6 @@ export default function PeersPanel() {
           )}
         </div>
       </div>
-      {showReceiverModal && (
-        <XboxTransferModal
-          mode="receiver"
-          initialPeer={receiverPeer}
-          initialGame={receiverGame}
-          onClose={() => {
-            setShowReceiverModal(false);
-            setReceiverPeer(undefined);
-            setReceiverGame(undefined);
-          }}
-        />
-      )}
     </div>
   );
 }

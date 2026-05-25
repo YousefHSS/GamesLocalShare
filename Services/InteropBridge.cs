@@ -739,7 +739,12 @@ public class InteropBridge : IDisposable
                         if (payload.Value.TryGetProperty("xboxDestinationPath", out var xdp))
                             _viewModel.XboxDestinationPath = xdp.GetString() ?? "";
                         if (payload.Value.TryGetProperty("xboxRootPath", out var xrp))
-                            _viewModel.XboxRootPath = xrp.GetString() ?? "";
+                        {
+                            var root = xrp.GetString() ?? "";
+                            _viewModel.XboxRootPath = root;
+                            _viewModel.Settings.XboxRootPath = string.IsNullOrWhiteSpace(root) ? null : root;
+                            _viewModel.Settings.Save();
+                        }
                     }
                     break;
 
@@ -875,6 +880,7 @@ public class InteropBridge : IDisposable
                 startWithWindows = OperatingSystem.IsWindows() ? actualStartupState : s.StartWithWindows,
                 minimizeToTray = s.MinimizeToTray,
                 epicInstallRoot = s.EpicInstallRoot ?? string.Empty,
+                xboxRootPath = s.XboxRootPath ?? string.Empty,
             },
             hiddenGames,
             externalLibraries,
@@ -985,6 +991,13 @@ public class InteropBridge : IDisposable
         {
             var root = v6.GetString()?.Trim();
             s.EpicInstallRoot = string.IsNullOrEmpty(root) ? null : root;
+        }
+
+        if (payload.TryGetProperty("xboxRootPath", out var vXbox))
+        {
+            var xroot = vXbox.GetString()?.Trim();
+            s.XboxRootPath = string.IsNullOrEmpty(xroot) ? null : xroot;
+            _viewModel.XboxRootPath = xroot ?? string.Empty;
         }
 
         if (payload.TryGetProperty("startWithWindows", out var v7))

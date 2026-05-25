@@ -74,7 +74,8 @@ export type CommandName =
   | 'CompleteXboxStage'
   | 'CancelXboxStage'
   | 'BrowseXboxDestination'
-  | 'BrowseXboxRoot';
+  | 'BrowseXboxRoot'
+  | 'SetXboxPath';
 
 export interface CommandPayload {
   [key: string]: any;
