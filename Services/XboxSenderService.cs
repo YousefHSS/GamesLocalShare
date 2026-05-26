@@ -540,7 +540,12 @@ public class XboxSenderService
         var allFiles = new DirectoryInfo(sourcePath)
             .EnumerateFiles("*", SearchOption.AllDirectories).ToList();
 
-        // Separate protected vs normal files and probe readability
+        // Probe EVERY file for readability — not just .exe/.dll. On a live
+        // Xbox install, the .xvi/.xvs/.xct envelope files and sometimes other
+        // metadata also have ACLs that block user-mode reads. The drive-based
+        // path works around this by running robocopy as SYSTEM with backup
+        // privilege (/B). Here we have to route every unreadable file through
+        // the package-context rescue helper.
         var protectedUnreadable = new List<(FileInfo File, string RelPath)>();
 
         foreach (var file in allFiles)
@@ -550,51 +555,61 @@ public class XboxSenderService
             totalBytes += file.Length;
             totalFiles++;
 
-            bool isProtected = ProtectedExtensions.Contains(file.Extension);
+            bool isExeOrDll = ProtectedExtensions.Contains(file.Extension);
 
-            if (isProtected)
+            // Probe: can we actually read this file in user-mode?
+            bool readable = false;
+            try
             {
-                // Probe: can we read this file?
-                bool readable = false;
-                try
-                {
-                    using var fs = File.Open(file.FullName, FileMode.Open,
-                        FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    // Try reading first 2 bytes to verify real access
-                    var buf = new byte[2];
-                    readable = fs.Read(buf, 0, 2) == 2;
-                }
-                catch { }
-
-                if (readable)
-                {
-                    // Exe/dll readable directly (rare but possible)
-                    entries.Add(new XboxOverlayManifestEntry
-                    {
-                        RelativePath = relPath,
-                        Size = file.Length,
-                        LastModifiedUtc = file.LastWriteTimeUtc,
-                        IsProtected = true,
-                    });
-                }
-                else
-                {
-                    protectedUnreadable.Add((file, relPath));
-                }
+                using var fs = File.Open(file.FullName, FileMode.Open,
+                    FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var buf = new byte[2];
+                readable = fs.Read(buf, 0, Math.Min(2, (int)file.Length)) >= 0;
             }
-            else
+            catch { }
+
+            if (readable)
             {
                 entries.Add(new XboxOverlayManifestEntry
                 {
                     RelativePath = relPath,
                     Size = file.Length,
                     LastModifiedUtc = file.LastWriteTimeUtc,
+                    IsProtected = isExeOrDll,
                 });
+            }
+            else
+            {
+                protectedUnreadable.Add((file, relPath));
             }
         }
 
-        Log($"Scan complete: {totalFiles} files, {entries.Count} streamable, " +
-            $"{protectedUnreadable.Count} protected-unreadable");
+        // Count unreadable by category so the log makes the diagnosis obvious.
+        var unreadableExe = protectedUnreadable.Count(p =>
+            ProtectedExtensions.Contains(Path.GetExtension(p.RelPath)));
+        var unreadableEnvelope = protectedUnreadable.Count(p =>
+        {
+            var ext = Path.GetExtension(p.RelPath).ToLowerInvariant();
+            return ext is ".xvi" or ".xvs" or ".xct" or ".smd" or ".xsp";
+        });
+        var unreadableOther = protectedUnreadable.Count - unreadableExe - unreadableEnvelope;
+
+        Log($"==== DIAGNOSTIC: scan complete ====");
+        Log($"  Total files:           {totalFiles}");
+        Log($"  Directly streamable:   {entries.Count}");
+        Log($"  Unreadable (rescue):   {protectedUnreadable.Count}");
+        Log($"    .exe/.dll:           {unreadableExe}");
+        Log($"    .xvi/.xvs/.xct/...:  {unreadableEnvelope}  (MSIXVC envelope/metadata)");
+        Log($"    other:               {unreadableOther}");
+        Log($"  PackageFamilyName:     {(string.IsNullOrEmpty(_state.PackageFamilyName) ? "<EMPTY>" : _state.PackageFamilyName)}");
+        if (protectedUnreadable.Count > 0)
+        {
+            foreach (var p in protectedUnreadable.Take(5))
+                Log($"    needs rescue: {p.RelPath}");
+            if (protectedUnreadable.Count > 5)
+                Log($"    ... and {protectedUnreadable.Count - 5} more");
+        }
+        Log($"===================================");
 
         // Attempt rescue of unreadable protected files via package context
         if (protectedUnreadable.Count > 0 && !string.IsNullOrEmpty(_state.PackageFamilyName))
@@ -607,17 +622,19 @@ public class XboxSenderService
                 "GamesLocalShare", "xbox-network-rescued",
                 _state.GameName);
             Directory.CreateDirectory(rescueDir);
+            Log($"Rescue dir: {rescueDir}");
 
             var relPaths = protectedUnreadable.Select(p => p.RelPath).ToList();
+            Log($"Invoking package-context rescue for {relPaths.Count} file(s)...");
             var rescued = await RescueProtectedFilesAsync(
                 _state.PackageFamilyName, sourcePath, rescueDir, relPaths, ct);
 
+            int rescuedCount = 0;
             foreach (var (file, relPath) in protectedUnreadable)
             {
                 var rescuedPath = Path.Combine(rescueDir, relPath);
                 if (rescued.Contains(relPath) && File.Exists(rescuedPath))
                 {
-                    // Rescued successfully — stream from rescue dir
                     entries.Add(new XboxOverlayManifestEntry
                     {
                         RelativePath = relPath,
@@ -626,23 +643,36 @@ public class XboxSenderService
                         IsProtected = true,
                     });
                     pathOverrides[relPath] = rescuedPath;
-                    Log($"Rescued: {relPath}");
+                    rescuedCount++;
+                    Log($"  [OK]   Rescued: {relPath} ({new FileInfo(rescuedPath).Length:N0} bytes)");
                 }
                 else
                 {
-                    // Could not rescue — receiver must download via Xbox
                     skipped.Add(new SkippedProtectedFile
                     {
                         RelativePath = relPath,
                         ExpectedSize = file.Length,
                     });
-                    Log($"Skipped (receiver must download): {relPath}");
+                    Log($"  [FAIL] Could not rescue: {relPath}");
                 }
+            }
+
+            Log($"Rescue summary: {rescuedCount}/{protectedUnreadable.Count} succeeded, {skipped.Count} failed");
+
+            // FAIL LOUD: shipping an incomplete manifest produces a corrupt install on the receiver.
+            if (skipped.Count > 0)
+            {
+                Fail($"Could not rescue {skipped.Count} of {protectedUnreadable.Count} protected executable(s) " +
+                     $"(PFN={_state.PackageFamilyName}). Streaming an incomplete manifest would produce a corrupt " +
+                     "install on the receiver. Check the [Rescue] log lines above for the failure reason — " +
+                     "common causes: package not installed under current user, Invoke-CommandInDesktopPackage " +
+                     "blocked, or AppId mismatch. The first failed file was: " + skipped[0].RelativePath);
+                return (new XboxOverlayManifest(), pathOverrides);
             }
         }
         else if (protectedUnreadable.Count > 0)
         {
-            // No PFN — can't rescue, skip all
+            // FAIL LOUD: no PFN means no possibility of rescue → transfer would be guaranteed corrupt.
             foreach (var (file, relPath) in protectedUnreadable)
             {
                 skipped.Add(new SkippedProtectedFile
@@ -651,7 +681,12 @@ public class XboxSenderService
                     ExpectedSize = file.Length,
                 });
             }
-            Log($"No PackageFamilyName — {protectedUnreadable.Count} protected files skipped");
+            Fail($"Cannot transfer: {protectedUnreadable.Count} protected executable(s) need package-context rescue, " +
+                 "but PackageFamilyName could not be resolved for this game. Without it, the protected exes will " +
+                 "be missing from the transfer and the receiver's install will be corrupt. " +
+                 "Diagnostic: try `Get-AppxPackage -AllUsers -PackageTypeFilter Main | ? { $_.InstallLocation -like '" +
+                 sourcePath + "*' }` on this PC — if that returns nothing, the game isn't registered under your user account.");
+            return (new XboxOverlayManifest(), pathOverrides);
         }
 
         long streamBytes = entries.Sum(e => e.Size);
@@ -725,15 +760,39 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
 ";
             await File.WriteAllTextAsync(scriptPath, script, ct);
 
+            Log($"[Rescue] script: {scriptPath}");
+            Log($"[Rescue] args:   {argsPath}");
+            Log($"[Rescue] result: {resultPath}");
+            Log($"[Rescue] PFN={pfn}, GameFolder={gameFolder}, files={relativePaths.Count}");
+
             var exitCode = await host.RunAsync(scriptPath, Array.Empty<string>(),
                 onOutput: line => Log($"[Rescue] {line}"),
                 ct: ct);
 
-            if (File.Exists(resultPath))
+            Log($"[Rescue] PowerShell exited: {exitCode}");
+
+            if (!File.Exists(resultPath))
             {
-                using var doc = System.Text.Json.JsonDocument.Parse(
-                    await File.ReadAllTextAsync(resultPath, ct));
+                Log($"[Rescue] FAIL: no result file at {resultPath} — Copy-ProtectedFilesViaPackage never wrote output. " +
+                    "Likely Invoke-CommandInDesktopPackage failed or the package isn't installed for current user.");
+                return rescued;
+            }
+
+            try
+            {
+                var resultText = await File.ReadAllTextAsync(resultPath, ct);
+                Log($"[Rescue] raw result JSON ({resultText.Length} bytes):");
+                foreach (var line in resultText.Split('\n').Take(40))
+                    Log($"[Rescue]   {line.TrimEnd('\r')}");
+
+                using var doc = System.Text.Json.JsonDocument.Parse(resultText);
                 var root = doc.RootElement;
+
+                if (root.TryGetProperty("Reason", out var reasonEl) && reasonEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                    Log($"[Rescue] Reason: {reasonEl.GetString()}");
+                if (root.TryGetProperty("Identity", out var idEl) && idEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                    Log($"[Rescue] Helper ran as: {idEl.GetString()}");
+
                 if (root.TryGetProperty("Files", out var filesEl) &&
                     filesEl.ValueKind == System.Text.Json.JsonValueKind.Array)
                 {
@@ -743,13 +802,36 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
                         var copied = f.TryGetProperty("Copied", out var c) &&
                                      c.ValueKind == System.Text.Json.JsonValueKind.True;
                         var header = f.TryGetProperty("Header", out var h) ? h.GetString() : "";
-                        if (path != null && copied && header == "4d5a")
+                        var err = f.TryGetProperty("Error", out var e) ? e.GetString() : "";
+
+                        // .exe/.dll MUST have an MZ header to be a real PE.
+                        // Envelope/metadata files (.xvi/.xvs/.xct) and other
+                        // non-PE assets have their own formats — we just need
+                        // them to copy successfully.
+                        var ext = path != null ? Path.GetExtension(path).ToLowerInvariant() : "";
+                        var requiresMzHeader = ext is ".exe" or ".dll";
+
+                        if (path != null && copied && (!requiresMzHeader || header == "4d5a"))
+                        {
                             rescued.Add(path);
+                        }
+                        else
+                        {
+                            Log($"[Rescue] reject {path}: copied={copied} header={header} err={err} requiresMz={requiresMzHeader}");
+                        }
                     }
                 }
+                else
+                {
+                    Log($"[Rescue] FAIL: result JSON has no Files array");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[Rescue] FAIL parsing result JSON: {ex.Message}");
             }
 
-            Log($"Rescue complete: {rescued.Count}/{relativePaths.Count} succeeded (exit {exitCode})");
+            Log($"[Rescue] complete: {rescued.Count}/{relativePaths.Count} succeeded (exit {exitCode})");
         }
         catch (Exception ex)
         {
