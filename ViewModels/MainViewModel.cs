@@ -2929,11 +2929,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // Validate and prepare
             _xboxSenderService.Reset();
+            // Subscribe BEFORE ValidateSource so its PFN-resolution diagnostics
+            // are visible — they fire inside that call.
+            _xboxSenderService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+
             var error = _xboxSenderService.ValidateSource(game.InstallPath, game.PackageFamilyName);
             if (error != null)
                 return (false, error);
-
-            _xboxSenderService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
 
             var (manifest, pathOverrides) = await _xboxSenderService.PrepareForDirectNetworkAsync();
 

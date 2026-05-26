@@ -68,9 +68,12 @@ public class XboxSenderService
         if (xviFiles.Length > 0)
             _state.ContentGuid = Path.GetFileNameWithoutExtension(xviFiles[0]);
 
-        // PFN resolution chain: caller hint → ACL extraction → PowerShell fallback
+        // PFN resolution chain: caller hint → embedded appxmanifest.xml
+        // (most reliable for alternate-drive installs) → ACL extraction →
+        // broad PowerShell fallback.
         _state.PackageFamilyName =
             (!string.IsNullOrEmpty(pfnHint) ? pfnHint : null)
+            ?? ExtractPfnFromEmbeddedManifest(sourcePath)
             ?? ExtractPfnFromAcl(sourcePath)
             ?? ExtractPfnViaAppxPackage(sourcePath)
             ?? "";
@@ -988,6 +991,99 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= max ? s : s.Substring(0, max) + "...";
+    }
+
+    /// <summary>
+    /// Reads the game's own Content\appxmanifest.xml (which every MSIXVC
+    /// install carries) to get the package Identity Name, then asks
+    /// Get-AppxPackage to resolve the PFN by that exact name. This works
+    /// even for alternate-drive installs (e.g. F:\Games\Rematch) where the
+    /// folder ACL has no SYSAPPID marker and InstallLocation in Get-AppxPackage
+    /// points at WindowsApps rather than the game folder.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private string? ExtractPfnFromEmbeddedManifest(string dir)
+    {
+        try
+        {
+            var manifest = Path.Combine(dir, "Content", "appxmanifest.xml");
+            if (!File.Exists(manifest))
+            {
+                Log($"PFN/Manifest: no Content\\appxmanifest.xml under {dir}");
+                return null;
+            }
+
+            string? identityName = null;
+            try
+            {
+                var doc = new System.Xml.XmlDocument();
+                doc.Load(manifest);
+                var nsm = new System.Xml.XmlNamespaceManager(doc.NameTable);
+                // Try the default Foundation namespace; fall back to any Identity element.
+                nsm.AddNamespace("a", "http://schemas.microsoft.com/appx/manifest/foundation/windows10");
+                var id = doc.SelectSingleNode("/a:Package/a:Identity", nsm)
+                         ?? doc.GetElementsByTagName("Identity").OfType<System.Xml.XmlElement>().FirstOrDefault();
+                identityName = id?.Attributes?["Name"]?.Value;
+            }
+            catch (Exception ex)
+            {
+                Log($"PFN/Manifest: XML parse failed: {ex.Message}");
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(identityName))
+            {
+                Log("PFN/Manifest: Identity Name not present in appxmanifest.xml");
+                return null;
+            }
+
+            Log($"PFN/Manifest: Identity Name = '{identityName}', querying Get-AppxPackage by exact name...");
+
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            var escapedName = identityName.Replace("'", "''");
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(
+                $"$pkg = Get-AppxPackage -AllUsers -Name '{escapedName}' 2>$null | Select-Object -First 1;" +
+                "if ($pkg) { Write-Output \"PFN=$($pkg.PackageFamilyName)\" }" +
+                "else { Write-Output 'PFN=' }");
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return null;
+            var stdout = proc.StandardOutput.ReadToEnd();
+            var stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit(15_000);
+
+            if (!string.IsNullOrWhiteSpace(stderr))
+                Log($"PFN/Manifest: stderr: {Truncate(stderr, 300)}");
+
+            foreach (var raw in stdout.Split('\n'))
+            {
+                var line = raw.TrimEnd('\r').Trim();
+                if (line.StartsWith("PFN=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var pfn = line.Substring(4).Trim();
+                    if (!string.IsNullOrEmpty(pfn) && pfn.Contains('_'))
+                    {
+                        Log($"PFN/Manifest: resolved {pfn}");
+                        return pfn;
+                    }
+                }
+            }
+            Log($"PFN/Manifest: Get-AppxPackage -Name '{identityName}' returned no match");
+        }
+        catch (Exception ex)
+        {
+            Log($"PFN/Manifest: exception {ex.Message}");
+        }
+        return null;
     }
 
     /// <summary>
