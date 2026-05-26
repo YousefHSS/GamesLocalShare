@@ -353,6 +353,8 @@ function Copy-ProtectedFilesViaPackage {
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $argsPath -Encoding UTF8
 
     # Helper script - runs inside the package context.
+    # Streams file copies in chunks via FileStream.CopyTo so files larger
+    # than Int32.MaxValue (~2 GB) — e.g. UE5 .ucas paks — work correctly.
     $helper = @'
 param([Parameter(Mandatory)][string]$ArgsFile)
 $ErrorActionPreference = 'SilentlyContinue'
@@ -363,22 +365,37 @@ foreach ($rel in @($a.Files)) {
     $dst = Join-Path $a.DestGame   $rel
     $e = [ordered]@{ Path = $rel; Copied = $false; Header = ''; Size = 0; Error = '' }
     try {
-        $fs  = [System.IO.File]::Open($src, 'Open', 'Read', 'ReadWrite')
-        $len = $fs.Length
-        $buf = New-Object byte[] $len
-        $off = 0
-        while ($off -lt $len) {
-            $n = $fs.Read($buf, $off, $len - $off)
-            if ($n -le 0) { break }
-            $off += $n
+        $fsIn  = [System.IO.File]::Open($src, 'Open', 'Read', 'ReadWrite')
+        $len   = $fsIn.Length
+
+        # Read the first 2 bytes (file header) for the diagnostic ID.
+        $headerBuf = New-Object byte[] 2
+        $headRead = 0
+        if ($len -ge 2) {
+            while ($headRead -lt 2) {
+                $n = $fsIn.Read($headerBuf, $headRead, 2 - $headRead)
+                if ($n -le 0) { break }
+                $headRead += $n
+            }
+            $e.Header = ('{0:x2}{1:x2}' -f $headerBuf[0], $headerBuf[1])
         }
-        $fs.Close()
+        $fsIn.Position = 0
+
         $dir = Split-Path -Parent $dst
         if ($dir -and -not (Test-Path -LiteralPath $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
-        [System.IO.File]::WriteAllBytes($dst, $buf)
-        if ($len -ge 2) { $e.Header = ('{0:x2}{1:x2}' -f $buf[0], $buf[1]) }
+
+        $fsOut = [System.IO.File]::Open($dst, 'Create', 'Write', 'None')
+        try {
+            # 1 MB chunks — fast on NVMe, safe for >4 GB files.
+            $fsIn.CopyTo($fsOut, 1048576)
+        } finally {
+            $fsOut.Flush()
+            $fsOut.Close()
+        }
+        $fsIn.Close()
+
         $e.Size   = $len
         $e.Copied = $true
     } catch {
