@@ -13,8 +13,16 @@ namespace GamesLocalShare.Services;
 public class XboxNetworkReceiver
 {
     private CancellationTokenSource? _cts;
+    private DateTime _transferStartTime;
+    private long _lastSpeedBytes;
+    private DateTime _lastSpeedTime;
 
     public long BytesReceived { get; private set; }
+
+    /// <summary>
+    /// Current transfer speed in bytes per second.
+    /// </summary>
+    public long SpeedBytesPerSecond { get; private set; }
 
     /// <summary>
     /// The manifest received from the sender. Available after ReceiveAsync completes.
@@ -24,6 +32,7 @@ public class XboxNetworkReceiver
     public event EventHandler<string>? LogMessage;
     public event EventHandler<double>? ProgressChanged;
     public event EventHandler<long>? BytesReceivedChanged;
+    public event EventHandler<long>? SpeedChanged;
 
     public void Cancel()
     {
@@ -43,7 +52,17 @@ public class XboxNetworkReceiver
 
         using var client = new TcpClient();
         await client.ConnectAsync(host, port, token);
+
+        // Tune TCP for LAN throughput
+        client.NoDelay = true;
+        client.ReceiveBufferSize = 1024 * 1024;   // 1 MB socket buffer
+        client.SendBufferSize = 256 * 1024;        // 256 KB for commands
+
         Log($"Connected to {host}:{port}");
+
+        _transferStartTime = DateTime.UtcNow;
+        _lastSpeedTime = _transferStartTime;
+        _lastSpeedBytes = 0;
 
         var stream = client.GetStream();
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
@@ -91,6 +110,7 @@ public class XboxNetworkReceiver
 
             await using var fs = File.Create(destFile);
             var remaining = fileSize;
+            long bytesSinceLastProgress = 0;
             var buffer = ArrayPool<byte>.Shared.Rent(1048576); // 1MB buffer
             try
             {
@@ -104,6 +124,20 @@ public class XboxNetworkReceiver
                     await fs.WriteAsync(buffer.AsMemory(0, read), token);
                     remaining -= read;
                     BytesReceived += read;
+                    bytesSinceLastProgress += read;
+
+                    // Report progress every ~4 MB so large files don't
+                    // cause the progress bar to appear stuck.
+                    if (bytesSinceLastProgress >= 4 * 1024 * 1024)
+                    {
+                        bytesSinceLastProgress = 0;
+                        UpdateSpeed();
+                        BytesReceivedChanged?.Invoke(this, BytesReceived);
+                        var midProgress = streamableBytes > 0
+                            ? (double)BytesReceived / streamableBytes * 100 : 0;
+                        ProgressChanged?.Invoke(this, Math.Min(midProgress, 100));
+                        SpeedChanged?.Invoke(this, SpeedBytesPerSecond);
+                    }
                 }
             }
             finally
@@ -111,13 +145,29 @@ public class XboxNetworkReceiver
                 ArrayPool<byte>.Shared.Return(buffer);
             }
 
+            // Final event for this file (ensures 100% on last file)
+            UpdateSpeed();
             BytesReceivedChanged?.Invoke(this, BytesReceived);
             var progress = streamableBytes > 0 ? (double)BytesReceived / streamableBytes * 100 : 0;
             ProgressChanged?.Invoke(this, Math.Min(progress, 100));
+            SpeedChanged?.Invoke(this, SpeedBytesPerSecond);
         }
 
         await writer.WriteLineAsync("QUIT");
         Log($"Download complete: {BytesReceived} bytes received");
+    }
+
+    private void UpdateSpeed()
+    {
+        var now = DateTime.UtcNow;
+        var elapsed = (now - _lastSpeedTime).TotalSeconds;
+        if (elapsed >= 0.5)
+        {
+            var deltaBytes = BytesReceived - _lastSpeedBytes;
+            SpeedBytesPerSecond = (long)(deltaBytes / elapsed);
+            _lastSpeedBytes = BytesReceived;
+            _lastSpeedTime = now;
+        }
     }
 
     private static async Task<XboxOverlayManifest?> ReadManifestAsync(StreamReader reader, CancellationToken ct)

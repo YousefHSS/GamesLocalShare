@@ -578,6 +578,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         await Task.Run(async () =>
         {
+            // Gather library paths from ALL scanners so incomplete transfers
+            // for Xbox, Epic, etc. are discovered — not just Steam.
             var libraryPaths = _steamScanner.GetLibraryFolders()
                 .Select(f => Path.Combine(f, "common"))
                 .Where(Directory.Exists)
@@ -591,6 +593,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     .Select(f => Path.Combine(f, "common"))
                     .Where(Directory.Exists)
                     .ToList();
+            }
+
+            // Add non-Steam scanner library paths (Xbox, Epic, External).
+            // Their GetLibraryFolders() already returns the parent dirs that
+            // contain game subdirectories directly (no "common" nesting).
+            foreach (var scanner in _scanners)
+            {
+                if (scanner == _steamScanner)
+                    continue;
+
+                foreach (var folder in scanner.GetLibraryFolders())
+                {
+                    if (Directory.Exists(folder) && !libraryPaths.Contains(folder))
+                        libraryPaths.Add(folder);
+                }
             }
 
             var incomplete = _fileTransferService.FindIncompleteTransfers(libraryPaths);
@@ -1121,9 +1138,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var existing = NetworkPeers.FirstOrDefault(p => p.PeerId == peer.PeerId);
             if (existing != null)
             {
-                // Assign new collection to trigger UI update
+                // Update games on the existing peer object
                 existing.Games = new ObservableCollection<GameInfo>(peer.Games);
-                
+
+                // Force a CollectionChanged notification so the InteropBridge
+                // re-serializes networkPeers (including the updated games) to
+                // the WebView.  Without this, availableFromPeers is refreshed
+                // but networkPeers[].games stays stale in JS, causing the
+                // "Could not find peer for game" error.
+                var idx = NetworkPeers.IndexOf(existing);
+                if (idx >= 0)
+                    NetworkPeers[idx] = existing;
+
                 System.Diagnostics.Debug.WriteLine($"OnPeerGamesUpdated: {peer.DisplayName} now has {existing.Games.Count} games");
             }
             else

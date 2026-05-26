@@ -546,7 +546,7 @@ export default function App() {
                   </span>
                   <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
                     {xt.networkReceivedMB > 0
-                      ? `${xt.networkReceivedMB.toFixed(1)} MB received`
+                      ? `${xt.networkReceivedMB.toFixed(1)} MB${xt.networkSpeedMBps > 0 ? ` · ${xt.networkSpeedMBps.toFixed(1)} MB/s` : ''}`
                       : xt.overlayProgress > 0
                         ? `${xt.overlayProgress.toFixed(1)}%`
                         : ''}

@@ -119,6 +119,7 @@ export interface XboxTransferState {
   overlayProgress: number;
   statusMessage: string;
   networkReceivedMB: number;
+  networkSpeedMBps: number;
   packageInstalled: boolean;
   packageStatus: string;
   isNetwork?: boolean;

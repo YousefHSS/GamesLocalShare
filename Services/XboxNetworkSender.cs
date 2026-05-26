@@ -114,6 +114,11 @@ public class XboxNetworkSender : IDisposable
     {
         using (client)
         {
+            // Tune TCP for LAN throughput
+            client.NoDelay = true;
+            client.SendBufferSize = 1024 * 1024;   // 1 MB socket buffer
+            client.ReceiveBufferSize = 256 * 1024;  // 256 KB for commands
+
             try
             {
                 var stream = client.GetStream();

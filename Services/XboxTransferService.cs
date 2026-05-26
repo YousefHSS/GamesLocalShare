@@ -154,12 +154,19 @@ public class XboxTransferService
             receiver.ProgressChanged += (_, pct) =>
             {
                 _state.OverlayProgress = pct;
-                _state.StatusMessage = $"Downloading from peer: {pct:N1}%";
+                var speedText = _state.NetworkSpeedMBps > 0
+                    ? $" @ {_state.NetworkSpeedMBps:N1} MB/s"
+                    : "";
+                _state.StatusMessage = $"Downloading from peer: {pct:N1}%{speedText}";
                 RaiseStateChanged();
             };
             receiver.BytesReceivedChanged += (_, bytes) =>
             {
                 _state.NetworkReceivedMB = bytes / 1024.0 / 1024.0;
+            };
+            receiver.SpeedChanged += (_, bps) =>
+            {
+                _state.NetworkSpeedMBps = bps / 1024.0 / 1024.0;
             };
             receiver.LogMessage += (_, msg) => Log(msg);
 
