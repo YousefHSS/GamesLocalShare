@@ -1215,8 +1215,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         AvailableFromPeers.Clear();
 
-        // Find games that peers have but we don't
-        var localAppIds = LocalGames.Select(g => g.AppId).ToHashSet();
+        // Find games that peers have but we don't.
+        // Exclude Xbox games that are still installing (GUID folder exists but
+        // not fully installed) — the user needs to be able to re-initiate the
+        // overlay transfer for those.
+        var localAppIds = LocalGames
+            .Where(g => g.IsInstalled || g.Platform != GamePlatform.Xbox)
+            .Select(g => g.AppId)
+            .ToHashSet();
 
         foreach (var peer in NetworkPeers)
         {
@@ -2817,7 +2823,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             AddLog($"Xbox network transfer: sender ready on port {peerPort}, starting download...", LogMessageType.Info);
 
             var verdict = await _xboxTransferService.RunNetworkOverlayAsync(
-                peerHost, peerPort, xboxRoot, force);
+                peerHost, peerPort, xboxRoot, force, gameAppId: gameAppId);
             switch (verdict)
             {
                 case XboxTransferVerdict.FullSkip:
@@ -2855,6 +2861,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsXboxTransferActive = false;
         StatusMessage = "Xbox transfer cancelled";
         AddLog("Xbox transfer cancelled by user", LogMessageType.Warning);
+    }
+
+    [RelayCommand]
+    private void PauseXboxTransfer()
+    {
+        _xboxTransferService.PauseDownload();
+        AddLog("Xbox transfer paused by user", LogMessageType.Warning);
+    }
+
+    [RelayCommand]
+    private void ResumeXboxTransfer()
+    {
+        _xboxTransferService.ResumeDownload();
+        AddLog("Xbox transfer resumed", LogMessageType.Info);
     }
 
     [RelayCommand]

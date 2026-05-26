@@ -16,13 +16,18 @@ public class XboxNetworkReceiver
     private DateTime _transferStartTime;
     private long _lastSpeedBytes;
     private DateTime _lastSpeedTime;
+    private volatile bool _isPaused;
+    private readonly SemaphoreSlim _pauseGate = new(1, 1);
 
     public long BytesReceived { get; private set; }
+    public long TotalBytes { get; private set; }
 
     /// <summary>
     /// Current transfer speed in bytes per second.
     /// </summary>
     public long SpeedBytesPerSecond { get; private set; }
+
+    public bool IsPaused => _isPaused;
 
     /// <summary>
     /// The manifest received from the sender. Available after ReceiveAsync completes.
@@ -37,6 +42,29 @@ public class XboxNetworkReceiver
     public void Cancel()
     {
         _cts?.Cancel();
+    }
+
+    public void Pause()
+    {
+        if (!_isPaused)
+        {
+            _isPaused = true;
+            _pauseGate.Wait();  // Acquire — the download loop will block on this
+            Log("Transfer paused");
+        }
+    }
+
+    public void Resume()
+    {
+        if (_isPaused)
+        {
+            _isPaused = false;
+            _pauseGate.Release();
+            // Reset speed counters so we don't show stale speed from before pause
+            _lastSpeedBytes = BytesReceived;
+            _lastSpeedTime = DateTime.UtcNow;
+            Log("Transfer resumed");
+        }
     }
 
     /// <summary>
@@ -65,28 +93,66 @@ public class XboxNetworkReceiver
         _lastSpeedBytes = 0;
 
         var stream = client.GetStream();
-        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
         var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true, NewLine = "\n" };
 
-        // Request manifest
+        // Request manifest (uses its own StreamReader — safe because no binary
+        // data follows the manifest until WE send the first GET command)
         await writer.WriteLineAsync("MANIFEST");
-        var manifest = await ReadManifestAsync(reader, token);
+        var manifest = await ReadManifestAsync(stream, token);
         if (manifest == null)
             throw new InvalidOperationException("Failed to receive manifest from sender");
 
         ReceivedManifest = manifest;
         Directory.CreateDirectory(destinationPath);
 
-        // Use streamable bytes for progress (excludes skipped files)
+        // Total bytes across all manifest entries
         long streamableBytes = manifest.Entries.Sum(e => e.Size);
+        TotalBytes = streamableBytes;
 
-        Log($"Manifest: {manifest.Entries.Count} files to stream ({streamableBytes / 1024 / 1024} MB), " +
-            $"{manifest.SkippedProtectedFiles.Count} skipped exe(s)");
-
-        // Request each file
+        // Check which files already exist from a previous partial download
+        // so we can skip them and only request what's missing.
+        long preExistingBytes = 0;
+        var entriesToDownload = new List<XboxOverlayManifestEntry>();
         foreach (var entry in manifest.Entries)
         {
+            var destFile = Path.Combine(destinationPath, entry.RelativePath);
+            if (File.Exists(destFile) && new FileInfo(destFile).Length == entry.Size)
+            {
+                preExistingBytes += entry.Size;
+            }
+            else
+            {
+                entriesToDownload.Add(entry);
+            }
+        }
+
+        // Count pre-existing bytes as already received for progress tracking
+        BytesReceived = preExistingBytes;
+
+        if (preExistingBytes > 0)
+        {
+            Log($"Manifest: {manifest.Entries.Count} files ({streamableBytes / 1024 / 1024} MB total), " +
+                $"{manifest.Entries.Count - entriesToDownload.Count} already cached ({preExistingBytes / 1024 / 1024} MB), " +
+                $"{entriesToDownload.Count} to download, " +
+                $"{manifest.SkippedProtectedFiles.Count} skipped exe(s)");
+        }
+        else
+        {
+            Log($"Manifest: {manifest.Entries.Count} files to stream ({streamableBytes / 1024 / 1024} MB), " +
+                $"{manifest.SkippedProtectedFiles.Count} skipped exe(s)");
+        }
+
+        // Request each file that still needs downloading
+        foreach (var entry in entriesToDownload)
+        {
             token.ThrowIfCancellationRequested();
+
+            // Honor pause
+            if (_isPaused)
+            {
+                await _pauseGate.WaitAsync(token);
+                _pauseGate.Release();
+            }
 
             var destFile = Path.Combine(destinationPath, entry.RelativePath);
             var destDir = Path.GetDirectoryName(destFile);
@@ -95,7 +161,10 @@ public class XboxNetworkReceiver
 
             await writer.WriteLineAsync($"GET {entry.RelativePath}");
 
-            var header = await reader.ReadLineAsync(token);
+            // Read the header line directly from the raw stream — do NOT use
+            // StreamReader here because its internal buffer would consume
+            // binary file data that follows, causing stream.ReadAsync to deadlock.
+            var header = await ReadLineRawAsync(stream, token);
             if (header == null || !header.StartsWith("FILE ", StringComparison.OrdinalIgnoreCase))
             {
                 Log($"Unexpected response for {entry.RelativePath}: {header}");
@@ -170,19 +239,40 @@ public class XboxNetworkReceiver
         }
     }
 
-    private static async Task<XboxOverlayManifest?> ReadManifestAsync(StreamReader reader, CancellationToken ct)
+    /// <summary>
+    /// Reads a single UTF-8 line from the raw network stream without buffering
+    /// ahead, so subsequent binary reads from the same stream are not affected.
+    /// </summary>
+    private static async Task<string?> ReadLineRawAsync(NetworkStream stream, CancellationToken ct)
     {
-        var header = await reader.ReadLineAsync(ct);
+        var sb = new StringBuilder(128);
+        var buf = new byte[1];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buf.AsMemory(), ct);
+            if (read == 0) return sb.Length > 0 ? sb.ToString() : null;
+            var ch = (char)buf[0];
+            if (ch == '\n') return sb.ToString();
+            if (ch != '\r') sb.Append(ch);
+        }
+    }
+
+    private static async Task<XboxOverlayManifest?> ReadManifestAsync(NetworkStream stream, CancellationToken ct)
+    {
+        var header = await ReadLineRawAsync(stream, ct);
         if (header == null || !header.StartsWith("MANIFEST ", StringComparison.OrdinalIgnoreCase))
             return null;
 
         if (!int.TryParse(header.Substring(9).Trim(), out var jsonLength))
             return null;
 
+        // The sender writes the JSON as line(s) via SendLineAsync.
+        // Read lines until we have enough characters (matches the sender's
+        // json.Length which is a character count, not byte count).
         var jsonBuilder = new StringBuilder(jsonLength);
         while (jsonBuilder.Length < jsonLength)
         {
-            var line = await reader.ReadLineAsync(ct);
+            var line = await ReadLineRawAsync(stream, ct);
             if (line == null) break;
             jsonBuilder.AppendLine(line);
         }

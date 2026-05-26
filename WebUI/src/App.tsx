@@ -524,11 +524,29 @@ export default function App() {
         const failed = xt.currentStep === 'Failed';
         const done = xt.currentStep === 'Complete';
         const finished = failed || done;
+        const downloading = xt.currentStep === 'DownloadingFromPeer';
+        const paused = xt.isPaused;
         const barColor = failed
           ? 'from-red-900/60 to-red-800/60 border-red-700/50'
           : done
             ? 'from-emerald-900/60 to-green-800/60 border-green-700/50'
-            : 'from-green-900/60 to-emerald-900/60 border-green-700/50';
+            : paused
+              ? 'from-amber-900/60 to-yellow-900/60 border-amber-700/50'
+              : 'from-green-900/60 to-emerald-900/60 border-green-700/50';
+
+        // Build info line like the normal transfer bar
+        const infoParts: string[] = [];
+        if (xt.networkReceivedMB > 0) {
+          const totalMB = xt.sourceBytes > 0 ? (xt.sourceBytes / 1024 / 1024) : 0;
+          infoParts.push(totalMB > 0
+            ? `${xt.networkReceivedMB.toFixed(1)} / ${totalMB.toFixed(0)} MB`
+            : `${xt.networkReceivedMB.toFixed(1)} MB`);
+        }
+        if (xt.networkSpeedMBps > 0 && !paused) infoParts.push(`${xt.networkSpeedMBps.toFixed(1)} MB/s`);
+        if (paused) infoParts.push('PAUSED');
+        if (xt.networkEta && !paused) infoParts.push(`ETA ${xt.networkEta}`);
+        if (!downloading && xt.overlayProgress > 0 && infoParts.length === 0) infoParts.push(`${xt.overlayProgress.toFixed(1)}%`);
+
         return (
           <div className={`bg-gradient-to-r ${barColor} border-t px-3 sm:px-6 py-2.5 animate-slide-up`}>
             <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
@@ -536,7 +554,9 @@ export default function App() {
                 ? <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
                 : done
                   ? <Download className="w-5 h-5 text-green-400 flex-shrink-0" />
-                  : <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
+                  : paused
+                    ? <Pause className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                    : <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
               }
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
@@ -545,17 +565,13 @@ export default function App() {
                     <span className="ml-2 text-[10px] text-green-400 font-mono">XBOX</span>
                   </span>
                   <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
-                    {xt.networkReceivedMB > 0
-                      ? `${xt.networkReceivedMB.toFixed(1)} MB${xt.networkSpeedMBps > 0 ? ` · ${xt.networkSpeedMBps.toFixed(1)} MB/s` : ''}`
-                      : xt.overlayProgress > 0
-                        ? `${xt.overlayProgress.toFixed(1)}%`
-                        : ''}
+                    {infoParts.join(' \u00b7 ')}
                   </span>
                 </div>
                 {!finished && (
                   <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
                     <div
-                      className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all"
+                      className={`h-full transition-all ${paused ? 'bg-gradient-to-r from-amber-500 to-yellow-500' : 'bg-gradient-to-r from-green-500 to-emerald-500'}`}
                       style={{ width: `${Math.min(xt.overlayProgress, 100)}%` }}
                     />
                   </div>
@@ -573,12 +589,31 @@ export default function App() {
                     <X className="w-3 h-3" /> Dismiss
                   </button>
                 ) : (
-                  <button
-                    onClick={() => { if (confirm('Cancel Xbox transfer?')) sendCommand('CancelXboxTransfer'); }}
-                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center gap-1"
-                  >
-                    <Square className="w-3 h-3" /> Cancel
-                  </button>
+                  <>
+                    {downloading && (
+                      paused ? (
+                        <button
+                          onClick={() => sendCommand('ResumeXboxTransfer')}
+                          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium flex items-center gap-1"
+                        >
+                          <Play className="w-3 h-3" /> Resume
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => sendCommand('PauseXboxTransfer')}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium flex items-center gap-1"
+                        >
+                          <Pause className="w-3 h-3" /> Pause
+                        </button>
+                      )
+                    )}
+                    <button
+                      onClick={() => { if (confirm('Stop the Xbox transfer?')) sendCommand('CancelXboxTransfer'); }}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium flex items-center gap-1"
+                    >
+                      <Square className="w-3 h-3" /> Stop
+                    </button>
+                  </>
                 )}
               </div>
             </div>

@@ -21,6 +21,8 @@ public class XboxTransferState
     // Monitoring results
     public double NetworkReceivedMB { get; set; }
     public double NetworkSpeedMBps { get; set; }
+    public string NetworkEta { get; set; } = string.Empty;
+    public bool IsPaused { get; set; }
     public bool PackageInstalled { get; set; }
     public string PackageStatus { get; set; } = string.Empty;
 

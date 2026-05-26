@@ -696,6 +696,16 @@ public class InteropBridge : IDisposable
                         _viewModel.CancelXboxTransferCommand.Execute(null);
                     break;
 
+                case "PauseXboxTransfer":
+                    if (_viewModel.PauseXboxTransferCommand.CanExecute(null))
+                        _viewModel.PauseXboxTransferCommand.Execute(null);
+                    break;
+
+                case "ResumeXboxTransfer":
+                    if (_viewModel.ResumeXboxTransferCommand.CanExecute(null))
+                        _viewModel.ResumeXboxTransferCommand.Execute(null);
+                    break;
+
                 case "DismissXboxTransfer":
                     if (_viewModel.DismissXboxTransferCommand.CanExecute(null))
                         _viewModel.DismissXboxTransferCommand.Execute(null);

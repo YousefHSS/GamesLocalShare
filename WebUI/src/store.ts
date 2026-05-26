@@ -120,6 +120,8 @@ export interface XboxTransferState {
   statusMessage: string;
   networkReceivedMB: number;
   networkSpeedMBps: number;
+  networkEta: string;
+  isPaused: boolean;
   packageInstalled: boolean;
   packageStatus: string;
   isNetwork?: boolean;

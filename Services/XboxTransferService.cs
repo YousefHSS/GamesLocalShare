@@ -26,6 +26,7 @@ public class XboxTransferService
 
     private CancellationTokenSource? _cts;
     private string? _overlayDestPath;
+    private XboxNetworkReceiver? _activeReceiver;
 
     /// <summary>
     /// When true, the overlay script runs in a visible PowerShell window
@@ -127,7 +128,8 @@ public class XboxTransferService
     /// </summary>
     public async Task<XboxTransferVerdict> RunNetworkOverlayAsync(
         string peerHost, int peerPort, string? xboxRoot = null,
-        bool force = false, CancellationToken ct = default)
+        bool force = false, CancellationToken ct = default,
+        string? gameAppId = null)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // Network downloads can be slow on WiFi; 60-minute timeout.
@@ -144,13 +146,17 @@ public class XboxTransferService
             _state.StatusMessage = $"Connecting to {peerHost}:{peerPort}...";
             RaiseStateChanged();
 
+            // Use a stable folder keyed by game AppId so partial downloads
+            // survive across retries and the receiver can skip existing files.
+            var folderKey = gameAppId ?? DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
             tempFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "GamesLocalShare", "xbox-network-download",
-                DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+                folderKey);
             Directory.CreateDirectory(tempFolder);
 
             var receiver = new XboxNetworkReceiver();
+            _activeReceiver = receiver;
             receiver.ProgressChanged += (_, pct) =>
             {
                 _state.OverlayProgress = pct;
@@ -167,12 +173,40 @@ public class XboxTransferService
             receiver.SpeedChanged += (_, bps) =>
             {
                 _state.NetworkSpeedMBps = bps / 1024.0 / 1024.0;
+                // Compute ETA from speed and remaining bytes
+                if (bps > 0 && receiver.TotalBytes > 0)
+                {
+                    var remainingBytes = receiver.TotalBytes - receiver.BytesReceived;
+                    var etaSeconds = (double)remainingBytes / bps;
+                    if (etaSeconds < 3600)
+                        _state.NetworkEta = TimeSpan.FromSeconds(etaSeconds).ToString(@"mm\:ss");
+                    else
+                        _state.NetworkEta = TimeSpan.FromSeconds(etaSeconds).ToString(@"h\:mm\:ss");
+                }
+                else
+                {
+                    _state.NetworkEta = "";
+                }
             };
             receiver.LogMessage += (_, msg) => Log(msg);
 
             await receiver.ReceiveAsync(peerHost, peerPort, tempFolder, token);
+            _activeReceiver = null;
 
             Log($"Network download complete: {receiver.BytesReceived} bytes to {tempFolder}");
+
+            // Sanity check: if we received far less than expected, the download
+            // was truncated (e.g. connection lost, protocol error). Don't proceed
+            // to the overlay script with incomplete data.
+            if (receiver.TotalBytes > 0 && receiver.BytesReceived < receiver.TotalBytes * 0.95)
+            {
+                var pct = receiver.TotalBytes > 0
+                    ? (double)receiver.BytesReceived / receiver.TotalBytes * 100 : 0;
+                return Fail(
+                    $"Network download incomplete: received {receiver.BytesReceived / 1024.0 / 1024.0:N1} MB " +
+                    $"of {receiver.TotalBytes / 1024.0 / 1024.0:N1} MB ({pct:N1}%). " +
+                    "Check your network connection and try again.");
+            }
 
             // Generate transfer-summary.json from the received manifest so
             // ValidateSource and the overlay PS1 script find the metadata they expect.
@@ -190,7 +224,8 @@ public class XboxTransferService
                     ["IntegrityOk"] = true,
                     ["SkippedFiles"] = 0,
                     ["ReceiverProvidedFiles"] = manifest.SkippedProtectedFiles
-                        .Select(s => s.RelativePath).ToArray(),
+                        .Select(s => new { Path = s.RelativePath, Size = s.ExpectedSize })
+                        .ToArray(),
                 };
                 var summaryJson = JsonSerializer.Serialize(summary,
                     new JsonSerializerOptions { WriteIndented = true });
@@ -207,8 +242,13 @@ public class XboxTransferService
             if (validationError != null)
                 return Fail($"Downloaded files invalid: {validationError}");
 
-            // Phase 3: Run the same overlay script as drive-based transfer
-            return await RunOverlayScriptAsync(xboxRoot, force, token);
+            // Phase 3: Run the overlay script. For network transfers, always
+            // force the overlay past the receiver-provided-exe check. The sender
+            // may have been unable to rescue protected EXEs, and the receiver's
+            // Xbox download is typically paused very early (before those EXEs
+            // arrive). Forcing lets the overlay proceed; Gaming Services will
+            // re-download just the missing EXEs during Resume (small delta).
+            return await RunOverlayScriptAsync(xboxRoot, force: true, token);
         }
         catch (OperationCanceledException)
         {
@@ -623,6 +663,21 @@ public class XboxTransferService
     };
 
     public void Cancel() => _cts?.Cancel();
+
+    public void PauseDownload()
+    {
+        _activeReceiver?.Pause();
+        _state.IsPaused = true;
+        _state.StatusMessage = "Download paused";
+        RaiseStateChanged();
+    }
+
+    public void ResumeDownload()
+    {
+        _activeReceiver?.Resume();
+        _state.IsPaused = false;
+        RaiseStateChanged();
+    }
 
     public void Reset()
     {
