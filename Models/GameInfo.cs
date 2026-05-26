@@ -76,6 +76,12 @@ public class GameInfo : INotifyPropertyChanged
     public bool IsOverlaySupported { get; set; } = false;
 
     /// <summary>
+    /// Package Family Name for Xbox games, extracted from the folder's ACL.
+    /// Used for protected-exe rescue during network transfers.
+    /// </summary>
+    public string? PackageFamilyName { get; set; }
+
+    /// <summary>
     /// Whether this game is hidden from peers (not shared on network)
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]

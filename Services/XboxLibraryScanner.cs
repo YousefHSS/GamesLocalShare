@@ -233,6 +233,7 @@ public class XboxLibraryScanner : IGameLibraryScanner
             Platform = GamePlatform.Xbox,
             IsInstalled = !isGuidFolder,
             IsOverlaySupported = isOverlaySupported,
+            PackageFamilyName = pfn,
         };
 
         return game;

@@ -41,7 +41,11 @@ public class XboxSenderService
     /// Validates that the source is a valid Xbox MSIXVC install.
     /// Returns null on success, error message on failure.
     /// </summary>
-    public string? ValidateSource(string sourcePath)
+    /// <param name="pfnHint">
+    /// Optional PFN from GameInfo (extracted during library scan). Used as
+    /// primary source; ACL and PowerShell fallbacks are tried if empty.
+    /// </param>
+    public string? ValidateSource(string sourcePath, string? pfnHint = null)
     {
         if (!Directory.Exists(sourcePath))
             return $"Source directory not found: {sourcePath}";
@@ -64,7 +68,17 @@ public class XboxSenderService
         if (xviFiles.Length > 0)
             _state.ContentGuid = Path.GetFileNameWithoutExtension(xviFiles[0]);
 
-        _state.PackageFamilyName = ExtractPfnFromAcl(sourcePath) ?? "";
+        // PFN resolution chain: caller hint → ACL extraction → PowerShell fallback
+        _state.PackageFamilyName =
+            (!string.IsNullOrEmpty(pfnHint) ? pfnHint : null)
+            ?? ExtractPfnFromAcl(sourcePath)
+            ?? ExtractPfnViaAppxPackage(sourcePath)
+            ?? "";
+
+        if (!string.IsNullOrEmpty(_state.PackageFamilyName))
+            Log($"PFN resolved: {_state.PackageFamilyName}");
+        else
+            Log("WARNING: Could not resolve PackageFamilyName — protected exe rescue will be skipped");
 
         // Best-effort size estimate. Protected installs may deny enumeration;
         // the script does the authoritative scan as SYSTEM.
@@ -867,6 +881,48 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
             return sddl.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Fallback PFN discovery via PowerShell Get-AppxPackage. Finds the
+    /// installed AppX package whose InstallLocation matches the game folder.
+    /// Slower than ACL extraction (~1-2s) but works even if ACLs were reset.
+    /// </summary>
+    private string? ExtractPfnViaAppxPackage(string dir)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            };
+            // Search all packages for one whose InstallLocation is under the
+            // same XboxGames root as our game folder.
+            var gameName = Path.GetFileName(dir);
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(
+                "Get-AppxPackage -AllUsers -PackageTypeFilter Main 2>$null | " +
+                $"Where-Object {{ $_.Name -like '*{gameName.Replace("'", "''")}*' }} | " +
+                "Select-Object -First 1 -ExpandProperty PackageFamilyName");
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return null;
+
+            var output = proc.StandardOutput.ReadToEnd().Trim();
+            proc.WaitForExit(10_000);
+
+            if (!string.IsNullOrEmpty(output) && output.Contains('_'))
+            {
+                Log($"PFN resolved via Get-AppxPackage: {output}");
+                return output;
+            }
+        }
+        catch { }
+        return null;
     }
 
     /// <summary>

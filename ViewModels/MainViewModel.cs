@@ -2926,7 +2926,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // Validate and prepare
             _xboxSenderService.Reset();
-            var error = _xboxSenderService.ValidateSource(game.InstallPath);
+            var error = _xboxSenderService.ValidateSource(game.InstallPath, game.PackageFamilyName);
             if (error != null)
                 return (false, error);
 
