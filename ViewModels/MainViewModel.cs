@@ -169,6 +169,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _xboxTransferService = new XboxTransferService();
         _xboxSenderService = new XboxSenderService();
         _xboxNetworkSender = new XboxNetworkSender();
+        _xboxNetworkSender.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
+        _xboxNetworkSender.LogsReceived += (_, info) =>
+            AddLog($"[Xbox] Receiver logs saved to {info}", LogMessageType.Info);
 
         // Initialize drive detection
         _driveDetectionService = new DriveDetectionService();

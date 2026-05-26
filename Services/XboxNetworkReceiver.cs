@@ -1,4 +1,7 @@
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.IO;
+using System.IO.Compression;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -18,6 +21,10 @@ public class XboxNetworkReceiver
     private DateTime _lastSpeedTime;
     private volatile bool _isPaused;
     private readonly SemaphoreSlim _pauseGate = new(1, 1);
+
+    // Bounded tail of recent log lines, captured for log-push diagnostics.
+    private const int LogTailCapacity = 500;
+    private readonly ConcurrentQueue<string> _recentLogs = new();
 
     public long BytesReceived { get; private set; }
     public long TotalBytes { get; private set; }
@@ -286,6 +293,157 @@ public class XboxNetworkReceiver
 
     private void Log(string message)
     {
-        LogMessage?.Invoke(this, $"[XboxNetworkReceiver] {message}");
+        var line = $"[XboxNetworkReceiver] {message}";
+        // Keep a bounded tail for log-push diagnostics.
+        _recentLogs.Enqueue($"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ} {line}");
+        while (_recentLogs.Count > LogTailCapacity && _recentLogs.TryDequeue(out _)) { }
+        LogMessage?.Invoke(this, line);
+    }
+
+    /// <summary>
+    /// Bundles the recent receiver-side diagnostic artifacts into a ZIP and
+    /// pushes it back to the sender over a fresh TCP connection using the
+    /// new PUSH_LOGS command. Fire-and-forget: any error is logged locally
+    /// and swallowed — log push must never disturb the calling flow.
+    /// </summary>
+    public async Task PushLogsAsync(
+        string host,
+        int port,
+        string attemptStatus,
+        string? extraTempFolder,
+        Exception? lastError = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            using var pushTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            pushTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var token = pushTimeout.Token;
+
+            byte[] zipBytes;
+            using (var ms = new MemoryStream())
+            {
+                using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+                {
+                    // 1. transfer-summary.json from the receiver's temp folder
+                    if (!string.IsNullOrEmpty(extraTempFolder))
+                    {
+                        var summary = Path.Combine(extraTempFolder, "transfer-summary.json");
+                        TryAddFile(zip, summary, "transfer-summary.json");
+                    }
+
+                    // 2. Recent receiver-* files from the runs directory
+                    var runsDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "GamesLocalShare", "xbox-transfer", "runs");
+                    if (Directory.Exists(runsDir))
+                    {
+                        var cutoff = DateTime.UtcNow - TimeSpan.FromMinutes(30);
+                        foreach (var f in Directory.EnumerateFiles(runsDir, "receiver-*", SearchOption.TopDirectoryOnly))
+                        {
+                            try
+                            {
+                                var fi = new FileInfo(f);
+                                if (fi.LastWriteTimeUtc < cutoff) continue;
+                                TryAddFile(zip, fi.FullName, "runs/" + fi.Name);
+                            }
+                            catch { }
+                        }
+                    }
+
+                    // 3. In-memory tail of receiver log messages
+                    var tail = string.Join("\n", _recentLogs.ToArray());
+                    AddTextEntry(zip, "client-log.txt", tail);
+
+                    // 4. Meta
+                    var meta = new
+                    {
+                        ReceiverHost = Environment.MachineName,
+                        ReceiverUser = Environment.UserName,
+                        UtcTime = DateTime.UtcNow.ToString("o"),
+                        PeerHost = host,
+                        PeerPort = port,
+                        AttemptStatus = attemptStatus,
+                        BytesReceived,
+                        TotalBytes,
+                        LastError = lastError?.ToString() ?? "",
+                    };
+                    AddTextEntry(zip, "meta.json",
+                        JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+                }
+                zipBytes = ms.ToArray();
+            }
+
+            using var client = new TcpClient();
+            await client.ConnectAsync(host, port, token);
+            client.NoDelay = true;
+
+            var stream = client.GetStream();
+            var receiverHost = SanitizeToken(Environment.MachineName);
+            var status = SanitizeToken(attemptStatus);
+            var header = $"PUSH_LOGS {zipBytes.Length} {receiverHost} {status}\n";
+            var headerBytes = Encoding.UTF8.GetBytes(header);
+            await stream.WriteAsync(headerBytes, token);
+            await stream.FlushAsync(token);
+
+            // Wait for READY before sending the binary body, so the sender's
+            // StreamReader has no chance to buffer ahead into our bytes.
+            var ready = await ReadLineRawAsync(stream, token);
+            if (ready == null || !ready.Trim().Equals("READY", StringComparison.OrdinalIgnoreCase))
+            {
+                Log($"PushLogs: did not get READY (got '{ready}')");
+                return;
+            }
+
+            await stream.WriteAsync(zipBytes, token);
+            await stream.FlushAsync(token);
+            Log($"Pushed {zipBytes.Length} bytes of logs to {host}:{port} (status={status})");
+        }
+        catch (Exception ex)
+        {
+            // Never propagate — log push is best-effort.
+            Log($"PushLogsAsync failed: {ex.Message}");
+        }
+    }
+
+    private static void TryAddFile(ZipArchive zip, string path, string entryName)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            // Read with shared read so we can grab files the script may still hold open.
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
+            using var es = entry.Open();
+            fs.CopyTo(es);
+        }
+        catch { /* best-effort */ }
+    }
+
+    private static void AddTextEntry(ZipArchive zip, string entryName, string content)
+    {
+        try
+        {
+            var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
+            using var es = entry.Open();
+            using var sw = new StreamWriter(es, Encoding.UTF8);
+            sw.Write(content);
+        }
+        catch { }
+    }
+
+    private static string SanitizeToken(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "unknown";
+        var sb = new StringBuilder(Math.Min(s.Length, 64));
+        foreach (var c in s.Take(64))
+        {
+            if (char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-')
+                sb.Append(c);
+            else
+                sb.Append('_');
+        }
+        return sb.Length == 0 ? "unknown" : sb.ToString();
     }
 }

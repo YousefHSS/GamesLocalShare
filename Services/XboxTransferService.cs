@@ -137,6 +137,8 @@ public class XboxTransferService
         var token = _cts.Token;
 
         string? tempFolder = null;
+        XboxNetworkReceiver? receiverForLogs = null;
+        Exception? lastError = null;
         try
         {
             // Phase 1: Download from peer
@@ -156,6 +158,7 @@ public class XboxTransferService
             Directory.CreateDirectory(tempFolder);
 
             var receiver = new XboxNetworkReceiver();
+            receiverForLogs = receiver;
             _activeReceiver = receiver;
             receiver.ProgressChanged += (_, pct) =>
             {
@@ -250,8 +253,9 @@ public class XboxTransferService
             // re-download just the missing EXEs during Resume (small delta).
             return await RunOverlayScriptAsync(xboxRoot, force: true, token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            lastError = ex;
             return Fail(ct.IsCancellationRequested
                 ? "Transfer cancelled."
                 : "Network transfer timed out. Check that the sender is still " +
@@ -259,15 +263,34 @@ public class XboxTransferService
         }
         catch (IOException ex)
         {
+            lastError = ex;
             return Fail($"Connection error: {ex.Message}. Make sure the sender is " +
                         "still running and the firewall allows port {peerPort}.");
         }
         catch (Exception ex)
         {
+            lastError = ex;
             return Fail($"Network transfer error: {ex.Message}");
         }
         finally
         {
+            // Push receiver-side logs back to the sender (best-effort,
+            // fire-and-forget) so the developer running the sender app can
+            // diagnose without remoting into the receiver.
+            if (receiverForLogs != null)
+            {
+                var status = _state.Verdict switch
+                {
+                    XboxTransferVerdict.FullSkip => "FullSkip",
+                    XboxTransferVerdict.DeltaOnly => "DeltaOnly",
+                    XboxTransferVerdict.Error => "Failed",
+                    _ => _state.CurrentStep.ToString(),
+                };
+                // Fire and forget — never let log push delay or break the flow.
+                _ = receiverForLogs.PushLogsAsync(
+                    peerHost, peerPort, status, tempFolder, lastError, CancellationToken.None);
+            }
+
             // Clean up temp folder on success
             if (tempFolder != null &&
                 _state.Verdict is XboxTransferVerdict.FullSkip or XboxTransferVerdict.DeltaOnly)

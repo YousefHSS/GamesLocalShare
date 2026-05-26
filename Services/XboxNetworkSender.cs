@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -32,6 +34,12 @@ public class XboxNetworkSender : IDisposable
 
     public event EventHandler<string>? LogMessage;
     public event EventHandler<long>? BytesStreamedChanged;
+
+    /// <summary>
+    /// Raised when a receiver peer has pushed a log bundle. Payload is the
+    /// absolute path to the extracted folder, suffixed with " (attempt: STATUS)".
+    /// </summary>
+    public event EventHandler<string>? LogsReceived;
 
     public void SetManifest(XboxOverlayManifest manifest)
     {
@@ -138,6 +146,15 @@ public class XboxNetworkSender : IDisposable
                         var relPath = line.Substring(4).Trim();
                         await SendFileAsync(stream, relPath, ct);
                     }
+                    else if (line.StartsWith("PUSH_LOGS ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // After PUSH_LOGS the stream contains raw bytes — we
+                        // cannot use the StreamReader (which has already
+                        // buffered ahead) for further reads on this connection.
+                        // Process and then break out so the connection closes.
+                        await ReceivePushedLogsAsync(stream, reader, line, ct);
+                        break;
+                    }
                     else if (line.Trim().Equals("QUIT", StringComparison.OrdinalIgnoreCase))
                     {
                         break;
@@ -234,6 +251,117 @@ public class XboxNetworkSender : IDisposable
         var bytes = Encoding.UTF8.GetBytes(line + "\n");
         await stream.WriteAsync(bytes.AsMemory(), ct);
         await stream.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// Handles a PUSH_LOGS command. Protocol:
+    ///   client: PUSH_LOGS &lt;len&gt; &lt;host&gt; &lt;status&gt;\n
+    ///   server: READY\n
+    ///   client: &lt;len&gt; bytes of ZIP
+    /// The ACK ensures the StreamReader on this side has not buffered the
+    /// binary payload — the client only sends bytes after seeing READY.
+    /// </summary>
+    private async Task ReceivePushedLogsAsync(
+        NetworkStream stream, StreamReader reader, string headerLine, CancellationToken ct)
+    {
+        try
+        {
+            // PUSH_LOGS <len> <host> <status>
+            var parts = headerLine.Split(' ', 4, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 4 || !int.TryParse(parts[1], out var len) || len <= 0 || len > 256 * 1024 * 1024)
+            {
+                Log($"PUSH_LOGS: malformed header: {headerLine}");
+                return;
+            }
+            var receiverHost = SanitizeToken(parts[2]);
+            var status = SanitizeToken(parts[3]);
+
+            // ACK so the client can start streaming the binary body.
+            await SendLineAsync(stream, "READY", ct);
+
+            // From here on, the StreamReader has no buffered data ahead (the
+            // client waited for READY before sending more). Read raw bytes
+            // off the underlying NetworkStream directly.
+            var buf = ArrayPool<byte>.Shared.Rent(1024 * 1024);
+            byte[] payload;
+            try
+            {
+                payload = new byte[len];
+                var read = 0;
+                while (read < len)
+                {
+                    var toRead = Math.Min(buf.Length, len - read);
+                    var n = await stream.ReadAsync(buf.AsMemory(0, toRead), ct);
+                    if (n == 0)
+                    {
+                        Log($"PUSH_LOGS: connection closed at {read}/{len} bytes");
+                        return;
+                    }
+                    Buffer.BlockCopy(buf, 0, payload, read, n);
+                    read += n;
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buf);
+            }
+
+            // Write zip + extract under receiver-logs root.
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GamesLocalShare", "xbox-transfer", "receiver-logs");
+            Directory.CreateDirectory(root);
+
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var folder = Path.Combine(root, $"{stamp}-{receiverHost}");
+            Directory.CreateDirectory(folder);
+
+            var zipPath = Path.Combine(folder, "receiver-logs.zip");
+            await File.WriteAllBytesAsync(zipPath, payload, ct);
+
+            try
+            {
+                using var ms = new MemoryStream(payload, writable: false);
+                using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
+                foreach (var entry in zip.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name)) continue; // skip directories
+                    var safeName = entry.FullName.Replace('\\', '/');
+                    var dest = Path.GetFullPath(Path.Combine(folder, safeName));
+                    if (!dest.StartsWith(Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase))
+                        continue; // zip-slip guard
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    using var entryStream = entry.Open();
+                    using var outFs = File.Create(dest);
+                    await entryStream.CopyToAsync(outFs, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"PUSH_LOGS: zip extract failed: {ex.Message} (raw zip kept at {zipPath})");
+            }
+
+            Log($"PUSH_LOGS: stored {payload.Length} bytes under {folder}");
+            LogsReceived?.Invoke(this, $"{folder} (attempt: {status})");
+        }
+        catch (Exception ex)
+        {
+            Log($"PUSH_LOGS error: {ex.Message}");
+        }
+    }
+
+    private static string SanitizeToken(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "unknown";
+        var sb = new StringBuilder(Math.Min(s.Length, 64));
+        foreach (var c in s.Take(64))
+        {
+            if (char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-')
+                sb.Append(c);
+            else
+                sb.Append('_');
+        }
+        return sb.Length == 0 ? "unknown" : sb.ToString();
     }
 
     private void Log(string message)
