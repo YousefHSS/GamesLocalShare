@@ -2937,6 +2937,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             var (manifest, pathOverrides) = await _xboxSenderService.PrepareForDirectNetworkAsync();
 
+            // Honor the sender's fail-loud verdict — don't serve an empty
+            // manifest to a peer waiting for files.
+            if (_xboxSenderService.State.CurrentStep != XboxTransferStep.Complete)
+            {
+                var err = _xboxSenderService.State.ErrorMessage ?? "Preparation failed";
+                AddLog($"Xbox streaming aborted: {err}", LogMessageType.Error);
+                return (false, err);
+            }
+
             _xboxNetworkSender.SetManifest(manifest);
             if (pathOverrides.Count > 0)
                 _xboxNetworkSender.SetPathOverrides(pathOverrides);

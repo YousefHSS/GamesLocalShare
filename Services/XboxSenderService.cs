@@ -944,7 +944,7 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
         root.TryGetProperty(name, out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt32() : 0;
 
     [SupportedOSPlatform("windows")]
-    private static string? ExtractPfnFromAcl(string dir)
+    private string? ExtractPfnFromAcl(string dir)
     {
         try
         {
@@ -953,22 +953,47 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
 
             const string marker = "SYSAPPID";
             var idx = sddl.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) return null;
+            if (idx < 0)
+            {
+                Log($"PFN/ACL: no SYSAPPID marker in SDDL of {dir}");
+                Log($"PFN/ACL: SDDL excerpt: {Truncate(sddl, 400)}");
+                return null;
+            }
 
             var quoteStart = sddl.IndexOf('"', idx);
-            if (quoteStart < 0) return null;
+            if (quoteStart < 0)
+            {
+                Log($"PFN/ACL: SYSAPPID found but no opening quote (SDDL: {Truncate(sddl.Substring(idx), 200)})");
+                return null;
+            }
             var quoteEnd = sddl.IndexOf('"', quoteStart + 1);
-            if (quoteEnd < 0) return null;
+            if (quoteEnd < 0)
+            {
+                Log($"PFN/ACL: SYSAPPID found but no closing quote (SDDL: {Truncate(sddl.Substring(idx), 200)})");
+                return null;
+            }
 
-            return sddl.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
+            var pfn = sddl.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
+            Log($"PFN/ACL: extracted '{pfn}' from {dir}");
+            return pfn;
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            Log($"PFN/ACL: exception reading ACL of {dir}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string Truncate(string s, int max)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return s.Length <= max ? s : s.Substring(0, max) + "...";
     }
 
     /// <summary>
-    /// Fallback PFN discovery via PowerShell Get-AppxPackage. Finds the
-    /// installed AppX package whose InstallLocation matches the game folder.
-    /// Slower than ACL extraction (~1-2s) but works even if ACLs were reset.
+    /// Fallback PFN discovery via PowerShell Get-AppxPackage. Searches by
+    /// InstallLocation — folder names like "Rematch" don't match package
+    /// names like "SLOCLAP.ProjectRuntime", so name-based matching fails.
     /// </summary>
     private string? ExtractPfnViaAppxPackage(string dir)
     {
@@ -979,31 +1004,57 @@ if ($result.Ok) {{ exit 0 }} else {{ exit 1 }}
                 FileName = "powershell.exe",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 CreateNoWindow = true,
             };
-            // Search all packages for one whose InstallLocation is under the
-            // same XboxGames root as our game folder.
-            var gameName = Path.GetFileName(dir);
+            // Escape backslashes for PowerShell single-quoted string.
+            var escapedDir = dir.Replace("'", "''");
             psi.ArgumentList.Add("-NoProfile");
             psi.ArgumentList.Add("-Command");
             psi.ArgumentList.Add(
-                "Get-AppxPackage -AllUsers -PackageTypeFilter Main 2>$null | " +
-                $"Where-Object {{ $_.Name -like '*{gameName.Replace("'", "''")}*' }} | " +
-                "Select-Object -First 1 -ExpandProperty PackageFamilyName");
+                // 1. Match by InstallLocation = $dir exactly
+                // 2. Else InstallLocation starts with $dir (rare nested case)
+                // 3. Else fall back to folder-name substring match on Name
+                $"$d = '{escapedDir}';" +
+                "$pkgs = Get-AppxPackage -AllUsers -PackageTypeFilter Main 2>$null;" +
+                "$m = $pkgs | Where-Object { $_.InstallLocation -eq $d } | Select-Object -First 1;" +
+                "if (-not $m) { $m = $pkgs | Where-Object { $_.InstallLocation -and $d.StartsWith($_.InstallLocation, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1 };" +
+                "if (-not $m) { $leaf = Split-Path -Leaf $d; $m = $pkgs | Where-Object { $_.Name -like \"*$leaf*\" } | Select-Object -First 1 };" +
+                "if ($m) { Write-Output \"PFN=$($m.PackageFamilyName)\"; Write-Output \"NAME=$($m.Name)\"; Write-Output \"LOC=$($m.InstallLocation)\" }" +
+                "else { Write-Output 'PFN=' ; $pkgs | Select-Object -First 5 | ForEach-Object { Write-Output \"  PKG: $($_.Name) | $($_.InstallLocation)\" } }");
 
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null) return null;
 
-            var output = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit(10_000);
+            var stdout = proc.StandardOutput.ReadToEnd();
+            var stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit(15_000);
 
-            if (!string.IsNullOrEmpty(output) && output.Contains('_'))
+            Log($"PFN/AppX: stdout:");
+            foreach (var line in stdout.Split('\n').Take(20))
+                Log($"PFN/AppX:   {line.TrimEnd('\r')}");
+            if (!string.IsNullOrWhiteSpace(stderr))
+                Log($"PFN/AppX: stderr: {Truncate(stderr, 300)}");
+
+            foreach (var raw in stdout.Split('\n'))
             {
-                Log($"PFN resolved via Get-AppxPackage: {output}");
-                return output;
+                var line = raw.TrimEnd('\r').Trim();
+                if (line.StartsWith("PFN=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var pfn = line.Substring(4).Trim();
+                    if (!string.IsNullOrEmpty(pfn) && pfn.Contains('_'))
+                    {
+                        Log($"PFN/AppX: resolved {pfn}");
+                        return pfn;
+                    }
+                }
             }
+            Log($"PFN/AppX: no package matched InstallLocation '{dir}' or leaf-name");
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Log($"PFN/AppX: exception {ex.Message}");
+        }
         return null;
     }
 
