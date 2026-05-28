@@ -64,6 +64,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
   const [isNetworkMode, setIsNetworkMode] = useState(!!initialPeer);
   const [selectedNetworkPeer, setSelectedNetworkPeer] = useState<NetworkPeer | null>(initialPeer ?? null);
   const [selectedNetworkGame, setSelectedNetworkGame] = useState<GameInfo | null>(initialGame ?? null);
+  const [acknowledgedPause, setAcknowledgedPause] = useState(false);
 
   const game = mode === 'sender' ? selectedLocalGame : null;
   const isXboxOverlayGame = game?.platform === 'Xbox' && game?.isOverlaySupported;
@@ -111,12 +112,14 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
       return;
     }
     setError(null);
-    setLaunched(true);
     sendCommand('StartXboxStage', { sourcePath: game.installPath });
     // StartXboxStage validates and prepares; CompleteXboxStage does the copy.
     setTimeout(() => {
       sendCommand('CompleteXboxStage', { destinationPath: xboxDestinationPath });
     }, 500);
+    // Close the wizard — progress is shown by the global Xbox transfer bar,
+    // matching how regular drive transfers behave.
+    onClose();
   };
 
   const handleStartSenderNetwork = () => {
@@ -140,12 +143,14 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
       return;
     }
     setError(null);
-    setLaunched(true);
     sendCommand('StartXboxTransfer', {
       sourcePath: xboxSourcePath,
       xboxRoot: xboxRootPath.trim() || undefined,
       force,
     });
+    // Close the wizard — progress is shown by the global Xbox transfer bar,
+    // matching how regular drive transfers behave.
+    onClose();
   };
 
   const handleStartNetworkReceiver = () => {
@@ -688,6 +693,18 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
             </div>
           )}
 
+          <div className="bg-red-900/30 border border-red-700 rounded p-3 text-sm text-red-200 space-y-1">
+            <p className="font-semibold flex items-center gap-2">
+              <AlertCircle size={16} />
+              Required: start &amp; pause the install first
+            </p>
+            <p className="text-red-200/80 text-xs">
+              The overlay cannot apply if there is no paused download in the Xbox app.
+              Complete every step below before continuing — the button stays
+              disabled until you confirm.
+            </p>
+          </div>
+
           <ol className="text-gray-300 text-sm list-decimal list-inside space-y-2">
             {isNetworkMode && (
               <li>Make sure the sender shows <strong>&quot;Waiting for receiver&quot;</strong>.</li>
@@ -737,9 +754,23 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
             </div>
           )}
 
+          <label className="flex items-start gap-2 text-sm text-gray-200 cursor-pointer bg-gray-800/60 border border-gray-700 rounded p-3">
+            <input
+              type="checkbox"
+              checked={acknowledgedPause}
+              onChange={(e) => setAcknowledgedPause(e.target.checked)}
+              className="mt-0.5 accent-blue-500"
+            />
+            <span>
+              I have clicked <strong>Install</strong> on <strong>{gameName}</strong> in
+              the Xbox app and the download is currently <strong>paused</strong>.
+            </span>
+          </label>
+
           <button
             onClick={isNetworkMode ? handleStartNetworkReceiver : handleStartReceiver}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
+            disabled={!acknowledgedPause}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2 rounded font-semibold transition flex items-center justify-center gap-2"
           >
             <ArrowRight size={18} />
             I've Paused the Install

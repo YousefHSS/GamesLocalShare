@@ -525,14 +525,17 @@ export default function App() {
         const done = xt.currentStep === 'Complete';
         const finished = failed || done;
         const downloading = xt.currentStep === 'DownloadingFromPeer';
+        const awaitingResume = xt.currentStep === 'WaitingForResume';
         const paused = xt.isPaused;
         const barColor = failed
           ? 'from-red-900/60 to-red-800/60 border-red-700/50'
           : done
             ? 'from-emerald-900/60 to-green-800/60 border-green-700/50'
-            : paused
-              ? 'from-amber-900/60 to-yellow-900/60 border-amber-700/50'
-              : 'from-green-900/60 to-emerald-900/60 border-green-700/50';
+            : awaitingResume
+              ? 'from-yellow-900/70 to-amber-800/70 border-yellow-500/60'
+              : paused
+                ? 'from-amber-900/60 to-yellow-900/60 border-amber-700/50'
+                : 'from-green-900/60 to-emerald-900/60 border-green-700/50';
 
         // Build info line like the normal transfer bar
         const infoParts: string[] = [];
@@ -542,10 +545,15 @@ export default function App() {
             ? `${xt.networkReceivedMB.toFixed(1)} / ${totalMB.toFixed(0)} MB`
             : `${xt.networkReceivedMB.toFixed(1)} MB`);
         }
-        if (xt.networkSpeedMBps > 0 && !paused) infoParts.push(`${xt.networkSpeedMBps.toFixed(1)} MB/s`);
+        const showSpeed = xt.networkSpeedMBps > 0 && !paused;
+        const speedLabel = showSpeed
+          ? (s.showSpeedInMbps
+              ? `${(xt.networkSpeedMBps * 8).toFixed(1)} Mbps`
+              : `${xt.networkSpeedMBps.toFixed(1)} MB/s`)
+          : '';
         if (paused) infoParts.push('PAUSED');
         if (xt.networkEta && !paused) infoParts.push(`ETA ${xt.networkEta}`);
-        if (!downloading && xt.overlayProgress > 0 && infoParts.length === 0) infoParts.push(`${xt.overlayProgress.toFixed(1)}%`);
+        if (!downloading && xt.overlayProgress > 0 && infoParts.length === 0 && !showSpeed) infoParts.push(`${xt.overlayProgress.toFixed(1)}%`);
 
         return (
           <div className={`bg-gradient-to-r ${barColor} border-t px-3 sm:px-6 py-2.5 animate-slide-up`}>
@@ -554,21 +562,37 @@ export default function App() {
                 ? <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
                 : done
                   ? <Download className="w-5 h-5 text-green-400 flex-shrink-0" />
-                  : paused
-                    ? <Pause className="w-5 h-5 text-amber-400 flex-shrink-0" />
-                    : <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
+                  : awaitingResume
+                    ? <Play className="w-5 h-5 text-yellow-300 animate-pulse flex-shrink-0" />
+                    : paused
+                      ? <Pause className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                      : <Download className="w-5 h-5 text-green-400 animate-pulse flex-shrink-0" />
               }
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm font-medium text-white truncate">
-                    {xt.gameName || 'Xbox Transfer'}
+                    {awaitingResume
+                      ? <>Click <strong className="text-yellow-200">RESUME</strong> in the Xbox app now</>
+                      : <>{xt.gameName || 'Xbox Transfer'}</>}
                     <span className="ml-2 text-[10px] text-green-400 font-mono">XBOX</span>
                   </span>
-                  <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0">
+                  <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0 flex items-center gap-1">
+                    {showSpeed && (
+                      <>
+                        <button
+                          onClick={() => sendCommand('ToggleSpeedUnit')}
+                          title="Click to toggle Mbps/MB/s"
+                          className="hover:text-white hover:underline cursor-pointer"
+                        >
+                          {speedLabel}
+                        </button>
+                        {infoParts.length > 0 && <span>\u00b7</span>}
+                      </>
+                    )}
                     {infoParts.join(' \u00b7 ')}
                   </span>
                 </div>
-                {!finished && (
+                {!finished && !awaitingResume && (
                   <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
                     <div
                       className={`h-full transition-all ${paused ? 'bg-gradient-to-r from-amber-500 to-yellow-500' : 'bg-gradient-to-r from-green-500 to-emerald-500'}`}
@@ -576,7 +600,7 @@ export default function App() {
                     />
                   </div>
                 )}
-                <p className={`text-[10px] mt-1 truncate ${failed ? 'text-red-300' : 'text-slate-400'}`}>
+                <p className={`text-[10px] mt-1 truncate ${failed ? 'text-red-300' : awaitingResume ? 'text-yellow-200' : 'text-slate-400'}`}>
                   {xt.errorMessage || xt.statusMessage}
                 </p>
               </div>
