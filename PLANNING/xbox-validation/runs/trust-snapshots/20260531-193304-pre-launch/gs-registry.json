@@ -1,0 +1,43 @@
+{
+    "StreamingCheckpoints":  {
+
+                             },
+    "StreamingTracking":  {
+
+                          },
+    "StreamingSummaries":  {
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{AE2E2DC7-9693-4332-B993-FA5F6A56882F}":  {
+                                                                                                                                                           "(default)":  "134247046188054401",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{AB03F40C-E85D-467B-8C67-3870B89BD2D1}":  "0"
+                                                                                                                                                       }
+                           },
+    "PackageBackups":  {
+
+                       },
+    "StreamingServices":  {
+
+                          },
+    "StreamingRequests":  {
+
+                          },
+    "PackageRepository\\Metadata":  {
+                                        "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{AB03F40C-E85D-467B-8C67-3870B89BD2D1}":  {
+                                                                                                                              "InitialInstallTime":  "134240779145000562",
+                                                                                                                              "UsingAppLicensing":  "1",
+                                                                                                                              "LastActivationTime":  "134240779339453116",
+                                                                                                                              "LastSessionTimeMs":  "11947",
+                                                                                                                              "LastUpdatedTime":  "134246098109389869"
+                                                                                                                          }
+                                    },
+    "PackageRepository\\Root":  {
+                                    "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{AB03F40C-E85D-467B-8C67-3870B89BD2D1}":  {
+                                                                                                                          "[child] F:WindowsAppsMicrosoft.ForteBaseGame_3.364.933.0_x64__8wekyb3d8bbwe":  {
+                                                                                                                                                                                                              "Package":  "Microsoft.ForteBaseGame_3.364.933.0_x64__8wekyb3d8bbwe",
+                                                                                                                                                                                                              "Root":  "\\\\?\\F:\\WindowsApps\\Microsoft.ForteBaseGame_3.364.933.0_x64__8wekyb3d8bbwe\\"
+                                                                                                                                                                                                          }
+                                                                                                                      }
+                                },
+    "PackageRepository\\Package":  {
+
+                                   }
+}

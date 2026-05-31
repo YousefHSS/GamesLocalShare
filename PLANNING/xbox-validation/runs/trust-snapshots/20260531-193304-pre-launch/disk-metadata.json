@@ -1,0 +1,48 @@
+{
+    "Root":  "F:\\Games\\Forza Horizon 6",
+    "RootSddl":  "O:SYG:SYD:AI(A;OICIID;FA;;;S-1-5-21-4002976177-2962401402-1312406969-1001)(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;WD)(A;OICIID;FA;;;SY)",
+    "Files":  [
+                  {
+                      "Name":  "AB03F40C-E85D-467B-8C67-3870B89BD2D1",
+                      "Length":  1074122752,
+                      "LastWriteUtc":  "2026-05-31T12:36:58.0819375Z",
+                      "Sha256":  "D1C2E79C660BED1C29BC113D2C6499D5E0357ACAEFEB045BB4D3BE10BAEDF9FD",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "AB03F40C-E85D-467B-8C67-3870B89BD2D1.59D87DA4-5755-4992-A8B9-D55ACF8B2C2A.xsp",
+                      "Length":  34096,
+                      "LastWriteUtc":  "2026-05-30T10:16:50.8641025Z",
+                      "Sha256":  "7F92ED15A1731958D665263C9CB9C26B8A58BB139E729179C85F209CA58EFBB9",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "AB03F40C-E85D-467B-8C67-3870B89BD2D1.smd",
+                      "Length":  2270010,
+                      "LastWriteUtc":  "2026-05-31T12:36:58.0849406Z",
+                      "Sha256":  "1B45028CE5A3802ECAD00545B51B34330FE839952E5AFCABF4D136BD08C07598",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "AB03F40C-E85D-467B-8C67-3870B89BD2D1.xct",
+                      "Length":  4096,
+                      "LastWriteUtc":  "2026-05-31T12:37:58.9396317Z",
+                      "Sha256":  "D18D206473A86CB0C7D45F4BE2B07CEBC2050D95E83244860DA81FF237815DC0",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "AB03F40C-E85D-467B-8C67-3870B89BD2D1.xvi",
+                      "Length":  16384,
+                      "LastWriteUtc":  "2026-05-31T12:37:58.9416918Z",
+                      "Sha256":  "07C3000983643EB9EC66C21C85B1993B65E7F7999E62FFB442E46BB75C0C9A77",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "AB03F40C-E85D-467B-8C67-3870B89BD2D1.xvs",
+                      "Length":  37202,
+                      "LastWriteUtc":  "2026-05-31T12:36:58.5846801Z",
+                      "Sha256":  "814DD277E7A0DB6411EA3EE16352BF90FF9FF3AE3AF594C9908FEAB770902EF9",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  }
+              ]
+}

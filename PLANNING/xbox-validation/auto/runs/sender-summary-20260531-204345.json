@@ -1,0 +1,40 @@
+﻿{
+    "StartedAtUtc":  "2026-05-31T17:46:53.4128409Z",
+    "SenderHost":  "DESKTOP-FHVD1S8",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "GameFolder":  "F:\\Games\\Clone Drone in the Danger Zone",
+    "GameName":  "Clone Drone in the Danger Zone",
+    "Destination":  "G:\\stage\\Clone Drone in the Danger Zone",
+    "PackageFamilyName":  "DoborogGames.CloneDroneintheDangerZone_w6hf08ggk4es4",
+    "SourceFileCount":  242,
+    "SourceBytes":  1779445219,
+    "UnreadableFiles":  [
+                            "F:\\Games\\Clone Drone in the Danger Zone\\Content\\Clone Drone in the Danger Zone.exe",
+                            "F:\\Games\\Clone Drone in the Danger Zone\\Content\\UnityCrashHandler64.exe"
+                        ],
+    "SkippedFiles":  2,
+    "ReceiverProvidedFiles":  [
+                                  {
+                                      "Path":  "Content\\Clone Drone in the Danger Zone.exe",
+                                      "Size":  653824
+                                  },
+                                  {
+                                      "Path":  "Content\\UnityCrashHandler64.exe",
+                                      "Size":  1232816
+                                  }
+                              ],
+    "StaleRemovedFiles":  [
+
+                          ],
+    "FilesCopied":  240,
+    "BytesCopied":  1777558579,
+    "RobocopyExit":  1,
+    "RobocopyLog":  "F:\\Documents\\GamesLocalShare\\PLANNING\\xbox-validation\\auto\\runs\\sender-robocopy-20260531-204345.log",
+    "IntegrityOk":  true,
+    "MissingFiles":  [
+
+                     ],
+    "MismatchFiles":  [
+
+                      ]
+}
