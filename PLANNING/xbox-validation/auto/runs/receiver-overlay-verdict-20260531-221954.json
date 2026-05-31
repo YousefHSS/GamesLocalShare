@@ -1,0 +1,79 @@
+﻿{
+    "StartedAtUtc":  "2026-05-31T19:21:59.6213717Z",
+    "ReceiverHost":  "GELERZ",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "D:\\stage\\Clone Drone in the Danger Zone",
+    "Deploy":  "C:\\XboxGames\\368B2C2C-C6E2-4472-ACDA-52A5F18A1D51",
+    "GameName":  "Clone Drone in the Danger Zone",
+    "PackageFamilyName":  "DoborogGames.CloneDroneintheDangerZone_w6hf08ggk4es4",
+    "SourceBytes":  1779445219,
+    "SourceFileCount":  242,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  69,
+    "PreOverlayBytes":  46692586,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  242,
+    "PostOverlayBytes":  1779445219,
+    "RobocopyExit":  1,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  548635522,
+                     "SentBytes":  27350687,
+                     "Time":  "\/Date(1780255258457)\/"
+                 },
+    "ObserveSeconds":  360,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  0.01,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  0.5,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  0.73,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  0.78,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "SignatureKind":  "Store",
+                       "Status":  "Ok",
+                       "InstallLocation":  "C:\\Program Files\\WindowsApps\\DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                       "PackageFullName":  "DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                       "Installed":  true
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  821337,
+                       "SentBytes":  150440,
+                       "ReceivedMB":  0.78,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  0.78,
+    "Hypothesis":  "H1_FULL_SKIP"
+}
