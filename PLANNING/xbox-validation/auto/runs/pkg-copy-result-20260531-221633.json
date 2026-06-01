@@ -1,0 +1,19 @@
+﻿{
+    "Identity":  "DESKTOP-FHVD1S8\\SIGMA",
+    "Files":  [
+                  {
+                      "Path":  "Content\\Clone Drone in the Danger Zone.exe",
+                      "Copied":  true,
+                      "Header":  "4d5a",
+                      "Size":  653824,
+                      "Error":  ""
+                  },
+                  {
+                      "Path":  "Content\\UnityCrashHandler64.exe",
+                      "Copied":  true,
+                      "Header":  "4d5a",
+                      "Size":  1232816,
+                      "Error":  ""
+                  }
+              ]
+}

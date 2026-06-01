@@ -1,0 +1,103 @@
+﻿{
+    "StartedAtUtc":  "2026-06-01T22:23:32.8762656Z",
+    "ReceiverHost":  "DESKTOP-FHVD1S8",
+    "Identity":  "NT AUTHORITY\\SYSTEM",
+    "Mode":  "overlay-on-paused-install",
+    "Source":  "G:\\stage\\Clone Drone in the Danger Zone",
+    "Deploy":  "F:\\Games\\368B2C2C-C6E2-4472-ACDA-52A5F18A1D51",
+    "GameName":  "Clone Drone in the Danger Zone",
+    "PackageFamilyName":  "DoborogGames.CloneDroneintheDangerZone_w6hf08ggk4es4",
+    "SourceBytes":  1779445219,
+    "SourceFileCount":  242,
+    "PreOverlayState":  {
+                            "Installed":  false
+                        },
+    "PreOverlayFiles":  11,
+    "PreOverlayBytes":  14395729,
+    "PostOverlayState":  {
+                             "Installed":  false
+                         },
+    "PostOverlayFiles":  242,
+    "PostOverlayBytes":  1779445219,
+    "RobocopyExit":  1,
+    "Baseline":  {
+                     "InterfaceAlias":  "Wi-Fi",
+                     "ReceivedBytes":  4873438240,
+                     "SentBytes":  255104635,
+                     "Time":  "\/Date(1780352505397)\/"
+                 },
+    "ObserveSeconds":  300,
+    "Samples":  [
+                    {
+                        "ElapsedSeconds":  15,
+                        "ReceivedMB":  7.8,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  30,
+                        "ReceivedMB":  10.41,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  45,
+                        "ReceivedMB":  12.6,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  60,
+                        "ReceivedMB":  19.89,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  75,
+                        "ReceivedMB":  23.47,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  90,
+                        "ReceivedMB":  28.98,
+                        "PackageInstalled":  false,
+                        "PackageStatus":  null,
+                        "InstallLocation":  null,
+                        "CounterWrapped":  false
+                    },
+                    {
+                        "ElapsedSeconds":  105,
+                        "ReceivedMB":  41.58,
+                        "PackageInstalled":  true,
+                        "PackageStatus":  "Ok",
+                        "InstallLocation":  "C:\\Program Files\\WindowsApps\\DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                        "CounterWrapped":  false
+                    }
+                ],
+    "FinalState":  {
+                       "SignatureKind":  "Store",
+                       "Status":  "Ok",
+                       "InstallLocation":  "C:\\Program Files\\WindowsApps\\DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                       "PackageFullName":  "DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                       "Installed":  true
+                   },
+    "FinalDelta":  {
+                       "ReceivedBytes":  43602386,
+                       "SentBytes":  2442672,
+                       "ReceivedMB":  41.58,
+                       "CounterWrapped":  false
+                   },
+    "ObservedReceivedMB":  41.58,
+    "Hypothesis":  "H1_FULL_SKIP"
+}
