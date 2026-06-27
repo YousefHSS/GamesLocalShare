@@ -323,7 +323,7 @@ export default function App() {
                                   });
                                 }}
                                 className="mt-2 w-full py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
-                                title="Stream-install from the peer: bytes are reconstructed on the fly from the peer's skeleton+install (no full package on either PC). You'll click Install in the Xbox app."
+                                title="Stream-install from the peer: the game is rebuilt on the fly from the other PC's installed files (no full package stored on either PC). You'll click Install in the Xbox app."
                               >
                                 <Download className="w-3 h-3" /> Download (stream from peer)
                               </button>
@@ -662,7 +662,7 @@ export default function App() {
             <button onClick={() => setShowSkeleton(v => !v)} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group ${showSkeleton ? 'bg-slate-800' : ''}`}>
               <Boxes className={`w-4 h-4 ${xboxHealthy ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`} />
               <span className={`text-sm ${xboxHealthy ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                Skeletons{s.skeletonCaptures.length > 0 ? ` (${s.skeletonCaptures.length})` : ''}
+                Xbox Ready{s.skeletonCaptures.length > 0 ? ` (${s.skeletonCaptures.length})` : ''}
               </span>
             </button>
           )}
@@ -707,7 +707,7 @@ export default function App() {
             <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
                 <Boxes className="w-6 h-6 text-white" />
-                <h2 className="text-lg font-bold text-white">Skeleton Capture</h2>
+                <h2 className="text-lg font-bold text-white">Xbox Single-Copy (Advanced)</h2>
               </div>
               <button onClick={() => setShowSkeleton(false)} className="text-white/80 hover:text-white" title="Close">
                 <X className="w-5 h-5" />

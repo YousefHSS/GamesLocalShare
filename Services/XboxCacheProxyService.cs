@@ -47,6 +47,9 @@ public sealed class XboxCacheProxyService : IDisposable
     // PackageFullName / content GUID), forward it to a peer's streaming-reconstruct endpoint instead of the CDN
     // and serve it transiently (NO disk fill) - the streaming single-copy receive path.
     private readonly Dictionary<string, (string host, int port)> _peerOrigins = new(StringComparer.OrdinalIgnoreCase);
+    // Extra roots (besides _cacheDir) checked for a HIT — e.g. an external drive holding a reconstructed package
+    // for a Smart drive-receive. Served read-only/transient (never written, never deleted).
+    private readonly HashSet<string> _serveRoots = new(StringComparer.OrdinalIgnoreCase);
 
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -59,9 +62,11 @@ public sealed class XboxCacheProxyService : IDisposable
 
     // Live counters (surfaced to the UI).
     public long Hits, Misses, Cached, Filling, Errors, Bytes;
-    // Active peer streaming-install progress: bytes served from the peer for the current title and the
-    // package total (learned from the peer's Content-Range). Reset on SetPeerOrigin.
+    // Active transfer progress: bytes served for the current title (peer-origin OR drive HIT) and the package
+    // total. Reset when a transfer begins. <see cref="ProgressKey"/> is the URL-path substring that identifies
+    // the active title's package (its content GUID / PackageFullName).
     public long PeerBytes, PeerTotal;
+    public string? ProgressKey;
 
     /// <summary>Free-text log/status line.</summary>
     public event Action<string>? Log;
@@ -164,6 +169,7 @@ public sealed class XboxCacheProxyService : IDisposable
         if (string.IsNullOrWhiteSpace(matchKey) || string.IsNullOrWhiteSpace(host) || port <= 0) return;
         Interlocked.Exchange(ref PeerBytes, 0);
         Interlocked.Exchange(ref PeerTotal, 0);
+        ProgressKey = matchKey;
         lock (_gate) { _peerOrigins[matchKey] = (host, port); }
         Log?.Invoke($"peer origin set: \"{matchKey}\" -> {host}:{port} (transient, no disk)");
     }
@@ -173,6 +179,7 @@ public sealed class XboxCacheProxyService : IDisposable
     {
         if (string.IsNullOrWhiteSpace(matchKey)) return;
         lock (_gate) { _peerOrigins.Remove(matchKey); }
+        ProgressKey = null;
         Log?.Invoke($"peer origin cleared: \"{matchKey}\"");
     }
 
@@ -194,6 +201,43 @@ public sealed class XboxCacheProxyService : IDisposable
                 }
         }
         return false;
+    }
+
+    // ---- drive serve (Smart receive: serve a reconstructed package straight from an external drive) --------
+
+    /// <summary>Adds an external drive root (holding <c>&lt;root&gt;\assets1.xboxlive.com\…\&lt;PFN&gt;.msixvc</c>)
+    /// as an extra HIT source and arms transfer-bar progress for it. The package is served read-only from the
+    /// drive — never copied or written — so there is no extra storage on this PC.</summary>
+    public void BeginDriveServe(string root, string matchKey, long total)
+    {
+        if (string.IsNullOrWhiteSpace(root)) return;
+        lock (_gate) { _serveRoots.Add(root); }
+        ProgressKey = matchKey;
+        Interlocked.Exchange(ref PeerBytes, 0);
+        Interlocked.Exchange(ref PeerTotal, total > 0 ? total : 0);
+        Log?.Invoke($"serving from drive: {root} (key \"{matchKey}\")");
+    }
+
+    /// <summary>Stops serving from a drive root (call when the drive install is done/cancelled).</summary>
+    public void EndDriveServe(string root)
+    {
+        if (!string.IsNullOrWhiteSpace(root)) lock (_gate) { _serveRoots.Remove(root); }
+        ProgressKey = null;
+    }
+
+    /// <summary>Resolves a request to a file under the main cache dir or any registered extra serve root.</summary>
+    private string ResolveServedFile(string hostHdr, string rel)
+    {
+        var primary = Path.Combine(Path.Combine(_cacheDir, hostHdr), rel);
+        if (File.Exists(primary)) return primary;
+        string[] roots;
+        lock (_gate) { roots = _serveRoots.ToArray(); }
+        foreach (var r in roots)
+        {
+            var cand = Path.Combine(Path.Combine(r, hostHdr), rel);
+            if (File.Exists(cand)) return cand;
+        }
+        return primary; // default (likely a MISS)
     }
 
     private async Task AcceptLoopAsync(CancellationToken ct)
@@ -222,7 +266,9 @@ public sealed class XboxCacheProxyService : IDisposable
             int qi = rel.IndexOf('?'); if (qi >= 0) rel = rel.Substring(0, qi);
             rel = rel.TrimStart('/').Replace('/', '\\');
             rel = Regex.Replace(rel, "[:*?\"<>|]", "_");
-            string file = Path.Combine(Path.Combine(_cacheDir, hostHdr), rel);
+            // Resolve from the main cache dir, or any registered extra serve root (e.g. an external drive holding
+            // a reconstructed package for a Smart drive-receive). First existing wins.
+            string file = ResolveServedFile(hostHdr, rel);
 
             if (File.Exists(file))
             {
@@ -264,8 +310,15 @@ public sealed class XboxCacheProxyService : IDisposable
                     res.OutputStream.Write(buf, 0, n);
                     remaining -= n;
                 }
+                long servedHit = len - remaining;
                 Interlocked.Increment(ref Hits);
-                Interlocked.Add(ref Bytes, len - remaining);
+                Interlocked.Add(ref Bytes, servedHit);
+                // Drive-receive progress: count HITs for the active title toward the transfer bar.
+                if (ProgressKey != null && rawPath.IndexOf(ProgressKey, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    if (PeerTotal == 0) Interlocked.Exchange(ref PeerTotal, total);
+                    Interlocked.Add(ref PeerBytes, servedHit);
+                }
                 StatsChanged?.Invoke();
             }
             else if (!_dns.ContainsKey(hostHdr))

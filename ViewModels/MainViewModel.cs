@@ -3154,8 +3154,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                               $"filling {_cacheProxy.Filling} · cached {_cacheProxy.Cached} · " +
                               $"{_cacheProxy.Bytes / 1048576.0:F1} MB served";
 
-            // Drive the transfer bar from peer-served bytes while a streaming peer install is active.
-            if (_peerInstallState != null && !string.IsNullOrEmpty(_activePeerMatchKey))
+            // Drive the transfer bar from served bytes while a streaming (peer) or drive install is active.
+            if (_peerInstallState != null &&
+                (!string.IsNullOrEmpty(_activePeerMatchKey) || !string.IsNullOrEmpty(_activeDriveServeRoot)))
             {
                 long got = _cacheProxy.PeerBytes, total = _cacheProxy.PeerTotal;
                 var now = DateTime.UtcNow;
@@ -3257,7 +3258,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private System.Diagnostics.Process? _xboxServeProc;   // sender: the running `xvdtool --serve` for a title
     private string? _xboxServeTitle;
-    private string? _activePeerMatchKey;                  // receiver: the proxy peer-origin key in effect
+    private string? _activePeerMatchKey;                  // receiver: the proxy peer-origin key in effect (network)
+    private string? _activeDriveServeRoot;                // receiver: the proxy drive serve root in effect (drive)
     private XboxTransferState? _peerInstallState;         // receiver: drives the transfer bar during a peer install
     private long _peerLastBytes;
     private DateTime _peerLastTick;
@@ -3444,9 +3446,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// finalize the transfer bar and stop forwarding to the peer.</summary>
     private void OnReceiverInstallDetected(string installDir)
     {
-        if (_peerInstallState == null || string.IsNullOrEmpty(_activePeerMatchKey)) return;
-        FinalizePeerInstallBar($"Installed \"{_peerInstallState.GameName}\" — streamed from the peer (no internet download)");
-        AddLog("Xbox peer install: install detected complete — streaming origin cleared", LogMessageType.Success);
+        if (_peerInstallState == null ||
+            (string.IsNullOrEmpty(_activePeerMatchKey) && string.IsNullOrEmpty(_activeDriveServeRoot)))
+            return;
+        bool fromDrive = !string.IsNullOrEmpty(_activeDriveServeRoot);
+        FinalizePeerInstallBar(fromDrive
+            ? $"Installed \"{_peerInstallState.GameName}\" — from the drive (no internet download)"
+            : $"Installed \"{_peerInstallState.GameName}\" — streamed from the peer (no internet download)");
+        AddLog("Xbox transfer: install detected complete — source released", LogMessageType.Success);
     }
 
     /// <summary>Flip the peer-install transfer bar to Complete and stop forwarding. Safe to call repeatedly.</summary>
@@ -3474,7 +3481,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _cacheProxy.ClearPeerOrigin(_activePeerMatchKey!);
             _activePeerMatchKey = null;
-            AddLog("Xbox peer install: streaming origin cleared", LogMessageType.Info);
+            AddLog("Xbox transfer: streaming origin cleared", LogMessageType.Info);
+        }
+        if (_cacheProxy != null && !string.IsNullOrEmpty(_activeDriveServeRoot))
+        {
+            _cacheProxy.EndDriveServe(_activeDriveServeRoot!);
+            _activeDriveServeRoot = null;
+            AddLog("Xbox transfer: drive source released", LogMessageType.Info);
         }
     }
 
@@ -3486,6 +3499,72 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var parts = payload.Split('|', 2);
         if (parts.Length != 2) return;
         await StartXboxPeerInstallAsync(parts[0], parts[1]);
+    }
+
+    /// <summary>
+    /// RECEIVER side, drive variant. Given a folder the user copied a Smart (updatable) Xbox game into, serve the
+    /// reconstructed package straight from the drive via the proxy and prompt the user to install in the Xbox app.
+    /// Returns false if the folder has no Smart copy (the caller can fall back to the Basic/overlay receive).
+    /// </summary>
+    public async Task<bool> ReceiveXboxFromDriveAsync(string path)
+    {
+        if (_cacheProxy == null) { AddLog("Drive receive is only available on Windows", LogMessageType.Error); return true; }
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return false;
+
+        // Find a reconstructed package: <…>\assets1.xboxlive.com\…\<PFN>.msixvc
+        string? msixvc = null;
+        try
+        {
+            msixvc = Directory.EnumerateFiles(path, "*.msixvc", SearchOption.AllDirectories)
+                .FirstOrDefault(f => f.IndexOf("assets1.xboxlive.com", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+        catch { }
+        if (msixvc == null) return false; // not a Smart copy here
+
+        int idx = msixvc.IndexOf("\\assets1.xboxlive.com\\", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return false;
+        string serveRoot = msixvc.Substring(0, idx);             // folder that contains assets1.xboxlive.com
+        long total = 0; try { total = new FileInfo(msixvc).Length; } catch { }
+        string matchKey = Path.GetFileName(msixvc);              // the .msixvc filename is in the Store's request URL
+        string friendly = FriendlyXboxName(Path.GetFileNameWithoutExtension(msixvc));
+
+        if (!_cacheProxy.IsRunning)
+        {
+            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+            await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
+            IsCacheProxyRunning = _cacheProxy.IsRunning;
+        }
+        _cacheProxy.BeginDriveServe(serveRoot, matchKey, total);
+        _activeDriveServeRoot = serveRoot;
+
+        _peerInstallState = new XboxTransferState
+        {
+            GameName = friendly,
+            IsNetwork = false,
+            CurrentStep = XboxTransferStep.DownloadingFromPeer,
+            StatusMessage = $"Click Install on \"{friendly}\" in the Xbox app — installing from the drive",
+        };
+        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow; _peerFinishScheduled = false;
+        Dispatcher.UIThread.Post(() =>
+        {
+            XboxTransfer = _peerInstallState;
+            IsXboxTransferActive = true;
+            OnPropertyChanged(nameof(XboxTransfer));
+        });
+
+        StatusMessage = $"Ready — click Install on \"{friendly}\" in the Xbox app (installs from the drive)";
+        AddLog($"Xbox drive receive: READY. Install \"{friendly}\" in the Xbox app now — it installs from the drive " +
+               $"({serveRoot}). Progress shows in the transfer bar.", LogMessageType.Success);
+        return true;
+    }
+
+    // "AnnapurnaInteractive.DonutCounty_1.0.4.0_x64__hash" -> "DonutCounty" (best-effort display name).
+    private static string FriendlyXboxName(string pfnStem)
+    {
+        var name = pfnStem;
+        int us = name.IndexOf('_'); if (us > 0) name = name.Substring(0, us);
+        int dot = name.LastIndexOf('.'); if (dot >= 0 && dot < name.Length - 1) name = name.Substring(dot + 1);
+        return string.IsNullOrEmpty(name) ? pfnStem : name;
     }
 
     public void Dispose()

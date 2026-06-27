@@ -111,9 +111,9 @@ export default function SkeletonPanel() {
       <div className="flex items-start gap-1.5 px-4 py-2 text-[11px] text-slate-500 border-b border-slate-700/30 flex-shrink-0">
         <Info className="w-3 h-3 flex-shrink-0 mt-0.5" />
         <span>
-          Install Xbox games normally. When an install completes its encrypted package is captured as a
-          ~tiny skeleton and self-verified — then the full package is safe to delete and can be rebuilt
-          byte-identically from the skeleton plus the installed files. Everything happens automatically.
+          Install Xbox games normally. When an install completes, the app prepares the game for transfer —
+          keeping only a tiny reference (self-verified) instead of a second full copy — so it can be moved to
+          another PC or drive and stay updatable. Everything happens automatically.
         </span>
       </div>
 
@@ -122,7 +122,7 @@ export default function SkeletonPanel() {
         <div>
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <Archive className="w-3.5 h-3.5 text-blue-400" /> Captured Skeletons ({s.skeletonCaptures.length})
+              <Archive className="w-3.5 h-3.5 text-blue-400" /> Games ready to transfer ({s.skeletonCaptures.length})
             </h4>
             {totalSaved > 0 && (
               <span className="text-[11px] text-green-400 font-medium">{fmtBytes(totalSaved)} saved</span>
@@ -131,8 +131,8 @@ export default function SkeletonPanel() {
           {s.skeletonCaptures.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Boxes className="w-10 h-10 text-slate-600 mb-2" />
-              <p className="text-slate-500 text-sm">No skeletons captured yet</p>
-              <p className="text-slate-600 text-xs mt-1">Install an Xbox game and it'll be captured automatically</p>
+              <p className="text-slate-500 text-sm">No Xbox games prepared yet</p>
+              <p className="text-slate-600 text-xs mt-1">Install an Xbox game — it's prepared for transfer automatically</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -150,7 +150,7 @@ export default function SkeletonPanel() {
                           <>
                             <button
                               onClick={() => sendCommand('RestoreSkeleton', { name: c.name })}
-                              title="Rebuild the genuine package from this skeleton + installed files and serve it back to the cache in place (so Verify/update HITs, no re-download)"
+                              title="Rebuild the full package from the installed files + the kept reference and serve it locally (so Verify/update doesn't re-download)"
                               className="px-2 py-0.5 bg-slate-700 hover:bg-blue-700 text-white rounded text-[10px] font-medium flex items-center gap-1"
                             >
                               <RotateCcw className="w-3 h-3" /> Restore
@@ -167,7 +167,7 @@ export default function SkeletonPanel() {
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
-                      {fmtBytes(c.skeletonBytes)} skeleton replaces {fmtBytes(c.packageBytes)} package
+                      {fmtBytes(c.skeletonBytes)} kept instead of {fmtBytes(c.packageBytes)}
                       <span className="text-green-400"> · saves {fmtBytes(c.savedBytes)}</span>
                     </p>
                   </div>

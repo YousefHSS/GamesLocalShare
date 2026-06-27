@@ -763,6 +763,10 @@ public class InteropBridge : IDisposable
                         await _viewModel.ToggleCacheProxyCommand.ExecuteAsync(null);
                     break;
 
+                case "ReceiveXboxFromDrive":
+                    await HandleReceiveXboxFromDriveAsync();
+                    break;
+
                 case "BrowseXboxSource":
                     await HandleBrowseXboxSourceAsync();
                     break;
@@ -898,6 +902,25 @@ public class InteropBridge : IDisposable
 
         if (result.Count > 0)
             await _viewModel.RestoreSkeletonToFolderAsync(name, result[0].Path.LocalPath);
+    }
+
+    /// <summary>Browse for the drive/folder a game was copied to, then serve a Smart (updatable) copy via the
+    /// proxy. If it isn't a Smart copy, fall back to the Basic/overlay receive modal.</summary>
+    private async Task HandleReceiveXboxFromDriveAsync()
+    {
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select the drive or folder you copied the Xbox game to",
+            AllowMultiple = false
+        });
+        if (result.Count == 0) return;
+
+        bool handled = await _viewModel.ReceiveXboxFromDriveAsync(result[0].Path.LocalPath);
+        if (!handled)
+            await ExecuteJavaScriptAsync("window.__openXboxReceiveModal && window.__openXboxReceiveModal();");
     }
 
     private async Task HandleBrowseXboxSourceAsync()

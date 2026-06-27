@@ -60,6 +60,13 @@ export default function DrivesPanel() {
     };
   }, []);
 
+  // Fallback: the backend opens this when a chosen "Receive" folder isn't an updatable (Smart) copy,
+  // so the user lands in the Basic/overlay receive flow.
+  useEffect(() => {
+    (window as any).__openXboxReceiveModal = () => setXboxModal({ mode: 'receiver' });
+    return () => { (window as any).__openXboxReceiveModal = undefined; };
+  }, []);
+
   useEffect(() => {
     const handler = (path: string) => {
       setPendingPath(path);
@@ -203,9 +210,9 @@ export default function DrivesPanel() {
           <HardDrive className="w-3.5 h-3.5" /> Add Library
         </button>
         <button
-          onClick={() => setXboxModal({ mode: 'receiver' })}
+          onClick={() => sendCommand('ReceiveXboxFromDrive')}
           className="px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white rounded text-xs font-medium flex items-center gap-1.5"
-          title="Install a staged Xbox game (from a drive) onto this PC"
+          title="Install an Xbox game you copied to a drive onto this PC. Updatable copies install via the local cache; older Basic copies fall back to the overlay flow."
         >
           Receive Xbox Game
         </button>
