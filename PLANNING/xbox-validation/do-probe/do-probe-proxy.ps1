@@ -76,6 +76,14 @@ try {
     $ctx = $listener.GetContext()    # blocking
     $req = $ctx.Request
     $res = $ctx.Response
+    # Skip known local telemetry NOISE by hostname/path (hosts-file redirects of telemetry
+    # domains to 127.0.0.1). NOTE: we intentionally do NOT skip by loopback IP, because on a
+    # single-PC test Delivery Optimization's own cache requests can also arrive over loopback.
+    $noiseHost = $req.UserHostName
+    $noiseUrl  = $req.RawUrl
+    if (($noiseHost -match 'aliyuncs\.com|easeusinfo|\.log\.') -or ($noiseUrl -match '(?i)wpad\.dat')) {
+      try { $res.StatusCode = 502; $res.Close() } catch {}; continue
+    }
     $now = (Get-Date -Format 'HH:mm:ss.fff')
     $clientIp = $req.RemoteEndPoint.Address.ToString()
     $hostHdr = $req.UserHostName
@@ -85,7 +93,7 @@ try {
     $status = 0; $bytes = 0
 
     # LOG IMMEDIATELY (the actual probe data)
-    Write-Line ("[{0}] {1} {2}  Host={3}  Range={4}" -f $now, $clientIp, $req.HttpMethod, $raw, $hostHdr, $range) 'White'
+    Write-Line ("[{0}] client={1} {2}  Host={3}  Path={4}  Range={5}" -f $now, $clientIp, $req.HttpMethod, $hostHdr, $raw, $range) 'White'
 
     try {
       $originHost = ($hostHdr -split ':')[0]

@@ -20,6 +20,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly XboxTransferService _xboxTransferService;
     private readonly XboxSenderService _xboxSenderService;
     private readonly XboxNetworkSender _xboxNetworkSender;
+    // Skeleton capture watcher (Windows only; null on other platforms).
+    private readonly SkeletonWatcherService? _skeletonWatcher;
+    // In-app LAN cache proxy (Windows only; null on other platforms).
+    private readonly XboxCacheProxyService? _cacheProxy;
     private readonly AppSettings _settings;
     private readonly DriveDetectionService _driveDetectionService;
     private readonly ExternalFolderScanner _externalScanner;
@@ -44,6 +48,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _xboxRootPath = string.Empty;
+
+    [ObservableProperty]
+    private bool _isSkeletonWatching;
+
+    [ObservableProperty]
+    private string _skeletonDropFolder = string.Empty;
+
+    // LAN cache proxy (Windows only).
+    [ObservableProperty]
+    private bool _isCacheProxyRunning;
+
+    [ObservableProperty]
+    private string _cacheProxyDir = string.Empty;
+
+    /// <summary>One-line stats summary for the cache proxy (hits/misses/filling/cached).</summary>
+    [ObservableProperty]
+    private string _cacheProxyStats = string.Empty;
+
+    public ObservableCollection<SkeletonCaptureEntry> SkeletonCaptures { get; } = [];
+    public ObservableCollection<string> SkeletonLog { get; } = [];
 
     [ObservableProperty]
     private string _statusMessage = "Ready";
@@ -172,6 +196,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _xboxNetworkSender.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
         _xboxNetworkSender.LogsReceived += (_, info) =>
             AddLog($"[Xbox] Receiver logs saved to {info}", LogMessageType.Info);
+
+        // Skeleton capture watcher (Windows only). On install-detect it auto-locates the
+        // title's encrypted .msixvc under the configured cache root, populates the CIK store
+        // on demand via CikExtractor, and captures a ~17 MB skeleton (xvdtool decrypts on the
+        // fly; the app never implements the cipher itself).
+        if (OperatingSystem.IsWindows())
+        {
+            var cikExtractor = string.IsNullOrWhiteSpace(_settings.CikExtractorPath)
+                ? @"C:\Users\SIGMA\source\repos\CikExtractor"
+                : _settings.CikExtractorPath;
+            _skeletonWatcher = new SkeletonWatcherService(
+                new SkeletonService(),
+                cacheRoot: _settings.XboxPackageCacheRoot,
+                cikExtractorPath: cikExtractor);
+            SkeletonDropFolder = _skeletonWatcher.DropFolder;
+            _skeletonWatcher.Status += OnSkeletonStatus;
+            _skeletonWatcher.CaptureCompleted += OnSkeletonCaptureCompleted;
+            _skeletonWatcher.CaptureFailed += OnSkeletonCaptureFailed;
+            _skeletonWatcher.RestoreCompleted += OnSkeletonRestoreCompleted;
+            _skeletonWatcher.RestoreFailed += OnSkeletonCaptureFailed;
+
+            // Load skeletons already captured in previous sessions so the UI lists them (with their
+            // Restore/Reconstruct actions) on startup — not just ones captured live this session.
+            foreach (var s in _skeletonWatcher.GetCapturedSkeletons())
+            {
+                SkeletonCaptures.Add(new SkeletonCaptureEntry
+                {
+                    Name = s.Name,
+                    SkeletonPath = s.SkeletonPath,
+                    SkeletonBytes = s.SkeletonBytes,
+                    PackageBytes = s.PackageBytes,
+                    SavedBytes = Math.Max(0, s.PackageBytes - s.SkeletonBytes),
+                    CapturedAt = s.CapturedAt,
+                });
+            }
+
+            _cacheProxy = new XboxCacheProxyService();
+            CacheProxyDir = string.IsNullOrWhiteSpace(_settings.XboxPackageCacheRoot)
+                ? @"F:\xbox-cache" : _settings.XboxPackageCacheRoot!;
+            _cacheProxy.Log += OnSkeletonStatus;
+            _cacheProxy.StatsChanged += OnCacheProxyStatsChanged;
+        }
 
         // Initialize drive detection
         _driveDetectionService = new DriveDetectionService();
@@ -2886,6 +2952,147 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsXboxTransferActive = false;
     }
 
+    // ---- Skeleton capture watcher ----------------------------------------
+
+    [RelayCommand]
+    private void ToggleSkeletonWatcher()
+    {
+        if (_skeletonWatcher == null)
+        {
+            StatusMessage = "Skeleton capture is only available on Windows";
+            return;
+        }
+
+        if (_skeletonWatcher.IsRunning)
+        {
+            _skeletonWatcher.Stop();
+            IsSkeletonWatching = false;
+        }
+        else
+        {
+            var roots = OperatingSystem.IsWindows()
+                ? new XboxLibraryScanner().GetLibraryFolders()
+                : new List<string>();
+            _skeletonWatcher.Start(roots);
+            IsSkeletonWatching = _skeletonWatcher.IsRunning;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenSkeletonDropFolder()
+    {
+        if (_skeletonWatcher == null) return;
+        try
+        {
+            Directory.CreateDirectory(_skeletonWatcher.DropFolder);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = _skeletonWatcher.DropFolder,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to open drop folder: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task RestoreSkeleton(string? name)
+    {
+        if (_skeletonWatcher == null)
+        {
+            StatusMessage = "Skeleton restore is only available on Windows";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(name)) return;
+        await _skeletonWatcher.RestoreAsync(name);
+    }
+
+    /// <summary>Reconstructs a title's genuine package to a chosen destination root (e.g. an external drive),
+    /// preserving the nested CDN path so another PC's proxy serves it as a HIT. Invoked by the bridge after a
+    /// folder picker.</summary>
+    public async Task RestoreSkeletonToFolderAsync(string name, string destinationRoot)
+    {
+        if (_skeletonWatcher == null)
+        {
+            StatusMessage = "Skeleton reconstruct is only available on Windows";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(destinationRoot)) return;
+        await _skeletonWatcher.RestoreAsync(name, destinationRoot);
+    }
+
+    private void OnSkeletonRestoreCompleted(string name)
+    {
+        AddLog($"[Skeleton] restored package for {name} (Verify/update will HIT the cache)", LogMessageType.Success);
+    }
+
+    [RelayCommand]
+    private async Task ToggleCacheProxy()
+    {
+        if (_cacheProxy == null)
+        {
+            StatusMessage = "The cache proxy is only available on Windows";
+            return;
+        }
+        if (_cacheProxy.IsRunning)
+        {
+            await _cacheProxy.StopAsync();
+        }
+        else
+        {
+            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+            await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
+        }
+        IsCacheProxyRunning = _cacheProxy.IsRunning;
+    }
+
+    private void OnCacheProxyStatsChanged()
+    {
+        if (_cacheProxy == null) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            IsCacheProxyRunning = _cacheProxy.IsRunning;
+            CacheProxyStats = $"hits {_cacheProxy.Hits} · misses {_cacheProxy.Misses} · " +
+                              $"filling {_cacheProxy.Filling} · cached {_cacheProxy.Cached} · " +
+                              $"{_cacheProxy.Bytes / 1048576.0:F1} MB served";
+        });
+    }
+
+    private void OnSkeletonStatus(string line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            SkeletonLog.Insert(0, $"{DateTime.Now:HH:mm:ss}  {line}");
+            while (SkeletonLog.Count > MaxLogMessages)
+                SkeletonLog.RemoveAt(SkeletonLog.Count - 1);
+        });
+        AddLog($"[Skeleton] {line}", LogMessageType.Info);
+    }
+
+    private void OnSkeletonCaptureCompleted(SkeletonCaptureResult res)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var name = Path.GetFileNameWithoutExtension(res.SkelPath);
+            SkeletonCaptures.Insert(0, new SkeletonCaptureEntry
+            {
+                Name = string.IsNullOrEmpty(name) ? "(unknown)" : name,
+                SkeletonPath = res.SkelPath,
+                SkeletonBytes = res.SkelFileSize,
+                PackageBytes = res.USize,
+                SavedBytes = Math.Max(0, res.USize - res.SkelFileSize),
+                CapturedAt = DateTime.Now.ToString("o"),
+            });
+        });
+    }
+
+    private void OnSkeletonCaptureFailed(string message)
+    {
+        AddLog($"[Skeleton] {message}", LogMessageType.Error);
+    }
+
     private void OnXboxTransferStateChanged(object? sender, XboxTransferState state)
     {
         Dispatcher.UIThread.Post(() =>
@@ -2983,6 +3190,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _fileTransferService.ProgressChanged -= OnTransferProgress;
         _fileTransferService.TransferCompleted -= OnTransferCompleted;
         _fileTransferService.TransferStopped -= OnTransferStopped;
+
+        if (_skeletonWatcher != null)
+        {
+            _skeletonWatcher.Status -= OnSkeletonStatus;
+            _skeletonWatcher.CaptureCompleted -= OnSkeletonCaptureCompleted;
+            _skeletonWatcher.CaptureFailed -= OnSkeletonCaptureFailed;
+            _skeletonWatcher.RestoreCompleted -= OnSkeletonRestoreCompleted;
+            _skeletonWatcher.RestoreFailed -= OnSkeletonCaptureFailed;
+            _skeletonWatcher.Dispose();
+        }
+
+        if (_cacheProxy != null)
+        {
+            _cacheProxy.Log -= OnSkeletonStatus;
+            _cacheProxy.StatsChanged -= OnCacheProxyStatsChanged;
+            _cacheProxy.Dispose();
+        }
 
         _networkService.Dispose();
         _fileTransferService.Dispose();

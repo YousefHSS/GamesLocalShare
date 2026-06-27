@@ -96,6 +96,29 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>xbox-scripts\%(Filename)%(Extension)</Link>
     </None>
+    <!-- Skeleton capture/reconstruct tool (single-copy storage). Bundled the
+         same way; deployed and run by SkeletonService. -->
+    <None Update="PLANNING\xbox-validation\reconstruct\xskl.ps1">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>xbox-scripts\%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+  <!-- Bundled xvdtool (on-the-fly decrypt + skeleton capture/reconstruct). The app shells out to
+       tools\xvdtool\XVDTool.exe as a separate process (so its deps never load in-process). The folder
+       is produced by publishing XVDTool (framework-dependent, win-x64) into tools\xvdtool and is copied
+       verbatim to the build output. -->
+  <ItemGroup>
+    <Content Include="tools\xvdtool\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>tools\xvdtool\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
+  <!-- Never treat the bundled tool's files as app sources. -->
+  <ItemGroup>
+    <Compile Remove="tools\**" />
+    <None Remove="tools\**" />
   </ItemGroup>
 
 </Project>

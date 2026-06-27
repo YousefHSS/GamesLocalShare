@@ -69,6 +69,8 @@ public class InteropBridge : IDisposable
         SubscribeToCollection(_viewModel.LogMessages, "logMessages");
         SubscribeToCollection(_viewModel.Drives, "drives");
         SubscribeToCollection(_viewModel.CrossLocationGames, "crossLocationGames");
+        SubscribeToCollection(_viewModel.SkeletonCaptures, "skeletonCaptures");
+        SubscribeToCollection(_viewModel.SkeletonLog, "skeletonLog");
 
         // Subscribe to individual game property changes (for cover images)
         SubscribeToGamePropertyChanges();
@@ -212,6 +214,15 @@ public class InteropBridge : IDisposable
             ["xboxDestinationPath"]  = _viewModel.XboxDestinationPath,
             ["xboxRootPath"]         = _viewModel.XboxRootPath,
             ["isElevated"]           = ElevationHelper.IsElevated(),
+
+            // Skeleton capture
+            ["isSkeletonWatching"]   = _viewModel.IsSkeletonWatching,
+            ["skeletonDropFolder"]   = _viewModel.SkeletonDropFolder,
+
+            // LAN cache proxy
+            ["isCacheProxyRunning"]  = _viewModel.IsCacheProxyRunning,
+            ["cacheProxyDir"]        = _viewModel.CacheProxyDir,
+            ["cacheProxyStats"]      = _viewModel.CacheProxyStats,
         };
 
         var json = JsonSerializer.Serialize(patch, JsonOptions);
@@ -288,6 +299,18 @@ public class InteropBridge : IDisposable
             xboxDestinationPath = _viewModel.XboxDestinationPath,
             xboxRootPath = _viewModel.XboxRootPath,
             isElevated = ElevationHelper.IsElevated(),
+
+            // Skeleton capture
+            isSkeletonWatching = _viewModel.IsSkeletonWatching,
+            skeletonDropFolder = _viewModel.SkeletonDropFolder,
+            skeletonCaptures = _viewModel.SkeletonCaptures.ToList(),
+            skeletonLog = _viewModel.SkeletonLog.ToList(),
+
+            // LAN cache proxy
+            isCacheProxyRunning = _viewModel.IsCacheProxyRunning,
+            cacheProxyDir = _viewModel.CacheProxyDir,
+            cacheProxyStats = _viewModel.CacheProxyStats,
+
             externalLibraries = _viewModel.Settings.ExternalLibraries.Select(lib => new
             {
                 id = lib.Id.ToString(),
@@ -711,6 +734,35 @@ public class InteropBridge : IDisposable
                         _viewModel.DismissXboxTransferCommand.Execute(null);
                     break;
 
+                case "ToggleSkeletonWatcher":
+                    if (_viewModel.ToggleSkeletonWatcherCommand.CanExecute(null))
+                        _viewModel.ToggleSkeletonWatcherCommand.Execute(null);
+                    break;
+
+                case "OpenSkeletonDropFolder":
+                    if (_viewModel.OpenSkeletonDropFolderCommand.CanExecute(null))
+                        _viewModel.OpenSkeletonDropFolderCommand.Execute(null);
+                    break;
+
+                case "RestoreSkeleton":
+                    if (payload?.TryGetProperty("name", out var skelRestoreEl) == true)
+                    {
+                        var skelName = skelRestoreEl.GetString() ?? "";
+                        if (_viewModel.RestoreSkeletonCommand.CanExecute(skelName))
+                            await _viewModel.RestoreSkeletonCommand.ExecuteAsync(skelName);
+                    }
+                    break;
+
+                case "ReconstructSkeleton":
+                    if (payload?.TryGetProperty("name", out var skelReconEl) == true)
+                        await HandleReconstructSkeletonAsync(skelReconEl.GetString() ?? "");
+                    break;
+
+                case "ToggleCacheProxy":
+                    if (_viewModel.ToggleCacheProxyCommand.CanExecute(null))
+                        await _viewModel.ToggleCacheProxyCommand.ExecuteAsync(null);
+                    break;
+
                 case "BrowseXboxSource":
                     await HandleBrowseXboxSourceAsync();
                     break;
@@ -812,6 +864,22 @@ public class InteropBridge : IDisposable
         }
     }
 
+    private async Task HandleReconstructSkeletonAsync(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = $"Choose where to reconstruct \"{name}\" (e.g. an external drive cache root)",
+            AllowMultiple = false
+        });
+
+        if (result.Count > 0)
+            await _viewModel.RestoreSkeletonToFolderAsync(name, result[0].Path.LocalPath);
+    }
+
     private async Task HandleBrowseXboxSourceAsync()
     {
         var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
@@ -896,6 +964,8 @@ public class InteropBridge : IDisposable
                 minimizeToTray = s.MinimizeToTray,
                 epicInstallRoot = s.EpicInstallRoot ?? string.Empty,
                 xboxRootPath = s.XboxRootPath ?? string.Empty,
+                xboxPackageCacheRoot = s.XboxPackageCacheRoot ?? string.Empty,
+                cikExtractorPath = s.CikExtractorPath ?? string.Empty,
             },
             hiddenGames,
             externalLibraries,
@@ -1013,6 +1083,18 @@ public class InteropBridge : IDisposable
             var xroot = vXbox.GetString()?.Trim();
             s.XboxRootPath = string.IsNullOrEmpty(xroot) ? null : xroot;
             _viewModel.XboxRootPath = xroot ?? string.Empty;
+        }
+
+        if (payload.TryGetProperty("xboxPackageCacheRoot", out var vCache))
+        {
+            var cache = vCache.GetString()?.Trim();
+            s.XboxPackageCacheRoot = string.IsNullOrEmpty(cache) ? null : cache;
+        }
+
+        if (payload.TryGetProperty("cikExtractorPath", out var vCik))
+        {
+            var cik = vCik.GetString()?.Trim();
+            s.CikExtractorPath = string.IsNullOrEmpty(cik) ? null : cik;
         }
 
         if (payload.TryGetProperty("startWithWindows", out var v7))

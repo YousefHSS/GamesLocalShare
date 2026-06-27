@@ -132,6 +132,15 @@ export interface XboxTransferState {
   errorMessage?: string;
 }
 
+export interface SkeletonCaptureEntry {
+  name: string;
+  skeletonPath: string;
+  skeletonBytes: number;
+  packageBytes: number;
+  savedBytes: number;
+  capturedAt: string;
+}
+
 export interface CrossLocationGame {
   deviceCopy: GameInfo | null;
   externalCopy: GameInfo | null;
@@ -204,6 +213,15 @@ export interface AppState {
   xboxSourcePath: string;
   xboxRootPath: string;
 
+  // Skeleton capture
+  isSkeletonWatching: boolean;
+  skeletonDropFolder: string;
+  skeletonCaptures: SkeletonCaptureEntry[];
+  skeletonLog: string[];
+  isCacheProxyRunning: boolean;
+  cacheProxyDir: string;
+  cacheProxyStats: string;
+
   // Actions
   updateState: (patch: Partial<AppState>) => void;
   reset: () => void;
@@ -263,6 +281,14 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   xboxDestinationPath: '',
   xboxSourcePath: '',
   xboxRootPath: '',
+
+  isSkeletonWatching: false,
+  skeletonDropFolder: '',
+  skeletonCaptures: [],
+  skeletonLog: [],
+  isCacheProxyRunning: false,
+  cacheProxyDir: '',
+  cacheProxyStats: '',
 };
 
 export const useAppState = create<AppState>((set) => ({
@@ -281,6 +307,8 @@ export interface AppSettingsForm {
   minimizeToTray: boolean;
   epicInstallRoot: string;
   xboxRootPath: string;
+  xboxPackageCacheRoot: string;
+  cikExtractorPath: string;
 }
 
 export interface SettingsPayload {

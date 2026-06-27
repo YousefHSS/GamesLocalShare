@@ -13,6 +13,8 @@ const DEFAULTS: AppSettingsForm = {
   minimizeToTray: false,
   epicInstallRoot: '',
   xboxRootPath: '',
+  xboxPackageCacheRoot: '',
+  cikExtractorPath: '',
 };
 
 export default function SettingsModal({
@@ -196,6 +198,36 @@ export default function SettingsModal({
                 value={form.xboxRootPath}
                 onChange={e => set('xboxRootPath', e.target.value)}
                 placeholder="e.g. D:\XboxGames"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm text-slate-200">Package cache root (skeleton capture)</label>
+              <p className="text-xs text-slate-500">
+                Folder searched for cached encrypted packages (&lt;PackageFullName&gt;.msixvc) when capturing a skeleton.
+                Should match the LAN-cache proxy's CacheDir. Leave blank to default to F:\xbox-cache.
+              </p>
+              <input
+                type="text"
+                value={form.xboxPackageCacheRoot}
+                onChange={e => set('xboxPackageCacheRoot', e.target.value)}
+                placeholder="e.g. F:\xbox-cache"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm text-slate-200">CikExtractor path</label>
+              <p className="text-xs text-slate-500">
+                Repo root or CikExtractor.exe used (elevated, on demand) to populate the CIK store for skeleton capture.
+                Leave blank to rely on a pre-populated CIK store.
+              </p>
+              <input
+                type="text"
+                value={form.cikExtractorPath}
+                onChange={e => set('cikExtractorPath', e.target.value)}
+                placeholder="e.g. C:\Users\you\source\repos\CikExtractor"
                 className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
               />
             </div>

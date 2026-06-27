@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
-  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye, Search, HardDrive,
+  Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye, Search, HardDrive, Boxes,
 } from 'lucide-react';
 import { useAppState, type GameInfo, type SettingsPayload } from './store';
 import { sendCommand } from './bridge';
 import SettingsModal from './components/SettingsModal';
 import DrivesPanel from './components/DrivesPanel';
+import SkeletonPanel from './components/SkeletonPanel';
 import PlatformIcon from './components/PlatformIcon';
 
 
@@ -26,6 +27,7 @@ export default function App() {
   const [peerGameFilter, setPeerGameFilter] = useState('');
   const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
   const [showDrives, setShowDrives] = useState(false);
+  const [showSkeleton, setShowSkeleton] = useState(false);
 
   useEffect(() => {
     (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
@@ -657,6 +659,14 @@ export default function App() {
               Drives{s.drives.length > 0 ? ` (${s.drives.length})` : ''}
             </span>
           </button>
+          {s.isWindows && (
+            <button onClick={() => setShowSkeleton(v => !v)} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group ${showSkeleton ? 'bg-slate-800' : ''}`}>
+              <Boxes className={`w-4 h-4 ${s.isSkeletonWatching ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`} />
+              <span className={`text-sm ${s.isSkeletonWatching ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                Skeletons{s.skeletonCaptures.length > 0 ? ` (${s.skeletonCaptures.length})` : ''}
+              </span>
+            </button>
+          )}
           <button onClick={() => sendCommand('ToggleHighSpeedMode')} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group">
             <Wifi className={`w-4 h-4 ${s.highSpeedMode ? 'text-amber-400' : 'text-slate-400'}`} />
             <span className={`text-sm ${s.highSpeedMode ? 'text-amber-400' : 'text-slate-400 group-hover:text-slate-300'}`}>{s.highSpeedMode ? 'High-Speed' : 'WiFi Mode'}</span>
@@ -688,6 +698,23 @@ export default function App() {
               </button>
             </div>
             <DrivesPanel />
+          </div>
+        </div>
+      )}
+
+      {showSkeleton && (
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4 animate-fade-in" onClick={e => { if (e.target === e.currentTarget) setShowSkeleton(false); }}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-scale-in">
+            <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <Boxes className="w-6 h-6 text-white" />
+                <h2 className="text-lg font-bold text-white">Skeleton Capture</h2>
+              </div>
+              <button onClick={() => setShowSkeleton(false)} className="text-white/80 hover:text-white" title="Close">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <SkeletonPanel />
           </div>
         </div>
       )}

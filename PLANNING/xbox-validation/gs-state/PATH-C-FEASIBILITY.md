@@ -86,6 +86,18 @@ DODelayCacheServerFallbackForeground=high on a TEST PC; install a small game; wa
 - DO never contacts our host for game content => games bypass DOCacheHost => Option 2 DEAD,
   Family 1 exhausted.
 
+## OPTION 2 PROBE RESULT (2026-06-03) -- DEAD: games are NOT Delivery Optimization jobs
+Ran the cheap decisive probe on ONE PC (DESKTOP-FHVD1S8): proxy on :80, DOCacheHost=192.168.1.244,
+DODelayCacheServerFallback*=70, DoSvc restarted. Started an Xbox game install. Q1 = "is the game
+even a DO job?" answered FIRST: Task Manager showed "Gaming Services (2)" actively downloading at
+13.9 Mbps (real network pull), but `Get-DeliveryOptimizationStatus` returned NOTHING game-sized.
+=> Xbox GAME payloads do not pass through Delivery Optimization / DoSvc at all; Gaming Services
+uses its OWN downloader. DOCacheHost only redirects DO traffic, so it can never intercept game
+content. The disconnect-internet step (step 4) was unnecessary -- Q1 already settled it.
+This empirically confirms Finding 1 (DO content table: Xbox Game Pass PC P2P=No) and the earlier
+"Forza bypassed DO" note. OPTION 2 IS DEAD. Family 1 (LAN caching to obtain a native trusted
+install) is EXHAUSTED on consumer Windows: DO-P2P excluded, DO-cache-host bypassed, MCC enterprise-gated.
+
 ## Where that leaves us (realistic options)
 1. ACCEPT the overlay app as launch-only: it gives a playable install and saves the FIRST
    download; Verify/updates re-download (at-rest ciphertext can't be reproduced by copy).

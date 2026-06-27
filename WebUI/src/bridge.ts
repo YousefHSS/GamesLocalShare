@@ -76,7 +76,14 @@ export type CommandName =
   | 'BrowseXboxDestination'
   | 'BrowseXboxRoot'
   | 'SetXboxPath'
-  | 'DismissXboxTransfer';
+  | 'DismissXboxTransfer'
+  | 'PauseXboxTransfer'
+  | 'ResumeXboxTransfer'
+  | 'ToggleSkeletonWatcher'
+  | 'OpenSkeletonDropFolder'
+  | 'RestoreSkeleton'
+  | 'ReconstructSkeleton'
+  | 'ToggleCacheProxy';
 
 export interface CommandPayload {
   [key: string]: any;

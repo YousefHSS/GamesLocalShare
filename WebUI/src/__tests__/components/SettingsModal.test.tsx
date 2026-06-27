@@ -15,6 +15,8 @@ const basePayload: SettingsPayload = {
     minimizeToTray: false,
     epicInstallRoot: '',
     xboxRootPath: '',
+    xboxPackageCacheRoot: '',
+    cikExtractorPath: '',
   },
   hiddenGames: [],
   externalLibraries: [],

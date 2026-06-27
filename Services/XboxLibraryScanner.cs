@@ -207,7 +207,7 @@ public class XboxLibraryScanner : IGameLibraryScanner
         catch { }
 
         // Try to extract PFN from folder ACL (conditional SYSAPPID ACE)
-        string? pfn = TryExtractPfnFromAcl(dir);
+        string? pfn = ExtractPfnFromAcl(dir);
 
         // Determine overlay support: requires both envelope files at root
         // AND a GUID-named subfolder (the MSIXVC Content container layout).
@@ -244,7 +244,7 @@ public class XboxLibraryScanner : IGameLibraryScanner
     /// MSIXVC folders have a conditional ACE: WIN://SYSAPPID Contains "PFN"
     /// </summary>
     [SupportedOSPlatform("windows")]
-    private string? TryExtractPfnFromAcl(string dir)
+    internal static string? ExtractPfnFromAcl(string dir)
     {
         try
         {

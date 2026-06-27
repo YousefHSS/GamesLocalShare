@@ -1,0 +1,72 @@
+{
+    "StreamingCheckpoints":  {
+
+                             },
+    "StreamingTracking":  {
+
+                          },
+    "StreamingSummaries":  {
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{0BBA5A81-D323-4354-9C2D-2892E0D4B323}":  {
+                                                                                                                                                           "(default)":  "134263515514608300",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{36AF2C1B-E6E4-4901-952B-E492D41B68B1}":  {
+                                                                                                                                                           "(default)":  "134263546867451526",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{6E0789C5-CA65-41CE-B369-A2F6B5FDB1BE}":  {
+                                                                                                                                                           "(default)":  "134263301997990268",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{AB03F40C-E85D-467B-8C67-3870B89BD2D1}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{8E6825CC-F025-4277-8AF0-A2E9AEE5BE72}":  {
+                                                                                                                                                           "(default)":  "134263525500355465",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{A4FB8B4A-0E53-4AD8-8D61-A385AE987C2D}":  {
+                                                                                                                                                           "(default)":  "134263344548267830",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{C85EE4B1-F52D-4F4A-81DF-65BFDC06BA87}":  {
+                                                                                                                                                           "(default)":  "134263306025201551",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{7792D9CE-355A-493C-AFBD-768F4A77C3B0}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{D9C9C817-1AE3-46F7-81EE-66B5ADF90807}":  {
+                                                                                                                                                           "(default)":  "134263529535843420",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{EEA655C8-7BBA-46E4-A087-3535139F156E}":  {
+                                                                                                                                                           "(default)":  "134263346986935903",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       },
+                               "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\GamingServices\\StreamingSummaries\\{F6F7E607-AB36-4B8D-9D75-1F8292B2B79A}":  {
+                                                                                                                                                           "(default)":  "134263525832821076",
+                                                                                                                                                           "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  "0"
+                                                                                                                                                       }
+                           },
+    "PackageBackups":  {
+
+                       },
+    "StreamingServices":  {
+
+                          },
+    "StreamingRequests":  {
+
+                          },
+    "PackageRepository\\Metadata":  {
+                                        "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  {
+                                                                                                                              "InitialInstallTime":  "134263546843219614",
+                                                                                                                              "UsingAppLicensing":  "1"
+                                                                                                                          }
+                                    },
+    "PackageRepository\\Root":  {
+                                    "{98053395-E234-4CF1-BF1E-3D8FBAF84537}#{368B2C2C-C6E2-4472-ACDA-52A5F18A1D51}":  {
+                                                                                                                          "[child] F:WindowsAppsDoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4":  {
+                                                                                                                                                                                                                         "Package":  "DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4",
+                                                                                                                                                                                                                         "Root":  "\\\\?\\F:\\WindowsApps\\DoborogGames.CloneDroneintheDangerZone_1.9.2.0_x64__w6hf08ggk4es4\\"
+                                                                                                                                                                                                                     }
+                                                                                                                      }
+                                },
+    "PackageRepository\\Package":  {
+
+                                   }
+}

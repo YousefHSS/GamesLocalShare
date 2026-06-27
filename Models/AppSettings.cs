@@ -85,6 +85,21 @@ public class AppSettings
     public string? XboxRootPath { get; set; }
 
     /// <summary>
+    /// Root folder searched (recursively) for cached encrypted Xbox packages
+    /// (&lt;PackageFullName&gt;.msixvc). The skeleton-capture watcher uses it to
+    /// auto-locate a detected title's package. When null/empty it defaults to the
+    /// application's own program folder.
+    /// </summary>
+    public string? XboxPackageCacheRoot { get; set; }
+
+    /// <summary>
+    /// Path to the CikExtractor tool (its repo root or CikExtractor.exe). The
+    /// watcher invokes it on demand (elevated) to populate the CIK store used by
+    /// skeleton capture. When null/empty, capture relies on a pre-populated store.
+    /// </summary>
+    public string? CikExtractorPath { get; set; }
+
+    /// <summary>
     /// List of external drive libraries to scan for games
     /// </summary>
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];
@@ -221,7 +236,9 @@ public class AppSettings
             $"AutoUpdateCheckInterval={AutoUpdateCheckInterval}",
             $"AutoResumeDownloads={AutoResumeDownloads}",
             $"HiddenGameIds={string.Join(",", HiddenGameIds)}",
-            $"EpicInstallRoot={EpicInstallRoot ?? string.Empty}"
+            $"EpicInstallRoot={EpicInstallRoot ?? string.Empty}",
+            $"XboxPackageCacheRoot={XboxPackageCacheRoot ?? string.Empty}",
+            $"CikExtractorPath={CikExtractorPath ?? string.Empty}"
         };
         for (int i = 0; i < ExternalLibraries.Count; i++)
         {
@@ -272,6 +289,12 @@ public class AppSettings
                     break;
                 case "EpicInstallRoot":
                     settings.EpicInstallRoot = string.IsNullOrWhiteSpace(value) ? null : value;
+                    break;
+                case "XboxPackageCacheRoot":
+                    settings.XboxPackageCacheRoot = string.IsNullOrWhiteSpace(value) ? null : value;
+                    break;
+                case "CikExtractorPath":
+                    settings.CikExtractorPath = string.IsNullOrWhiteSpace(value) ? null : value;
                     break;
                 case "HiddenGameIds":
                     if (!string.IsNullOrEmpty(value))

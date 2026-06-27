@@ -1,0 +1,12 @@
+[
+    {
+        "FullName":  "C:\\ProgramData\\Microsoft\\Windows\\AppRepository\\Packages\\Microsoft.ForteBaseGame_3.375.327.0_x64__8wekyb3d8bbwe\\MsixvcSignature.p7",
+        "Length":  11211,
+        "LastWriteUtc":  "2026-06-19T08:09:53.4637248Z"
+    },
+    {
+        "FullName":  "C:\\ProgramData\\Microsoft\\Windows\\AppRepository\\Packages\\Microsoft.ForteBaseGame_3.375.327.0_x64__8wekyb3d8bbwe\\S-1-5-21-4002976177-2962401402-1312406969-1001.pckgdep",
+        "Length":  3804,
+        "LastWriteUtc":  "2026-06-19T08:09:53.8207898Z"
+    }
+]

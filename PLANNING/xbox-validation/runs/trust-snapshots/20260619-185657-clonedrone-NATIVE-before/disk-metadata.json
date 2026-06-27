@@ -1,0 +1,48 @@
+{
+    "Root":  "F:\\Games\\Clone Drone in the Danger Zone",
+    "RootSddl":  "O:SYG:SYD:AI(A;OICIID;FA;;;S-1-5-21-4002976177-2962401402-1312406969-1001)(A;OICIID;FA;;;BA)(A;OICIID;0x1200a9;;;WD)(A;OICIID;FA;;;SY)",
+    "Files":  [
+                  {
+                      "Name":  "368B2C2C-C6E2-4472-ACDA-52A5F18A1D51",
+                      "Length":  14303232,
+                      "LastWriteUtc":  "2026-06-19T14:58:05.1452801Z",
+                      "Sha256":  "20FAB5D90443B3AF6E89C25A09111C261D79685D740D7C8D71C3374586300820",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "368B2C2C-C6E2-4472-ACDA-52A5F18A1D51.CF92E7F7-F498-4CD6-9652-9619111E3B2F.xsp",
+                      "Length":  7904,
+                      "LastWriteUtc":  "2026-06-19T14:57:39.3495912Z",
+                      "Sha256":  "1DB7AA2A3CA03F05ECE512EF51A84DEE3604802B13A25234CFEDEFB0DF7E764A",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "368B2C2C-C6E2-4472-ACDA-52A5F18A1D51.smd",
+                      "Length":  35078,
+                      "LastWriteUtc":  "2026-06-19T14:58:05.1462877Z",
+                      "Sha256":  "6D12D1F493241E866F1B16A9A113264061DF89EE71985FC14178CE2158F02C3B",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "368B2C2C-C6E2-4472-ACDA-52A5F18A1D51.xct",
+                      "Length":  4096,
+                      "LastWriteUtc":  "2026-06-19T14:59:06.8972658Z",
+                      "Sha256":  "D220E5678F9861B96BA8D372AFC0632268D240D079F900B315651542D1933F0D",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "368B2C2C-C6E2-4472-ACDA-52A5F18A1D51.xvi",
+                      "Length":  4096,
+                      "LastWriteUtc":  "2026-06-19T14:59:06.8987700Z",
+                      "Sha256":  "EF293CE3EBE1530D3D9527A103CB3AB060A896A8B6A51BDAE9B0FB7C964698B2",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  },
+                  {
+                      "Name":  "368B2C2C-C6E2-4472-ACDA-52A5F18A1D51.xvs",
+                      "Length":  10190,
+                      "LastWriteUtc":  "2026-06-19T14:58:06.4570661Z",
+                      "Sha256":  "43D58EF03AC65CAD49132776011FFDAA4A0C0CA9BADD141D352C48212BD70C36",
+                      "Sddl":  "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
+                  }
+              ]
+}

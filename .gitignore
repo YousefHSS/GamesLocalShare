@@ -320,6 +320,11 @@ __pycache__/
 # tools/**
 # !tools/packages.config
 
+# Xbox content-instance keys (device-bound; never commit). The bundled xvdtool
+# auto-loads <exe>\Cik\ at startup, so guard that path too.
+*.cik
+Cik/
+
 # Tabs Studio
 *.tss
 
