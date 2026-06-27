@@ -216,6 +216,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _skeletonWatcher.CaptureFailed += OnSkeletonCaptureFailed;
             _skeletonWatcher.RestoreCompleted += OnSkeletonRestoreCompleted;
             _skeletonWatcher.RestoreFailed += OnSkeletonCaptureFailed;
+            _skeletonWatcher.InstallDetected += OnReceiverInstallDetected;
 
             // Load skeletons already captured in previous sessions so the UI lists them (with their
             // Restore/Reconstruct actions) on startup — not just ones captured live this session.
@@ -2987,6 +2988,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void CancelXboxTransfer()
     {
         _xboxTransferService.Cancel();
+        // If a streaming peer install is showing in the bar, tear it down too.
+        EndXboxPeerInstall();
+        _peerInstallState = null;
         IsXboxTransferActive = false;
         StatusMessage = "Xbox transfer cancelled";
         AddLog("Xbox transfer cancelled by user", LogMessageType.Warning);
@@ -3009,6 +3013,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void DismissXboxTransfer()
     {
+        EndXboxPeerInstall();
+        _peerInstallState = null;
         IsXboxTransferActive = false;
     }
 
@@ -3117,6 +3123,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CacheProxyStats = $"hits {_cacheProxy.Hits} · misses {_cacheProxy.Misses} · " +
                               $"filling {_cacheProxy.Filling} · cached {_cacheProxy.Cached} · " +
                               $"{_cacheProxy.Bytes / 1048576.0:F1} MB served";
+
+            // Drive the transfer bar from peer-served bytes while a streaming peer install is active.
+            if (_peerInstallState != null && !string.IsNullOrEmpty(_activePeerMatchKey))
+            {
+                long got = _cacheProxy.PeerBytes, total = _cacheProxy.PeerTotal;
+                var now = DateTime.UtcNow;
+                double secs = (now - _peerLastTick).TotalSeconds;
+                if (secs >= 0.5)
+                {
+                    _peerInstallState.NetworkSpeedMBps = Math.Max(0, (got - _peerLastBytes) / 1048576.0 / secs);
+                    _peerLastBytes = got; _peerLastTick = now;
+                }
+                _peerInstallState.NetworkReceivedMB = got / 1048576.0;
+                if (total > 0)
+                {
+                    _peerInstallState.OverlayProgress = Math.Min(100.0, got * 100.0 / total);
+                    double remMB = Math.Max(0, (total - got) / 1048576.0);
+                    _peerInstallState.NetworkEta = _peerInstallState.NetworkSpeedMBps > 0.01
+                        ? TimeSpan.FromSeconds(remMB / _peerInstallState.NetworkSpeedMBps).ToString(@"mm\:ss")
+                        : "";
+                    if (got >= total && _peerInstallState.CurrentStep == XboxTransferStep.DownloadingFromPeer)
+                    {
+                        // All bytes streamed. Show "finishing" but KEEP the peer origin active until the install
+                        // is actually detected complete (the Store may re-request tail ranges) — see
+                        // OnReceiverInstallDetected, which finalizes + clears the origin.
+                        _peerInstallState.StatusMessage =
+                            $"Streamed {total / 1048576.0:F0} MB from the peer — Xbox app is finishing the install…";
+                    }
+                }
+                XboxTransfer = _peerInstallState;
+                OnPropertyChanged(nameof(XboxTransfer));
+            }
         });
     }
 
@@ -3175,6 +3213,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private System.Diagnostics.Process? _xboxServeProc;   // sender: the running `xvdtool --serve` for a title
     private string? _xboxServeTitle;
     private string? _activePeerMatchKey;                  // receiver: the proxy peer-origin key in effect
+    private XboxTransferState? _peerInstallState;         // receiver: drives the transfer bar during a peer install
+    private long _peerLastBytes;
+    private DateTime _peerLastTick;
 
     private static string XvdToolPath =>
         Path.Combine(AppContext.BaseDirectory, "tools", "xvdtool", "XVDTool.exe");
@@ -3308,12 +3349,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _cacheProxy.SetPeerOrigin(matchKey, peerHost, port);
         _activePeerMatchKey = matchKey;
 
+        // Show the standard Xbox transfer bar, driven live by the proxy's peer-served bytes.
+        _peerInstallState = new XboxTransferState
+        {
+            GameName = game.Name,
+            IsNetwork = true,
+            CurrentStep = XboxTransferStep.DownloadingFromPeer,
+            StatusMessage = $"Click Install on \"{game.Name}\" in the Xbox app — streaming from {peer.DisplayName}",
+            PeerId = peer.PeerId,
+            AppId = gameAppId,
+        };
+        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow;
+        Dispatcher.UIThread.Post(() =>
+        {
+            XboxTransfer = _peerInstallState;
+            IsXboxTransferActive = true;
+            OnPropertyChanged(nameof(XboxTransfer));
+        });
+
         // Fetch the tiny skeleton so this PC ends single-copy (install files + skeleton, no re-capture).
         await TryFetchPeerSkeletonAsync(peerHost, port, game);
 
         StatusMessage = $"Ready — click Install on \"{game.Name}\" in the Xbox app (it streams from {peer.DisplayName})";
         AddLog($"Xbox peer install: READY. In the Xbox app, install \"{game.Name}\" now — bytes stream from {peer.DisplayName} (~0 download). " +
-               $"The proxy stats show peer-served traffic.", LogMessageType.Success);
+               $"Progress shows in the transfer bar.", LogMessageType.Success);
     }
 
     private async Task TryFetchPeerSkeletonAsync(string peerHost, int port, GameInfo game)
@@ -3333,6 +3392,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             AddLog($"Xbox peer install: could not fetch skeleton ({ex.Message}) — install will still work; re-capture later for single-copy", LogMessageType.Warning);
         }
+    }
+
+    /// <summary>Receiver: the watcher saw a new install complete while a streaming peer install is active —
+    /// finalize the transfer bar and stop forwarding to the peer.</summary>
+    private void OnReceiverInstallDetected(string installDir)
+    {
+        if (_peerInstallState == null || string.IsNullOrEmpty(_activePeerMatchKey)) return;
+        EndXboxPeerInstall();
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_peerInstallState == null) return;
+            _peerInstallState.CurrentStep = XboxTransferStep.Complete;
+            _peerInstallState.Verdict = XboxTransferVerdict.FullSkip;
+            _peerInstallState.OverlayProgress = 100;
+            _peerInstallState.NetworkSpeedMBps = 0;
+            _peerInstallState.StatusMessage =
+                $"Installed \"{_peerInstallState.GameName}\" — streamed from the peer (no internet download)";
+            XboxTransfer = _peerInstallState;
+            OnPropertyChanged(nameof(XboxTransfer));
+        });
+        AddLog($"Xbox peer install: install detected complete — streaming origin cleared", LogMessageType.Success);
     }
 
     /// <summary>Receiver: clear the active peer streaming origin (call when the install is done or cancelled).</summary>

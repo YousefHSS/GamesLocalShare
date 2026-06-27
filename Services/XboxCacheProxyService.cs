@@ -59,6 +59,9 @@ public sealed class XboxCacheProxyService : IDisposable
 
     // Live counters (surfaced to the UI).
     public long Hits, Misses, Cached, Filling, Errors, Bytes;
+    // Active peer streaming-install progress: bytes served from the peer for the current title and the
+    // package total (learned from the peer's Content-Range). Reset on SetPeerOrigin.
+    public long PeerBytes, PeerTotal;
 
     /// <summary>Free-text log/status line.</summary>
     public event Action<string>? Log;
@@ -159,6 +162,8 @@ public sealed class XboxCacheProxyService : IDisposable
     public void SetPeerOrigin(string matchKey, string host, int port)
     {
         if (string.IsNullOrWhiteSpace(matchKey) || string.IsNullOrWhiteSpace(host) || port <= 0) return;
+        Interlocked.Exchange(ref PeerBytes, 0);
+        Interlocked.Exchange(ref PeerTotal, 0);
         lock (_gate) { _peerOrigins[matchKey] = (host, port); }
         Log?.Invoke($"peer origin set: \"{matchKey}\" -> {host}:{port} (transient, no disk)");
     }
@@ -295,6 +300,8 @@ public sealed class XboxCacheProxyService : IDisposable
                     res.StatusCode = sc;
                     ContentRangeHeaderValue? crange = resp.Content.Headers.ContentRange;
                     if (crange != null) res.Headers["Content-Range"] = crange.ToString();
+                    if (viaPeer && crange?.Length != null && PeerTotal == 0)
+                        System.Threading.Interlocked.Exchange(ref PeerTotal, crange.Length.Value);
                     long? cl = resp.Content.Headers.ContentLength;
                     if (cl != null) res.ContentLength64 = cl.Value;
                     res.Headers["Accept-Ranges"] = "bytes";
@@ -316,6 +323,7 @@ public sealed class XboxCacheProxyService : IDisposable
                 }
                 Interlocked.Increment(ref Misses);
                 Interlocked.Add(ref Bytes, sent);
+                if (viaPeer) Interlocked.Add(ref PeerBytes, sent);
                 StatsChanged?.Invoke();
             }
         }
