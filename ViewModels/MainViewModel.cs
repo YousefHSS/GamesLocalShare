@@ -3116,7 +3116,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
         AddLog($"Copy to drive (updatable): rebuilding \"{game.Name}\" → {lib.RootPath} …", LogMessageType.Info);
-        await RestoreSkeletonToFolderAsync(name, lib.RootPath);
+
+        // Show the standard transfer bar as an animated "working" bar (the reconstruct pre-allocates the file,
+        // so there's no reliable byte-% to show). Phase text is updated from the engine's status lines.
+        var st = new XboxTransferState
+        {
+            GameName = game.Name,
+            IsNetwork = false,
+            CurrentStep = XboxTransferStep.CopyingFiles,
+            Indeterminate = true,
+            StatusMessage = $"Building an updatable copy of \"{game.Name}\" on {lib.DisplayName} — this can take a few minutes…",
+        };
+        _driveCopyState = st;
+        Dispatcher.UIThread.Post(() =>
+        {
+            XboxTransfer = st;
+            IsXboxTransferActive = true;
+            OnPropertyChanged(nameof(XboxTransfer));
+        });
+
+        bool ok;
+        try { ok = await _skeletonWatcher.RestoreAsync(name, lib.RootPath); }
+        finally { _driveCopyState = null; }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            st.CurrentStep = ok ? XboxTransferStep.Complete : XboxTransferStep.Failed;
+            st.Verdict = ok ? XboxTransferVerdict.FullSkip : XboxTransferVerdict.Error;
+            st.Indeterminate = false;
+            st.OverlayProgress = ok ? 100 : 0;
+            st.StatusMessage = ok
+                ? $"Updatable copy of \"{game.Name}\" is ready on {lib.DisplayName} — take the drive to the other PC and use Receive Xbox Game"
+                : $"Copy of \"{game.Name}\" failed — see the log";
+            XboxTransfer = st; OnPropertyChanged(nameof(XboxTransfer));
+        });
     }
 
     private void OnSkeletonRestoreCompleted(string name)
@@ -3211,6 +3244,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SkeletonLog.Insert(0, $"{DateTime.Now:HH:mm:ss}  {line}");
             while (SkeletonLog.Count > MaxLogMessages)
                 SkeletonLog.RemoveAt(SkeletonLog.Count - 1);
+
+            // While a "Copy to Drive" is running, reflect the engine's phase in the transfer bar's status.
+            var dc = _driveCopyState;
+            if (dc != null)
+            {
+                string? phase = null;
+                if (line.IndexOf("Reconstructing", StringComparison.OrdinalIgnoreCase) >= 0)
+                    phase = $"Rebuilding \"{dc.GameName}\" on the drive…";
+                else if (line.IndexOf("RECONSTRUCT", StringComparison.OrdinalIgnoreCase) >= 0
+                      || line.IndexOf("re-encrypt", StringComparison.OrdinalIgnoreCase) >= 0
+                      || line.IndexOf("Crypting", StringComparison.OrdinalIgnoreCase) >= 0
+                      || line.IndexOf("data hashes", StringComparison.OrdinalIgnoreCase) >= 0
+                      || line.IndexOf("Loading file", StringComparison.OrdinalIgnoreCase) >= 0)
+                    phase = $"Encrypting \"{dc.GameName}\" (final step)…";
+                if (phase != null && dc.StatusMessage != phase)
+                {
+                    dc.StatusMessage = phase;
+                    XboxTransfer = dc;
+                    OnPropertyChanged(nameof(XboxTransfer));
+                }
+            }
         });
         AddLog($"[Skeleton] {line}", LogMessageType.Info);
     }
@@ -3264,6 +3318,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private long _peerLastBytes;
     private DateTime _peerLastTick;
     private bool _peerFinishScheduled;                    // one-shot guard for the finalize safety-net
+    private XboxTransferState? _driveCopyState;            // active "Copy to Drive" reconstruct → transfer bar
 
     private static string XvdToolPath =>
         Path.Combine(AppContext.BaseDirectory, "tools", "xvdtool", "XVDTool.exe");

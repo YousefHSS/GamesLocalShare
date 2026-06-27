@@ -595,10 +595,14 @@ export default function App() {
                 </div>
                 {!finished && !awaitingResume && (
                   <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
-                    <div
-                      className={`h-full transition-all ${paused ? 'bg-gradient-to-r from-amber-500 to-yellow-500' : 'bg-gradient-to-r from-green-500 to-emerald-500'}`}
-                      style={{ width: `${Math.min(xt.overlayProgress, 100)}%` }}
-                    />
+                    {xt.indeterminate ? (
+                      <div className="h-full w-full bg-gradient-to-r from-green-500 to-emerald-500 animate-pulse" />
+                    ) : (
+                      <div
+                        className={`h-full transition-all ${paused ? 'bg-gradient-to-r from-amber-500 to-yellow-500' : 'bg-gradient-to-r from-green-500 to-emerald-500'}`}
+                        style={{ width: `${Math.min(xt.overlayProgress, 100)}%` }}
+                      />
+                    )}
                   </div>
                 )}
                 <p className={`text-[10px] mt-1 truncate ${failed ? 'text-red-300' : awaitingResume ? 'text-yellow-200' : 'text-slate-400'}`}>

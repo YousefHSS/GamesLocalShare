@@ -16,6 +16,8 @@ public class XboxTransferState
 
     // Progress
     public double OverlayProgress { get; set; }
+    /// <summary>When true the work has no measurable percentage; the UI shows an animated "working" bar.</summary>
+    public bool Indeterminate { get; set; }
     public string StatusMessage { get; set; } = string.Empty;
 
     // Monitoring results

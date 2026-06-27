@@ -41,7 +41,7 @@ export default function DrivesPanel() {
   // "Device-only" rows (games installed locally but not on the drive) dominate
   // the list once compared, so they're hidden by default. The user can opt in
   // when they actually want to see what's missing from a drive.
-  const [showDeviceOnly, setShowDeviceOnly] = useState(false);
+  const [showDeviceOnly, setShowDeviceOnly] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Keep local state in sync with store
@@ -324,15 +324,17 @@ export default function DrivesPanel() {
                 </div>
 
                 {/* Games in this library */}
-                {gamesForLib.length === 0 ? (
+                {!connected ? (
+                  <div className="px-4 py-3 text-xs text-slate-500 italic">
+                    Drive not connected — connect it to compare and transfer games
+                  </div>
+                ) : gamesForLib.length === 0 ? (
                   <div className="px-4 py-3 text-xs text-slate-500 italic">
                     {searchQuery.trim()
                       ? `No games matching "${searchQuery.trim()}"`
                       : hiddenDeviceOnly > 0
                         ? `${hiddenDeviceOnly} device-only game${hiddenDeviceOnly === 1 ? '' : 's'} hidden — toggle "Show device-only games" to view`
-                        : connected
-                          ? 'Click "Compare Locations" to see games'
-                          : 'Drive not connected'}
+                        : 'Click "Compare Locations" to see games'}
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-700/30">
