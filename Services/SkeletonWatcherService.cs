@@ -27,7 +27,7 @@ public sealed class SkeletonWatcherService : IDisposable
     private readonly SkeletonService _skeleton;
     private readonly CikExtractorRunner _cikRunner = new();
     private readonly string _cikStore;
-    private readonly string _cacheRoot;
+    private string _cacheRoot;
     private readonly string? _cikExtractorPath;
     private readonly List<FileSystemWatcher> _watchers = new();
     // installed title folder name -> install dir
@@ -50,6 +50,23 @@ public sealed class SkeletonWatcherService : IDisposable
     public string CikStore => _cikStore;
     /// <summary>Root searched (recursively) for cached <c>&lt;PackageFullName&gt;.msixvc</c> packages.</summary>
     public string PackageCacheRoot => _cacheRoot;
+
+    /// <summary>Updates the package cache root (e.g. after the user changes it in Settings). Capture/restore
+    /// pick it up immediately; if the watcher is already running, the cache-folder watcher is re-pointed too.</summary>
+    public void UpdateCacheRoot(string? cacheRoot)
+    {
+        var newRoot = string.IsNullOrWhiteSpace(cacheRoot) ? @"F:\xbox-cache" : cacheRoot!;
+        if (string.Equals(_cacheRoot, newRoot, StringComparison.OrdinalIgnoreCase)) return;
+        _cacheRoot = newRoot;
+        Report($"package cache root changed to: {_cacheRoot}");
+        if (IsRunning)
+        {
+            // Restart so the cache-folder FileSystemWatcher re-points at the new root.
+            var roots = _roots;
+            Stop();
+            Start(roots);
+        }
+    }
     /// <summary>CikExtractor repo root or exe used to populate the CIK store on demand (may be null).</summary>
     public string? CikExtractorPath => _cikExtractorPath;
 

@@ -636,6 +636,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _autoUpdateTimer.Start();
             AddLog($"Auto-update interval changed to {_settings.AutoUpdateCheckInterval} minutes", LogMessageType.Info);
         }
+
+        // Propagate a changed Xbox package cache path to the live proxy + skeleton watcher. These were
+        // captured once at construction, so without this a Settings change never reached them (the proxy kept
+        // using the default F:\xbox-cache — "cannot create cache dir" on a PC without that path).
+        if (_cacheProxy != null)
+        {
+            var newCache = string.IsNullOrWhiteSpace(_settings.XboxPackageCacheRoot)
+                ? @"F:\xbox-cache" : _settings.XboxPackageCacheRoot!;
+            if (!string.Equals(CacheProxyDir, newCache, StringComparison.OrdinalIgnoreCase))
+            {
+                CacheProxyDir = newCache;
+                _skeletonWatcher?.UpdateCacheRoot(newCache);
+                AddLog($"Cache path set to {newCache}" +
+                    (_cacheProxy.IsRunning ? " — restart the proxy (Stop/Start) to apply" : ""),
+                    LogMessageType.Info);
+            }
+        }
     }
 
     /// <summary>
