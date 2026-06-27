@@ -43,6 +43,10 @@ public sealed class XboxCacheProxyService : IDisposable
     private readonly Dictionary<string, string> _dns = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private readonly HashSet<string> _inProgress = new(StringComparer.OrdinalIgnoreCase);
+    // Active peer-origin overrides: when a request's URL path contains one of these keys (e.g. a title's
+    // PackageFullName / content GUID), forward it to a peer's streaming-reconstruct endpoint instead of the CDN
+    // and serve it transiently (NO disk fill) - the streaming single-copy receive path.
+    private readonly Dictionary<string, (string host, int port)> _peerOrigins = new(StringComparer.OrdinalIgnoreCase);
 
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -146,6 +150,47 @@ public sealed class XboxCacheProxyService : IDisposable
         StatsChanged?.Invoke();
     }
 
+    // ---- peer streaming origins (receiver side of the single-copy peer transfer) ----------------------
+
+    /// <summary>Registers a peer streaming origin: any request whose URL path contains <paramref name="matchKey"/>
+    /// (e.g. the title's PackageFullName or content GUID) is forwarded to <c>http://host:port</c> instead of the
+    /// CDN and served transiently (never written to disk). Used during a streaming peer install so the receiver
+    /// pulls genuine bytes from the sender's on-the-fly reconstruct endpoint without ever storing the package.</summary>
+    public void SetPeerOrigin(string matchKey, string host, int port)
+    {
+        if (string.IsNullOrWhiteSpace(matchKey) || string.IsNullOrWhiteSpace(host) || port <= 0) return;
+        lock (_gate) { _peerOrigins[matchKey] = (host, port); }
+        Log?.Invoke($"peer origin set: \"{matchKey}\" -> {host}:{port} (transient, no disk)");
+    }
+
+    /// <summary>Removes a peer streaming origin (call when a streaming install finishes/aborts).</summary>
+    public void ClearPeerOrigin(string matchKey)
+    {
+        if (string.IsNullOrWhiteSpace(matchKey)) return;
+        lock (_gate) { _peerOrigins.Remove(matchKey); }
+        Log?.Invoke($"peer origin cleared: \"{matchKey}\"");
+    }
+
+    /// <summary>Removes all peer streaming origins.</summary>
+    public void ClearAllPeerOrigins()
+    {
+        lock (_gate) { _peerOrigins.Clear(); }
+    }
+
+    private bool TryGetPeerOrigin(string rawPath, out string host, out int port)
+    {
+        host = ""; port = 0;
+        lock (_gate)
+        {
+            foreach (var kv in _peerOrigins)
+                if (rawPath.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    host = kv.Value.host; port = kv.Value.port; return true;
+                }
+        }
+        return false;
+    }
+
     private async Task AcceptLoopAsync(CancellationToken ct)
     {
         var listener = _listener;
@@ -225,11 +270,23 @@ public sealed class XboxCacheProxyService : IDisposable
             }
             else
             {
-                // MISS: kick off background fill (once) + forward this request live.
-                string ip = _dns[hostHdr];
-                StartFill(file, hostHdr, rawPath, ip);
-                var msg = new HttpRequestMessage(HttpMethod.Get, "http://" + ip + rawPath);
-                msg.Headers.Host = hostHdr;
+                // MISS. If a peer streaming origin is registered for this path, forward to the peer's
+                // reconstruct endpoint (transient - NO disk fill): the streaming single-copy receive. Otherwise
+                // forward live to the real CDN and background-fill the package to disk as usual.
+                bool viaPeer = TryGetPeerOrigin(rawPath, out var peerHost, out var peerPort);
+                string target;
+                if (viaPeer)
+                {
+                    target = $"http://{peerHost}:{peerPort}{rawPath}";
+                }
+                else
+                {
+                    string ip = _dns[hostHdr];
+                    StartFill(file, hostHdr, rawPath, ip);
+                    target = "http://" + ip + rawPath;
+                }
+                var msg = new HttpRequestMessage(HttpMethod.Get, target);
+                if (!viaPeer) msg.Headers.Host = hostHdr; // CDN needs the real host; the peer endpoint ignores it
                 if (!string.IsNullOrEmpty(range)) msg.Headers.TryAddWithoutValidation("Range", range);
                 long sent = 0; int sc;
                 using (var resp = _live.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
@@ -378,6 +435,11 @@ public sealed class XboxCacheProxyService : IDisposable
 
     private async Task<bool> RunElevatedPowerShellAsync(string psScript)
     {
+        // When the app is already elevated, run the urlacl/hosts steps in-process (no UAC). Otherwise spawn a
+        // single elevated helper (one UAC) via runas.
+        bool alreadyElevated = false;
+        try { alreadyElevated = ElevationHelper.IsElevated(); } catch { }
+
         try
         {
             var enc = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
@@ -385,10 +447,21 @@ public sealed class XboxCacheProxyService : IDisposable
             {
                 FileName = "powershell.exe",
                 Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {enc}",
-                UseShellExecute = true,
-                Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Hidden,
+                CreateNoWindow = true,
             };
+            if (alreadyElevated)
+            {
+                // No elevation prompt needed; capture output so failures are diagnosable.
+                psi.UseShellExecute = false;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+            }
+            else
+            {
+                psi.UseShellExecute = true;   // required for Verb=runas
+                psi.Verb = "runas";           // triggers the UAC prompt
+            }
             using var p = Process.Start(psi);
             if (p == null) return false;
             await p.WaitForExitAsync();

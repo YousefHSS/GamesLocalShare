@@ -314,6 +314,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             _ = StartNetworkAsync();
         }
+
+        // Auto-start the Xbox single-copy engine (skeleton watcher + LAN cache proxy) so Xbox games are
+        // captured automatically with no manual Start Watching / Start Proxy. One UAC per session.
+        if (OperatingSystem.IsWindows() && _settings.XboxSingleCopyAutoStart && _skeletonWatcher != null)
+        {
+            _ = AutoStartXboxSingleCopyAsync();
+        }
+    }
+
+    /// <summary>
+    /// Brings up the Xbox single-copy engine on launch: starts the skeleton-capture watcher (so installs are
+    /// captured automatically) and the LAN cache proxy (so downloads are intercepted/served). Gated by
+    /// <see cref="AppSettings.XboxSingleCopyAutoStart"/>; failures are non-fatal (the app still works).
+    /// </summary>
+    private async Task AutoStartXboxSingleCopyAsync()
+    {
+        try
+        {
+            if (_skeletonWatcher != null && !_skeletonWatcher.IsRunning)
+            {
+                var roots = OperatingSystem.IsWindows()
+                    ? new XboxLibraryScanner().GetLibraryFolders()
+                    : new List<string>();
+                _skeletonWatcher.Start(roots);
+                IsSkeletonWatching = _skeletonWatcher.IsRunning;
+                AddLog("[Xbox] Auto-capture started (watching for installs)", LogMessageType.Info);
+            }
+
+            if (_cacheProxy != null && !_cacheProxy.IsRunning)
+            {
+                var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+                var ok = await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
+                IsCacheProxyRunning = _cacheProxy.IsRunning;
+                AddLog(ok
+                    ? "[Xbox] LAN cache proxy started"
+                    : "[Xbox] cache proxy not started (elevation declined?) — capture/serve disabled until you start it",
+                    ok ? LogMessageType.Info : LogMessageType.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"[Xbox] auto-start failed: {ex.Message}", LogMessageType.Warning);
+        }
     }
 
     private void AddLog(string message, LogMessageType type = LogMessageType.Info)
@@ -3127,67 +3170,190 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// Called when a remote peer asks us to prepare an Xbox game for streaming.
     /// Finds the game by appId, prepares it, and starts the XboxNetworkSender.
     /// </summary>
-    private async Task<(bool Success, string? Error)> OnXboxStreamingRequested(string gameAppId)
+    // ---- Streaming single-copy peer transfer (sender + receiver) -----------------------------------
+
+    private System.Diagnostics.Process? _xboxServeProc;   // sender: the running `xvdtool --serve` for a title
+    private string? _xboxServeTitle;
+    private string? _activePeerMatchKey;                  // receiver: the proxy peer-origin key in effect
+
+    private static string XvdToolPath =>
+        Path.Combine(AppContext.BaseDirectory, "tools", "xvdtool", "XVDTool.exe");
+
+    private static int FreeTcpPort()
+    {
+        var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        l.Start();
+        int p = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return p;
+    }
+
+    // Distinctive substring of the package's CDN URL path (the .msixvc filename carries "<Name>...<pubhash>").
+    // Used as the proxy peer-origin match key on the receiver. Falls back to the appId.
+    private static string DeriveMatchKey(GameInfo game)
+    {
+        var pfn = game.PackageFamilyName;
+        if (!string.IsNullOrEmpty(pfn))
+        {
+            int us = pfn.IndexOf('_');
+            var name = us > 0 ? pfn.Substring(0, us) : pfn; // "<Publisher>.<Title>"
+            if (!string.IsNullOrEmpty(name)) return name;
+        }
+        return game.AppId;
+    }
+
+    /// <summary>
+    /// SENDER side. A peer asked to stream an Xbox title we own. Launch <c>xvdtool --serve</c> backed by this
+    /// title's skeleton + installed files (genuine bytes produced on the fly - no package materialized) and
+    /// return the port. The receiver's proxy forwards the title's requests here instead of the CDN.
+    /// </summary>
+    private Task<(bool Success, int Port, string? Error)> OnXboxStreamingRequested(string gameAppId)
     {
         try
         {
-            // Find the Xbox game in our local library
             var game = LocalGames.FirstOrDefault(g =>
                 g.AppId.Equals(gameAppId, StringComparison.OrdinalIgnoreCase) &&
                 g.Platform == GamePlatform.Xbox);
             if (game == null)
-                return (false, $"Game {gameAppId} not found in local Xbox library");
-
+                return Task.FromResult((false, 0, (string?)$"Game {gameAppId} not found in local Xbox library"));
             if (string.IsNullOrEmpty(game.InstallPath) || !Directory.Exists(game.InstallPath))
-                return (false, $"Install path not found for {game.Name}");
+                return Task.FromResult((false, 0, (string?)$"Install path not found for {game.Name}"));
+            if (_skeletonWatcher == null)
+                return Task.FromResult((false, 0, (string?)"Skeleton engine unavailable"));
 
-            // If already serving this game, just return success
-            if (_xboxNetworkSender.Port > 0 && _xboxSenderService.State.SourcePath == game.InstallPath
-                && _xboxSenderService.State.CurrentStep == XboxTransferStep.Complete)
+            var name = Path.GetFileName(game.InstallPath.TrimEnd('\\', '/'));
+            var skel = Path.Combine(_skeletonWatcher.SkeletonStore, name + ".skl");
+            if (!File.Exists(skel))
+                return Task.FromResult((false, 0, (string?)$"No skeleton captured for \"{name}\" yet — install it here so it gets captured, then retry"));
+
+            // Stop any previous serve, start a fresh one for this title.
+            StopXboxServe();
+            int port = FreeTcpPort();
+            var psi = new System.Diagnostics.ProcessStartInfo
             {
-                AddLog($"Xbox streaming: already serving {game.Name}", LogMessageType.Info);
-                return (true, null);
-            }
+                FileName = XvdToolPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("--cikfolder"); psi.ArgumentList.Add(_skeletonWatcher.CikStore);
+            psi.ArgumentList.Add("--skel"); psi.ArgumentList.Add(skel);
+            psi.ArgumentList.Add("--install"); psi.ArgumentList.Add(game.InstallPath);
+            psi.ArgumentList.Add("--serve");
+            psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
+            psi.ArgumentList.Add("--bind"); psi.ArgumentList.Add("0.0.0.0");
 
-            AddLog($"Xbox streaming: peer requested {game.Name}, preparing...", LogMessageType.Info);
+            var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null)
+                return Task.FromResult((false, 0, (string?)"Failed to launch xvdtool --serve"));
+            proc.OutputDataReceived += (_, e) => { if (e.Data != null) AddLog($"[serve] {e.Data}", LogMessageType.Info); };
+            proc.ErrorDataReceived += (_, e) => { if (e.Data != null) AddLog($"[serve] {e.Data}", LogMessageType.Warning); };
+            proc.BeginOutputReadLine(); proc.BeginErrorReadLine();
+            _xboxServeProc = proc; _xboxServeTitle = name;
 
-            // Validate and prepare
-            _xboxSenderService.Reset();
-            // Subscribe BEFORE ValidateSource so its PFN-resolution diagnostics
-            // are visible — they fire inside that call.
-            _xboxSenderService.LogMessage += (_, msg) => AddLog(msg, LogMessageType.Info);
-
-            var error = _xboxSenderService.ValidateSource(game.InstallPath, game.PackageFamilyName);
-            if (error != null)
-                return (false, error);
-
-            var (manifest, pathOverrides) = await _xboxSenderService.PrepareForDirectNetworkAsync();
-
-            // Honor the sender's fail-loud verdict — don't serve an empty
-            // manifest to a peer waiting for files.
-            if (_xboxSenderService.State.CurrentStep != XboxTransferStep.Complete)
-            {
-                var err = _xboxSenderService.State.ErrorMessage ?? "Preparation failed";
-                AddLog($"Xbox streaming aborted: {err}", LogMessageType.Error);
-                return (false, err);
-            }
-
-            _xboxNetworkSender.SetManifest(manifest);
-            if (pathOverrides.Count > 0)
-                _xboxNetworkSender.SetPathOverrides(pathOverrides);
-
-            // Stop any previous listener and start fresh
-            _xboxNetworkSender.Stop();
-            _xboxNetworkSender.Start();
-
-            AddLog($"Xbox streaming: ready to serve {game.Name} on port {_xboxNetworkSender.Port}", LogMessageType.Info);
-            return (true, null);
+            AddLog($"Xbox streaming: serving \"{name}\" on port {port} (on-the-fly reconstruct, no package copy)", LogMessageType.Success);
+            return Task.FromResult((true, port, (string?)null));
         }
         catch (Exception ex)
         {
             AddLog($"Xbox streaming preparation failed: {ex.Message}", LogMessageType.Error);
-            return (false, ex.Message);
+            return Task.FromResult((false, 0, (string?)ex.Message));
         }
+    }
+
+    private void StopXboxServe()
+    {
+        try { if (_xboxServeProc is { HasExited: false }) _xboxServeProc.Kill(true); } catch { }
+        _xboxServeProc = null; _xboxServeTitle = null;
+    }
+
+    /// <summary>
+    /// RECEIVER side. One-click streaming install of an Xbox peer game: ask the peer to start serving, point our
+    /// LAN-cache proxy's miss-origin at the peer (transient), fetch the tiny skeleton so we end single-copy, then
+    /// prompt the user to click Install in the Xbox app. The install pulls genuine bytes from the peer on the fly
+    /// (~0 CDN download); neither PC ever stores the full package.
+    /// </summary>
+    public async Task StartXboxPeerInstallAsync(string peerHost, string gameAppId)
+    {
+        if (_cacheProxy == null || _skeletonWatcher == null)
+        {
+            AddLog("Xbox peer install is only available on Windows", LogMessageType.Error);
+            return;
+        }
+        var peer = NetworkPeers.FirstOrDefault(p => p.IpAddress == peerHost);
+        if (peer == null) { AddLog($"Peer {peerHost} not found", LogMessageType.Error); return; }
+        var game = peer.Games?.FirstOrDefault(g => g.AppId.Equals(gameAppId, StringComparison.OrdinalIgnoreCase));
+        if (game == null) { AddLog($"Game {gameAppId} not offered by {peer.DisplayName}", LogMessageType.Error); return; }
+
+        AddLog($"Xbox peer install: requesting {peer.DisplayName} to stream {game.Name}…", LogMessageType.Info);
+        var (ok, port, err) = await _networkService.RequestXboxStreamingAsync(peer, gameAppId);
+        if (!ok || port <= 0)
+        {
+            AddLog($"Xbox peer install: sender refused — {err}", LogMessageType.Error);
+            return;
+        }
+        AddLog($"Xbox peer install: sender streaming on {peerHost}:{port}", LogMessageType.Info);
+
+        // Ensure the proxy is up (it intercepts the Store's CDN requests).
+        if (!_cacheProxy.IsRunning)
+        {
+            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+            await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
+            IsCacheProxyRunning = _cacheProxy.IsRunning;
+        }
+
+        // Point the proxy at the peer for this title's package, transient (no disk fill).
+        var matchKey = DeriveMatchKey(game);
+        _cacheProxy.SetPeerOrigin(matchKey, peerHost, port);
+        _activePeerMatchKey = matchKey;
+
+        // Fetch the tiny skeleton so this PC ends single-copy (install files + skeleton, no re-capture).
+        await TryFetchPeerSkeletonAsync(peerHost, port, game);
+
+        StatusMessage = $"Ready — click Install on \"{game.Name}\" in the Xbox app (it streams from {peer.DisplayName})";
+        AddLog($"Xbox peer install: READY. In the Xbox app, install \"{game.Name}\" now — bytes stream from {peer.DisplayName} (~0 download). " +
+               $"The proxy stats show peer-served traffic.", LogMessageType.Success);
+    }
+
+    private async Task TryFetchPeerSkeletonAsync(string peerHost, int port, GameInfo game)
+    {
+        try
+        {
+            var name = !string.IsNullOrEmpty(game.PackageFamilyName)
+                ? game.Name : game.Name; // skeleton named after the install folder; best-effort = game name
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            var bytes = await http.GetByteArrayAsync($"http://{peerHost}:{port}/__skeleton__");
+            // Save into the drop folder; the watcher matches it to the install once the folder appears.
+            var outPath = Path.Combine(_skeletonWatcher!.SkeletonStore, name + ".skl");
+            await File.WriteAllBytesAsync(outPath, bytes);
+            AddLog($"Xbox peer install: received skeleton ({bytes.Length / 1048576.0:F1} MB) → {Path.GetFileName(outPath)}", LogMessageType.Info);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Xbox peer install: could not fetch skeleton ({ex.Message}) — install will still work; re-capture later for single-copy", LogMessageType.Warning);
+        }
+    }
+
+    /// <summary>Receiver: clear the active peer streaming origin (call when the install is done or cancelled).</summary>
+    public void EndXboxPeerInstall()
+    {
+        if (_cacheProxy != null && !string.IsNullOrEmpty(_activePeerMatchKey))
+        {
+            _cacheProxy.ClearPeerOrigin(_activePeerMatchKey!);
+            _activePeerMatchKey = null;
+            AddLog("Xbox peer install: streaming origin cleared", LogMessageType.Info);
+        }
+    }
+
+    [RelayCommand]
+    private async Task StartXboxPeerInstall(string? payload)
+    {
+        // payload = "peerHost|gameAppId"
+        if (string.IsNullOrWhiteSpace(payload)) return;
+        var parts = payload.Split('|', 2);
+        if (parts.Length != 2) return;
+        await StartXboxPeerInstallAsync(parts[0], parts[1]);
     }
 
     public void Dispose()

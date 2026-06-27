@@ -61,6 +61,7 @@ export default function App() {
   };
 
   const networkActive = s.isNetworkActive;
+  const xboxHealthy = s.isSkeletonWatching && s.isCacheProxyRunning;
   const currentStep = s.localGames.length === 0 ? 1 : !networkActive ? 2 : s.networkPeers.length === 0 ? 3 : 4;
 
   const stepBadge = (n: number) => `px-3 py-1 rounded text-xs font-medium ${
@@ -316,17 +317,15 @@ export default function App() {
                                     alert(`Could not find peer for game ${game.name} (${game.appId}). Peers: ${s.networkPeers.length}`);
                                     return;
                                   }
-                                  sendCommand('StartXboxNetworkTransfer', {
+                                  sendCommand('StartXboxPeerInstall', {
                                     peerHost: peer.ipAddress,
-                                    peerPort: peer.xboxOverlayPort,
                                     gameAppId: game.appId,
-                                    xboxRoot: s.xboxRootPath?.trim() || undefined,
-                                    force: false,
                                   });
                                 }}
                                 className="mt-2 w-full py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-medium flex items-center justify-center gap-1"
+                                title="Stream-install from the peer: bytes are reconstructed on the fly from the peer's skeleton+install (no full package on either PC). You'll click Install in the Xbox app."
                               >
-                                <Download className="w-3 h-3" /> Receive via Xbox Overlay
+                                <Download className="w-3 h-3" /> Download (stream from peer)
                               </button>
                             ) : (
                               <button
@@ -661,8 +660,8 @@ export default function App() {
           </button>
           {s.isWindows && (
             <button onClick={() => setShowSkeleton(v => !v)} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group ${showSkeleton ? 'bg-slate-800' : ''}`}>
-              <Boxes className={`w-4 h-4 ${s.isSkeletonWatching ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`} />
-              <span className={`text-sm ${s.isSkeletonWatching ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`}>
+              <Boxes className={`w-4 h-4 ${xboxHealthy ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`} />
+              <span className={`text-sm ${xboxHealthy ? 'text-green-400' : showSkeleton ? 'text-blue-400' : 'text-slate-400 group-hover:text-slate-300'}`}>
                 Skeletons{s.skeletonCaptures.length > 0 ? ` (${s.skeletonCaptures.length})` : ''}
               </span>
             </button>

@@ -845,6 +845,16 @@ public class InteropBridge : IDisposable
                     }
                     break;
 
+                case "StartXboxPeerInstall":
+                    if (payload?.TryGetProperty("peerHost", out var ppHost) == true &&
+                        payload?.TryGetProperty("gameAppId", out var ppGame) == true)
+                    {
+                        var ppPayload = $"{ppHost.GetString() ?? ""}|{ppGame.GetString() ?? ""}";
+                        if (_viewModel.StartXboxPeerInstallCommand.CanExecute(ppPayload))
+                            await _viewModel.StartXboxPeerInstallCommand.ExecuteAsync(ppPayload);
+                    }
+                    break;
+
                 case "RequestElevation":
                     var forwardArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
                     if (ElevationHelper.RelaunchAsAdmin(forwardArgs))
@@ -966,6 +976,7 @@ public class InteropBridge : IDisposable
                 xboxRootPath = s.XboxRootPath ?? string.Empty,
                 xboxPackageCacheRoot = s.XboxPackageCacheRoot ?? string.Empty,
                 cikExtractorPath = s.CikExtractorPath ?? string.Empty,
+                xboxSingleCopyAutoStart = s.XboxSingleCopyAutoStart,
             },
             hiddenGames,
             externalLibraries,
@@ -1096,6 +1107,9 @@ public class InteropBridge : IDisposable
             var cik = vCik.GetString()?.Trim();
             s.CikExtractorPath = string.IsNullOrEmpty(cik) ? null : cik;
         }
+
+        if (payload.TryGetProperty("xboxSingleCopyAutoStart", out var vAuto))
+            s.XboxSingleCopyAutoStart = vAuto.GetBoolean();
 
         if (payload.TryGetProperty("startWithWindows", out var v7))
         {

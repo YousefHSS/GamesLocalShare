@@ -83,7 +83,8 @@ export type CommandName =
   | 'OpenSkeletonDropFolder'
   | 'RestoreSkeleton'
   | 'ReconstructSkeleton'
-  | 'ToggleCacheProxy';
+  | 'ToggleCacheProxy'
+  | 'StartXboxPeerInstall';
 
 export interface CommandPayload {
   [key: string]: any;

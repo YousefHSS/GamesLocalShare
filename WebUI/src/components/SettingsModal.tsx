@@ -15,6 +15,7 @@ const DEFAULTS: AppSettingsForm = {
   xboxRootPath: '',
   xboxPackageCacheRoot: '',
   cikExtractorPath: '',
+  xboxSingleCopyAutoStart: true,
 };
 
 export default function SettingsModal({
@@ -188,6 +189,13 @@ export default function SettingsModal({
 
           {/* Xbox */}
           <Section title="Xbox Game Pass">
+            <Toggle
+              label="Auto-start single-copy on launch (recommended)"
+              hint="Automatically start the skeleton-capture watcher + LAN cache proxy when the app launches, so Xbox games are captured with no manual steps. One UAC per session."
+              checked={form.xboxSingleCopyAutoStart}
+              onChange={v => set('xboxSingleCopyAutoStart', v)}
+              disabled={!payload.isWindows}
+            />
             <div className="space-y-1.5">
               <label className="text-sm text-slate-200">Xbox install root</label>
               <p className="text-xs text-slate-500">

@@ -96,7 +96,7 @@ public class NetworkDiscoveryService : IDisposable
     /// on XboxNetworkSender, start the sender, and call the provided callback
     /// with (success, errorMessage).
     /// </summary>
-    public event Func<string, Task<(bool Success, string? Error)>>? XboxStreamingRequested;
+    public event Func<string, Task<(bool Success, int Port, string? Error)>>? XboxStreamingRequested;
 
     public NetworkDiscoveryService()
     {
@@ -893,10 +893,11 @@ public class NetworkDiscoveryService : IDisposable
                             var handler = XboxStreamingRequested;
                             if (handler != null && !string.IsNullOrEmpty(request.GameAppId))
                             {
-                                var (ok, err) = await handler.Invoke(request.GameAppId);
+                                var (ok, port, err) = await handler.Invoke(request.GameAppId);
                                 if (ok)
                                 {
                                     xboxResponse.Type = MessageType.XboxStreamingReady;
+                                    if (port > 0) xboxResponse.SenderXboxOverlayPort = port; // dynamic serve port
                                 }
                                 else
                                 {

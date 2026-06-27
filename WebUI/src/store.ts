@@ -309,6 +309,7 @@ export interface AppSettingsForm {
   xboxRootPath: string;
   xboxPackageCacheRoot: string;
   cikExtractorPath: string;
+  xboxSingleCopyAutoStart: boolean;
 }
 
 export interface SettingsPayload {

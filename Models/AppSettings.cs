@@ -100,6 +100,13 @@ public class AppSettings
     public string? CikExtractorPath { get; set; }
 
     /// <summary>
+    /// Whether to automatically start the Xbox single-copy engine (skeleton-capture watcher + LAN cache
+    /// proxy) on launch, so Xbox games captured automatically with no manual Start Watching / Start Proxy.
+    /// Defaults to true. Disable to require the manual toggles in the Skeletons panel.
+    /// </summary>
+    public bool XboxSingleCopyAutoStart { get; set; } = true;
+
+    /// <summary>
     /// List of external drive libraries to scan for games
     /// </summary>
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];
@@ -238,7 +245,8 @@ public class AppSettings
             $"HiddenGameIds={string.Join(",", HiddenGameIds)}",
             $"EpicInstallRoot={EpicInstallRoot ?? string.Empty}",
             $"XboxPackageCacheRoot={XboxPackageCacheRoot ?? string.Empty}",
-            $"CikExtractorPath={CikExtractorPath ?? string.Empty}"
+            $"CikExtractorPath={CikExtractorPath ?? string.Empty}",
+            $"XboxSingleCopyAutoStart={XboxSingleCopyAutoStart}"
         };
         for (int i = 0; i < ExternalLibraries.Count; i++)
         {
@@ -295,6 +303,9 @@ public class AppSettings
                     break;
                 case "CikExtractorPath":
                     settings.CikExtractorPath = string.IsNullOrWhiteSpace(value) ? null : value;
+                    break;
+                case "XboxSingleCopyAutoStart":
+                    settings.XboxSingleCopyAutoStart = !bool.TryParse(value, out var scas) || scas;
                     break;
                 case "HiddenGameIds":
                     if (!string.IsNullOrEmpty(value))
