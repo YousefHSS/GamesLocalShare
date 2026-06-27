@@ -332,11 +332,14 @@ public sealed class SkeletonWatcherService : IDisposable
             bool isNew = !_installs.ContainsKey(name);
             _installs[name] = installDir;
 
-            // Already have a verified skeleton for this title — nothing to do.
+            // Announce the completed install BEFORE the skeleton-exists check, so consumers (e.g. the streaming
+            // peer-install finalizer) still hear it even when a skeleton is already present (it was copied from
+            // the peer). The check below only skips re-CAPTURING, not detection.
+            if (isNew) InstallDetected?.Invoke(installDir);
+
+            // Already have a verified skeleton for this title — nothing more to do (don't re-capture).
             if (File.Exists(Path.Combine(SkeletonStore, name + ".skl")))
                 return;
-
-            if (isNew) InstallDetected?.Invoke(installDir);
 
             // Prefer a manually dropped package; otherwise auto-locate it in the cache.
             var pkg = FindDropFor(name) ?? LocatePackage(installDir);

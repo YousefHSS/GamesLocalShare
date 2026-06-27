@@ -3150,6 +3150,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         // OnReceiverInstallDetected, which finalizes + clears the origin.
                         _peerInstallState.StatusMessage =
                             $"Streamed {total / 1048576.0:F0} MB from the peer — Xbox app is finishing the install…";
+                        // Safety-net: if the watcher never reports the install (e.g. installed to an unwatched
+                        // root), finalize the bar anyway after a grace period so it can't get stuck.
+                        if (!_peerFinishScheduled)
+                        {
+                            _peerFinishScheduled = true;
+                            long totalSnap = total;
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(60));
+                                if (_peerInstallState != null &&
+                                    _peerInstallState.CurrentStep == XboxTransferStep.DownloadingFromPeer)
+                                    FinalizePeerInstallBar(
+                                        $"Streamed {totalSnap / 1048576.0:F0} MB from the peer — install finishing in the Xbox app");
+                            });
+                        }
                     }
                 }
                 XboxTransfer = _peerInstallState;
@@ -3216,6 +3231,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private XboxTransferState? _peerInstallState;         // receiver: drives the transfer bar during a peer install
     private long _peerLastBytes;
     private DateTime _peerLastTick;
+    private bool _peerFinishScheduled;                    // one-shot guard for the finalize safety-net
 
     private static string XvdToolPath =>
         Path.Combine(AppContext.BaseDirectory, "tools", "xvdtool", "XVDTool.exe");
@@ -3359,7 +3375,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             PeerId = peer.PeerId,
             AppId = gameAppId,
         };
-        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow;
+        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow; _peerFinishScheduled = false;
         Dispatcher.UIThread.Post(() =>
         {
             XboxTransfer = _peerInstallState;
@@ -3399,6 +3415,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void OnReceiverInstallDetected(string installDir)
     {
         if (_peerInstallState == null || string.IsNullOrEmpty(_activePeerMatchKey)) return;
+        FinalizePeerInstallBar($"Installed \"{_peerInstallState.GameName}\" — streamed from the peer (no internet download)");
+        AddLog("Xbox peer install: install detected complete — streaming origin cleared", LogMessageType.Success);
+    }
+
+    /// <summary>Flip the peer-install transfer bar to Complete and stop forwarding. Safe to call repeatedly.</summary>
+    private void FinalizePeerInstallBar(string statusMessage)
+    {
+        if (_peerInstallState == null) return;
         EndXboxPeerInstall();
         Dispatcher.UIThread.Post(() =>
         {
@@ -3407,12 +3431,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _peerInstallState.Verdict = XboxTransferVerdict.FullSkip;
             _peerInstallState.OverlayProgress = 100;
             _peerInstallState.NetworkSpeedMBps = 0;
-            _peerInstallState.StatusMessage =
-                $"Installed \"{_peerInstallState.GameName}\" — streamed from the peer (no internet download)";
+            _peerInstallState.StatusMessage = statusMessage;
             XboxTransfer = _peerInstallState;
             OnPropertyChanged(nameof(XboxTransfer));
         });
-        AddLog($"Xbox peer install: install detected complete — streaming origin cleared", LogMessageType.Success);
     }
 
     /// <summary>Receiver: clear the active peer streaming origin (call when the install is done or cancelled).</summary>
