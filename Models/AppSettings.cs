@@ -15,6 +15,17 @@ internal partial class AppSettingsJsonContext : JsonSerializerContext
 {
 }
 
+/// <summary>Preferred Xbox game transfer method (drive or network).</summary>
+public enum XboxTransferMethod
+{
+    /// <summary>Smart when the game qualifies, otherwise Basic (with a warning). Recommended default.</summary>
+    Auto = 0,
+    /// <summary>Reconstruct the genuine package — game stays updatable; needs a capture.</summary>
+    Smart = 1,
+    /// <summary>Overlay — works on any install but the game can't be updated afterward.</summary>
+    Basic = 2,
+}
+
 /// <summary>
 /// Application settings that persist across sessions
 /// </summary>
@@ -105,6 +116,14 @@ public class AppSettings
     /// Defaults to true. Disable to require the manual toggles in the Skeletons panel.
     /// </summary>
     public bool XboxSingleCopyAutoStart { get; set; } = true;
+
+    /// <summary>
+    /// Preferred method for transferring Xbox games (drive or network). <see cref="XboxTransferMethod.Smart"/>
+    /// reconstructs the genuine package so the game stays updatable (needs a capture); <see cref="XboxTransferMethod.Basic"/>
+    /// uses the overlay (works on any install but the game won't update); <see cref="XboxTransferMethod.Auto"/>
+    /// (default) uses Smart when available and falls back to Basic with a warning.
+    /// </summary>
+    public XboxTransferMethod XboxTransferMethod { get; set; } = XboxTransferMethod.Auto;
 
     /// <summary>
     /// List of external drive libraries to scan for games
@@ -246,7 +265,8 @@ public class AppSettings
             $"EpicInstallRoot={EpicInstallRoot ?? string.Empty}",
             $"XboxPackageCacheRoot={XboxPackageCacheRoot ?? string.Empty}",
             $"CikExtractorPath={CikExtractorPath ?? string.Empty}",
-            $"XboxSingleCopyAutoStart={XboxSingleCopyAutoStart}"
+            $"XboxSingleCopyAutoStart={XboxSingleCopyAutoStart}",
+            $"XboxTransferMethod={XboxTransferMethod}"
         };
         for (int i = 0; i < ExternalLibraries.Count; i++)
         {
@@ -306,6 +326,10 @@ public class AppSettings
                     break;
                 case "XboxSingleCopyAutoStart":
                     settings.XboxSingleCopyAutoStart = !bool.TryParse(value, out var scas) || scas;
+                    break;
+                case "XboxTransferMethod":
+                    settings.XboxTransferMethod = Enum.TryParse<XboxTransferMethod>(value, out var xtm)
+                        ? xtm : XboxTransferMethod.Auto;
                     break;
                 case "HiddenGameIds":
                     if (!string.IsNullOrEmpty(value))

@@ -128,6 +128,13 @@ export default function DrivesPanel() {
     setXboxModal({ mode: 'sender' });
   };
 
+  // Smart (updatable) copy of an Xbox game to a drive: rebuilds the genuine package on the drive under its
+  // CDN path so the other PC can install it (updatable) via "Receive Xbox Game".
+  const handleXboxSmartCopy = (game: CrossLocationGame) => {
+    if (!game.library) return;
+    sendCommand('CopyXboxGameToDrive', { appId: game.appId, libraryId: game.library.id });
+  };
+
   const canCopy = (dir: CrossLocationGame['direction']) =>
     dir === 'DeviceToDrive' || dir === 'DriveToDevice' ||
     dir === 'OnlyOnDevice' || dir === 'OnlyOnDrive';
@@ -335,13 +342,37 @@ export default function DrivesPanel() {
                           </span>
                           {platformFor(game) === 'Xbox' ? (
                             game.deviceCopy && (
-                              <button
-                                onClick={() => handleXboxStage(game)}
-                                className="px-1.5 py-0.5 bg-green-700 hover:bg-green-600 rounded text-[10px] font-medium text-white"
-                                title="Stage this install to a drive (required for MSIXVC / Game Pass titles)"
-                              >
-                                Stage to Drive
-                              </button>
+                              game.deviceCopy.xboxSmartReady ? (
+                                <>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded border bg-green-900/40 text-green-300 border-green-700/50">
+                                    Updatable
+                                  </span>
+                                  <button
+                                    onClick={() => handleXboxSmartCopy(game)}
+                                    disabled={!isLibraryConnected(game.library, s.drives)}
+                                    className="px-1.5 py-0.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded text-[10px] font-medium text-white"
+                                    title="Copy to this drive as an updatable copy (genuine package rebuilt on the drive). On the other PC, use 'Receive Xbox Game' to install it."
+                                  >
+                                    Copy to Drive
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span
+                                    className="text-[10px] px-1.5 py-0.5 rounded border bg-slate-800 text-slate-400 border-slate-700"
+                                    title="Only a Basic copy is available (the game won't be updatable). Reinstall this game while the app is open to enable updatable copies."
+                                  >
+                                    Basic only
+                                  </span>
+                                  <button
+                                    onClick={() => handleXboxStage(game)}
+                                    className="px-1.5 py-0.5 bg-slate-600 hover:bg-slate-500 rounded text-[10px] font-medium text-white"
+                                    title="Basic copy — the transferred game won't be updatable. Reinstall with the app open for an updatable copy."
+                                  >
+                                    Copy to Drive
+                                  </button>
+                                </>
+                              )
                             )
                           ) : (
                             <>

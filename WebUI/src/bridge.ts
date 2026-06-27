@@ -84,7 +84,8 @@ export type CommandName =
   | 'RestoreSkeleton'
   | 'ReconstructSkeleton'
   | 'ToggleCacheProxy'
-  | 'StartXboxPeerInstall';
+  | 'StartXboxPeerInstall'
+  | 'CopyXboxGameToDrive';
 
 export interface CommandPayload {
   [key: string]: any;

@@ -18,6 +18,7 @@ const basePayload: SettingsPayload = {
     xboxPackageCacheRoot: '',
     cikExtractorPath: '',
     xboxSingleCopyAutoStart: true,
+    xboxTransferMethod: 'Auto',
   },
   hiddenGames: [],
   externalLibraries: [],

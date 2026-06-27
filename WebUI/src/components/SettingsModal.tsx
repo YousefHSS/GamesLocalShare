@@ -16,6 +16,7 @@ const DEFAULTS: AppSettingsForm = {
   xboxPackageCacheRoot: '',
   cikExtractorPath: '',
   xboxSingleCopyAutoStart: true,
+  xboxTransferMethod: 'Auto',
 };
 
 export default function SettingsModal({
@@ -191,11 +192,46 @@ export default function SettingsModal({
           <Section title="Xbox Game Pass">
             <Toggle
               label="Auto-start single-copy on launch (recommended)"
-              hint="Automatically start the skeleton-capture watcher + LAN cache proxy when the app launches, so Xbox games are captured with no manual steps. One UAC per session."
+              hint="Automatically prepare Xbox games for transfer (and run the local cache) when the app launches, so games become transferable with no manual steps. One UAC per session."
               checked={form.xboxSingleCopyAutoStart}
               onChange={v => set('xboxSingleCopyAutoStart', v)}
               disabled={!payload.isWindows}
             />
+
+            <div className="space-y-2">
+              <label className="text-sm text-slate-200">Xbox transfer method</label>
+              <p className="text-xs text-slate-500">
+                How Xbox games are moved to another PC or drive.
+              </p>
+              {([
+                { v: 'Auto', t: 'Auto (recommended)', d: 'Use Smart when the game qualifies; otherwise fall back to Basic and warn you.' },
+                { v: 'Smart', t: 'Smart transfer (updatable)', d: 'Keeps the game genuine so it can still be updated. Only available if this app was running when the game was installed.' },
+                { v: 'Basic', t: 'Basic transfer (no updates)', d: 'Works for any installed game, but the transferred game cannot be updated — an update re-downloads the whole game.' },
+              ] as const).map(opt => (
+                <label
+                  key={opt.v}
+                  className={`flex items-start gap-2 rounded border px-3 py-2 cursor-pointer ${
+                    form.xboxTransferMethod === opt.v
+                      ? 'border-blue-500 bg-blue-900/20'
+                      : 'border-slate-700 hover:border-slate-600'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="xboxTransferMethod"
+                    className="mt-0.5 accent-blue-500"
+                    checked={form.xboxTransferMethod === opt.v}
+                    onChange={() => set('xboxTransferMethod', opt.v)}
+                    disabled={!payload.isWindows}
+                  />
+                  <span>
+                    <span className="text-sm text-slate-200">{opt.t}</span>
+                    <span className="block text-xs text-slate-500">{opt.d}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-sm text-slate-200">Xbox install root</label>
               <p className="text-xs text-slate-500">

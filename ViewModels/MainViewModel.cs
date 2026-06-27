@@ -451,6 +451,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     // Apply hidden status from settings
                     game.IsHidden = _settings.IsGameHidden(game.AppId);
+                    // Xbox: can it use the Smart (updatable) transfer? = a capture exists for it.
+                    if (game.Platform == GamePlatform.Xbox)
+                        game.XboxSmartReady = _skeletonWatcher?.CanRestore(
+                            Path.GetFileName(game.InstallPath.TrimEnd('\\', '/'))) ?? false;
                     LocalGames.Add(game);
                     if (game.Platform == GamePlatform.Xbox && game.IsOverlaySupported)
                     {
@@ -3087,6 +3091,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(destinationRoot)) return;
         await _skeletonWatcher.RestoreAsync(name, destinationRoot);
+    }
+
+    /// <summary>
+    /// Drives "Copy to Drive" for an Xbox game using the Smart (updatable) method: reconstruct the genuine
+    /// package onto the chosen external library (drive) under its CDN path, so another PC installs it (updatable)
+    /// via the proxy. Only valid when the game has a capture; the UI shows this action only when smart-ready.
+    /// </summary>
+    [RelayCommand]
+    private async Task CopyXboxGameToDrive((string appId, string libraryId) args)
+    {
+        if (_skeletonWatcher == null) { StatusMessage = "Only available on Windows"; return; }
+        var (appId, libraryId) = args;
+        var game = LocalGames.FirstOrDefault(g => g.AppId == appId && g.Platform == GamePlatform.Xbox);
+        if (game == null || string.IsNullOrEmpty(game.InstallPath))
+        { AddLog($"Copy to drive: Xbox game {appId} not found", LogMessageType.Error); return; }
+        var lib = _settings.ExternalLibraries.FirstOrDefault(l => l.Id.ToString() == libraryId);
+        if (lib == null) { AddLog($"Copy to drive: library not found", LogMessageType.Error); return; }
+        var name = Path.GetFileName(game.InstallPath.TrimEnd('\\', '/'));
+        if (!_skeletonWatcher.CanRestore(name))
+        {
+            AddLog($"Copy to drive: \"{game.Name}\" isn't ready for an updatable copy yet — reinstall it with " +
+                   $"the app open, or use Basic (Stage to Drive).", LogMessageType.Warning);
+            return;
+        }
+        AddLog($"Copy to drive (updatable): rebuilding \"{game.Name}\" → {lib.RootPath} …", LogMessageType.Info);
+        await RestoreSkeletonToFolderAsync(name, lib.RootPath);
     }
 
     private void OnSkeletonRestoreCompleted(string name)

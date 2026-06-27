@@ -82,6 +82,12 @@ public class GameInfo : INotifyPropertyChanged
     public string? PackageFamilyName { get; set; }
 
     /// <summary>
+    /// Xbox only: true when this game has a capture, so it can be transferred with the Smart (updatable)
+    /// method. False means only the Basic (overlay, non-updatable) method is available.
+    /// </summary>
+    public bool XboxSmartReady { get; set; }
+
+    /// <summary>
     /// Whether this game is hidden from peers (not shared on network)
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]

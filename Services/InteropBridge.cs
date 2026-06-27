@@ -855,6 +855,16 @@ public class InteropBridge : IDisposable
                     }
                     break;
 
+                case "CopyXboxGameToDrive":
+                    if (payload?.TryGetProperty("appId", out var cxAppId) == true &&
+                        payload?.TryGetProperty("libraryId", out var cxLib) == true)
+                    {
+                        var cxArgs = (cxAppId.GetString() ?? "", cxLib.GetString() ?? "");
+                        if (_viewModel.CopyXboxGameToDriveCommand.CanExecute(cxArgs))
+                            await _viewModel.CopyXboxGameToDriveCommand.ExecuteAsync(cxArgs);
+                    }
+                    break;
+
                 case "RequestElevation":
                     var forwardArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
                     if (ElevationHelper.RelaunchAsAdmin(forwardArgs))
@@ -977,6 +987,7 @@ public class InteropBridge : IDisposable
                 xboxPackageCacheRoot = s.XboxPackageCacheRoot ?? string.Empty,
                 cikExtractorPath = s.CikExtractorPath ?? string.Empty,
                 xboxSingleCopyAutoStart = s.XboxSingleCopyAutoStart,
+                xboxTransferMethod = s.XboxTransferMethod.ToString(),
             },
             hiddenGames,
             externalLibraries,
@@ -1110,6 +1121,13 @@ public class InteropBridge : IDisposable
 
         if (payload.TryGetProperty("xboxSingleCopyAutoStart", out var vAuto))
             s.XboxSingleCopyAutoStart = vAuto.GetBoolean();
+
+        if (payload.TryGetProperty("xboxTransferMethod", out var vMethod))
+        {
+            var m = vMethod.GetString();
+            if (Enum.TryParse<XboxTransferMethod>(m, out var parsed))
+                s.XboxTransferMethod = parsed;
+        }
 
         if (payload.TryGetProperty("startWithWindows", out var v7))
         {

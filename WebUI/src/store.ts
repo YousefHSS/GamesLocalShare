@@ -12,6 +12,7 @@ export interface GameInfo {
   isAvailableFromPeer: boolean;
   isHidden: boolean;
   isOverlaySupported?: boolean;
+  xboxSmartReady?: boolean;
   lastUpdated: string;
   coverUrl?: string | null;
 }
@@ -310,6 +311,7 @@ export interface AppSettingsForm {
   xboxPackageCacheRoot: string;
   cikExtractorPath: string;
   xboxSingleCopyAutoStart: boolean;
+  xboxTransferMethod: 'Auto' | 'Smart' | 'Basic';
 }
 
 export interface SettingsPayload {
