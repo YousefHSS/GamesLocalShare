@@ -179,10 +179,14 @@ public class ExternalFolderScannerTests
     }
 
     [Fact]
-    public async Task LoadCoverImageAsync_IsNoop_ForExternalScanner()
+    public async Task LoadCoverImageAsync_SkipsNetwork_WhenCoverAlreadyPresent()
     {
         var scanner = new ExternalFolderScanner(new AppSettings());
-        // Should not throw and should complete immediately
-        await scanner.LoadCoverImageAsync(new GameInfo { Name = "x" });
+        // External games now resolve covers online (delegating to TitleCoverArtService),
+        // but the loader must return immediately without touching the network when a
+        // cover URL is already set — so this stays fast/offline and preserves the value.
+        var game = new GameInfo { Name = "x", AppId = "ext:test", CoverUrl = "http://example/cover.jpg" };
+        await scanner.LoadCoverImageAsync(game);
+        game.CoverUrl.Should().Be("http://example/cover.jpg");
     }
 }

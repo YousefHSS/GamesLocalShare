@@ -16,6 +16,7 @@ public class XboxLibraryScanner : IGameLibraryScanner
 {
     private readonly List<string> _scanErrors = [];
     private readonly TitleCoverArtService _coverArt = new();
+    private readonly XboxStoreMetadataService _store = new();
 
     public GamePlatform Platform => GamePlatform.Xbox;
     public IReadOnlyList<string> ScanErrors => _scanErrors;
@@ -80,10 +81,29 @@ public class XboxLibraryScanner : IGameLibraryScanner
         return GetXboxGamesRoots();
     }
 
-    public Task LoadCoverImageAsync(GameInfo game)
+    public async Task LoadCoverImageAsync(GameInfo game)
     {
-        // Try fetching online cover art by title matching using the Epic storefront catalog
-        return _coverArt.LoadAsync(game);
+        // Prefer authoritative Microsoft Store metadata resolved from the install's StoreId:
+        // it gives the real product title (e.g. "Bluey: The Videogame" instead of the sanitized
+        // folder name "Bluey Game") and the official poster cover. Fall back to title-based
+        // cover lookup when there's no readable StoreId (offline, restrictive ACLs, etc.).
+        try
+        {
+            var info = await _store.ResolveAsync(game.InstallPath);
+            if (info != null)
+            {
+                if (!string.IsNullOrWhiteSpace(info.Title))
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => game.Name = info.Title!);
+                if (!string.IsNullOrWhiteSpace(info.CoverUrl))
+                {
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => game.CoverUrl = info.CoverUrl);
+                    return;
+                }
+            }
+        }
+        catch { /* best-effort; fall through to the title-based source */ }
+
+        await _coverArt.LoadAsync(game);
     }
 
     /// <summary>

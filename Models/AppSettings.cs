@@ -131,6 +131,12 @@ public class AppSettings
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];
 
     /// <summary>
+    /// Optional SteamGridDB API key. When set, External (non-store) games whose cover can't
+    /// be found on Steam/Epic are looked up on SteamGridDB. Null/empty disables that source.
+    /// </summary>
+    public string? SteamGridDbApiKey { get; set; }
+
+    /// <summary>
     /// Loads settings from disk, or returns defaults if file doesn't exist.
     /// Returns a singleton instance to ensure all parts of the app use the same settings.
     /// </summary>

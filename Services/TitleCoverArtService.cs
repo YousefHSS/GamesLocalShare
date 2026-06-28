@@ -51,12 +51,15 @@ public class TitleCoverArtService
 
             if (string.IsNullOrEmpty(url))
             {
-                url = await ResolveImageUrlAsync(NormalizeTitle(game.Name));
+                // Clean messy install/folder names (camelCase, dots, version/site tags)
+                // into a searchable title. For already-clean store titles this is a no-op.
+                var searchTitle = CleanSearchTitle(game.Name);
+                url = await ResolveImageUrlAsync(NormalizeTitle(searchTitle));
                 if (string.IsNullOrEmpty(url))
                 {
                     // Try with trailing tokens trimmed (e.g. "Rocket League" instead of "Rocket League: Ultimate Edition")
-                    var firstSegment = game.Name.Split(new[] { ':', '-', '–', '—' }, 2)[0].Trim();
-                    if (!string.IsNullOrEmpty(firstSegment) && !string.Equals(firstSegment, game.Name, StringComparison.OrdinalIgnoreCase))
+                    var firstSegment = searchTitle.Split(new[] { ':', '-', '–', '—' }, 2)[0].Trim();
+                    if (!string.IsNullOrEmpty(firstSegment) && !string.Equals(firstSegment, searchTitle, StringComparison.OrdinalIgnoreCase))
                         url = await ResolveImageUrlAsync(NormalizeTitle(firstSegment));
                 }
                 if (!string.IsNullOrEmpty(url))
@@ -94,6 +97,82 @@ public class TitleCoverArtService
         return System.Text.RegularExpressions.Regex.Replace(cleaned.ToString(), @"\s+", " ").Trim();
     }
 
+    /// <summary>
+    /// Derives a clean store-search query from a possibly-messy install/folder name —
+    /// the kind external (non-store) games have. Strips bracketed site tags and trailing
+    /// version/build noise (e.g. "[Game3rb.com]", "v1.2.122"), turns dot/underscore
+    /// separators into spaces, and splits camelCase joins ("AWayOut" -> "A Way Out").
+    /// For already-clean store titles it is effectively a no-op. The high-confidence
+    /// <see cref="TitlesMatch"/> guard still vets every result, so over-cleaning can
+    /// only cost a cover, never produce a wrong one.
+    /// </summary>
+    internal static string CleanSearchTitle(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return raw ?? string.Empty;
+        var rx = System.Text.RegularExpressions.RegexOptions.IgnoreCase;
+        var s = raw;
+        // [bracketed] (parenthesized) {tags}: site names, "(2)" dup suffixes, region codes.
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"[\[\(\{][^\]\)\}]*[\]\)\}]", " ");
+        // Trailing version / build noise, while the dots are still intact.
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\bv?\d+(\.\d+)+[a-z0-9\-]*", " ", rx);
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\b(build|update|patch)\s*\d+\b", " ", rx);
+        // Folder-style separators used in place of spaces.
+        s = s.Replace('.', ' ').Replace('_', ' ');
+        // Split squashed camelCase / letter→capital joins into words.
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"(?<=[a-z0-9])(?=[A-Z])", " ");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        return string.IsNullOrWhiteSpace(s) ? raw : s;
+    }
+
+    /// <summary>
+    /// Lowercases and reduces a title to space-separated alphanumeric tokens so two
+    /// titles can be compared without punctuation / edition noise getting in the way.
+    /// </summary>
+    private static string NormalizeForMatch(string s)
+    {
+        var lowered = NormalizeTitle(s).ToLowerInvariant();
+        var sb = new StringBuilder(lowered.Length);
+        foreach (var ch in lowered)
+            sb.Append(char.IsLetterOrDigit(ch) ? ch : ' ');
+        return System.Text.RegularExpressions.Regex.Replace(sb.ToString(), @"\s+", " ").Trim();
+    }
+
+    /// <summary>
+    /// True when a search-result title is close enough to the requested title to trust
+    /// its art. Accepts collapsed-string equality / strong prefixes and good token
+    /// overlap, but rejects loosely-related hits (so we leave the cover blank instead
+    /// of showing the wrong game). Conservative on purpose.
+    /// </summary>
+    internal static bool TitlesMatch(string candidate, string query)
+    {
+        var a = NormalizeForMatch(candidate);
+        var b = NormalizeForMatch(query);
+        if (a.Length == 0 || b.Length == 0) return false;
+        if (a == b) return true;
+
+        // Collapsed (spaceless) equality / substantial prefix, e.g. "AWayOut" vs "A Way Out".
+        var ca = a.Replace(" ", "");
+        var cb = b.Replace(" ", "");
+        if (ca == cb) return true;
+        if (ca.StartsWith(cb, StringComparison.Ordinal) || cb.StartsWith(ca, StringComparison.Ordinal))
+        {
+            var min = Math.Min(ca.Length, cb.Length);
+            var max = Math.Max(ca.Length, cb.Length);
+            if (min >= 4 && (double)min / max >= 0.6) return true;
+        }
+
+        // Token-set overlap: Jaccard or containment of the shorter title in the longer.
+        var ta = a.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        var tb = b.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        if (ta.Count == 0 || tb.Count == 0) return false;
+        int inter = ta.Intersect(tb).Count();
+        if (inter == 0) return false;
+        int union = ta.Union(tb).Count();
+        double jaccard = (double)inter / union;
+        double containment = (double)inter / Math.Min(ta.Count, tb.Count);
+        return jaccard >= 0.6 || containment >= 0.8;
+    }
+
     private static async Task<string?> ResolveImageUrlAsync(string title)
     {
         // 1. Try Steam storefront first as it has standardized library images
@@ -107,23 +186,26 @@ public class TitleCoverArtService
                 using var steamDoc = await JsonDocument.ParseAsync(steamStream);
                 if (steamDoc.RootElement.TryGetProperty("items", out var items) && items.GetArrayLength() > 0)
                 {
-                    // Look for exact match first
+                    // Accept an exact title match outright; otherwise the first result that
+                    // is *similar enough* to the requested title. Never blindly take the
+                    // first hit — that's how unrelated art (e.g. a Spider-Man cover for
+                    // "Hollow Knight: Silksong") used to slip in. No confident match here
+                    // just falls through to the Epic source below.
+                    int? matchedId = null;
                     foreach (var item in items.EnumerateArray())
                     {
-                        if (item.TryGetProperty("name", out var n) && string.Equals(n.GetString(), title, StringComparison.OrdinalIgnoreCase))
+                        if (!item.TryGetProperty("name", out var n) || !item.TryGetProperty("id", out var id)) continue;
+                        var name = n.GetString() ?? "";
+                        if (string.Equals(name, title, StringComparison.OrdinalIgnoreCase))
                         {
-                            if (item.TryGetProperty("id", out var id))
-                            {
-                                return $"https://cdn.cloudflare.steamstatic.com/steam/apps/{id.GetInt32()}/library_600x900.jpg";
-                            }
+                            matchedId = id.GetInt32();
+                            break; // exact match wins
                         }
+                        if (matchedId == null && TitlesMatch(name, title))
+                            matchedId = id.GetInt32();
                     }
-
-                    // Fall back to first match
-                    if (items[0].TryGetProperty("id", out var firstId))
-                    {
-                        return $"https://cdn.cloudflare.steamstatic.com/steam/apps/{firstId.GetInt32()}/library_600x900.jpg";
-                    }
+                    if (matchedId != null)
+                        return $"https://cdn.cloudflare.steamstatic.com/steam/apps/{matchedId.Value}/library_600x900.jpg";
                 }
             }
         }
@@ -144,21 +226,23 @@ public class TitleCoverArtService
         if (!doc.RootElement.TryGetProperty("hits", out var elements)) return null;
         if (elements.GetArrayLength() == 0) return null;
 
-        // Prefer the element whose normalized title best matches.
+        // Prefer the element whose title best matches; require it to be similar
+        // enough so we leave the cover blank rather than show unrelated art.
         JsonElement? best = null;
         foreach (var el in elements.EnumerateArray())
         {
             if (!el.TryGetProperty("title", out var t)) continue;
-            var tStr = NormalizeTitle(t.GetString() ?? "");
-            if (string.Equals(tStr, title, StringComparison.OrdinalIgnoreCase))
+            var tStr = t.GetString() ?? "";
+            if (string.Equals(NormalizeTitle(tStr), title, StringComparison.OrdinalIgnoreCase))
             {
                 best = el;
                 break;
             }
-            if (best == null && tStr.StartsWith(title, StringComparison.OrdinalIgnoreCase))
+            if (best == null && TitlesMatch(tStr, title))
                 best = el;
         }
-        var picked = best ?? elements[0];
+        if (best == null) return null; // no confident match → leave blank
+        var picked = best.Value;
 
         if (!picked.TryGetProperty("keyImages", out var images)) return null;
 

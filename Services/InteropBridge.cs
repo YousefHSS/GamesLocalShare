@@ -120,7 +120,7 @@ public class InteropBridge : IDisposable
     private void OnGamePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         // When a game property changes (like CoverImagePath), push the updated games list
-        if (e.PropertyName == nameof(GameInfo.CoverImagePath) || e.PropertyName == nameof(GameInfo.CoverImage) || e.PropertyName == nameof(GameInfo.CoverUrl))
+        if (e.PropertyName == nameof(GameInfo.CoverImagePath) || e.PropertyName == nameof(GameInfo.CoverImage) || e.PropertyName == nameof(GameInfo.CoverUrl) || e.PropertyName == nameof(GameInfo.Name))
         {
             System.Diagnostics.Debug.WriteLine($"[DEBUG] Game property changed: {e.PropertyName}, pushing updated games list");
             // Ensure we push the update on the UI thread
@@ -567,9 +567,19 @@ public class InteropBridge : IDisposable
 
                 // Game context menu commands
                 case "OpenGameFolder":
-                    if (payload?.TryGetProperty("appId", out var folderGameAppId) == true)
                     {
-                        var game = _viewModel.LocalGames.FirstOrDefault(g => g.AppId == folderGameAppId.GetString());
+                        // Prefer the unique install path: the same game can exist on two drives
+                        // with the same AppId (e.g. a Steam title installed once and copied to an
+                        // external drive), so matching by AppId alone always opened the first one.
+                        GameInfo? game = null;
+                        if (payload?.TryGetProperty("installPath", out var folderPath) == true)
+                        {
+                            var path = folderPath.GetString();
+                            if (!string.IsNullOrEmpty(path))
+                                game = _viewModel.LocalGames.FirstOrDefault(g => g.InstallPath == path);
+                        }
+                        if (game == null && payload?.TryGetProperty("appId", out var folderGameAppId) == true)
+                            game = _viewModel.LocalGames.FirstOrDefault(g => g.AppId == folderGameAppId.GetString());
                         if (game != null && _viewModel.OpenGameFolderCommand.CanExecute(game))
                             _viewModel.OpenGameFolderCommand.Execute(game);
                     }
@@ -1011,6 +1021,7 @@ public class InteropBridge : IDisposable
                 cikExtractorPath = s.CikExtractorPath ?? string.Empty,
                 xboxSingleCopyAutoStart = s.XboxSingleCopyAutoStart,
                 xboxTransferMethod = s.XboxTransferMethod.ToString(),
+                steamGridDbApiKey = s.SteamGridDbApiKey ?? string.Empty,
             },
             hiddenGames,
             externalLibraries,
@@ -1144,6 +1155,12 @@ public class InteropBridge : IDisposable
 
         if (payload.TryGetProperty("xboxSingleCopyAutoStart", out var vAuto))
             s.XboxSingleCopyAutoStart = vAuto.GetBoolean();
+
+        if (payload.TryGetProperty("steamGridDbApiKey", out var vSgdb))
+        {
+            var key = vSgdb.GetString()?.Trim();
+            s.SteamGridDbApiKey = string.IsNullOrEmpty(key) ? null : key;
+        }
 
         if (payload.TryGetProperty("xboxTransferMethod", out var vMethod))
         {

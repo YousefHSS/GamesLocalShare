@@ -16,10 +16,16 @@ public class GameInfo : INotifyPropertyChanged
     /// </summary>
     public string AppId { get; set; } = string.Empty;
 
+    private string _name = string.Empty;
     /// <summary>
-    /// Display name of the game
+    /// Display name of the game. Notifies so an asynchronously-resolved authoritative
+    /// title (e.g. the real Microsoft Store name) re-pushes to the WebUI.
     /// </summary>
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set { if (_name != value) { _name = value; OnPropertyChanged(); } }
+    }
 
     /// <summary>
     /// Full path to the game installation directory

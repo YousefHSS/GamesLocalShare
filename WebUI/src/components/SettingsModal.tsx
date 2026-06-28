@@ -17,6 +17,7 @@ const DEFAULTS: AppSettingsForm = {
   cikExtractorPath: '',
   xboxSingleCopyAutoStart: true,
   xboxTransferMethod: 'Auto',
+  steamGridDbApiKey: '',
 };
 
 export default function SettingsModal({
@@ -185,6 +186,22 @@ export default function SettingsModal({
                   <FolderOpen className="w-3.5 h-3.5" /> Browse...
                 </button>
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm text-slate-200">SteamGridDB API key <span className="text-slate-500 font-normal">(optional)</span></label>
+              <p className="text-xs text-slate-500">
+                Covers for games not on Steam/Epic/Microsoft Store already work automatically (via
+                Wikipedia, no key needed). Add a free SteamGridDB key only if you want nicer,
+                game-shaped art: <span className="text-blue-400">steamgriddb.com</span> → Preferences → API.
+              </p>
+              <input
+                type="password"
+                value={form.steamGridDbApiKey ?? ''}
+                onChange={e => set('steamGridDbApiKey', e.target.value)}
+                placeholder="Paste your SteamGridDB API key"
+                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
             </div>
           </Section>
 
