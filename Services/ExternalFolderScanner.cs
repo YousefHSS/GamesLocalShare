@@ -14,6 +14,9 @@ public class ExternalFolderScanner : IGameLibraryScanner
     public IReadOnlyList<string> ScanErrors => _scanErrors;
 
     private readonly AppSettings _settings;
+    private readonly TitleCoverArtService _coverArt = new();
+    private readonly SteamGridDbCoverService _sgdb = new();
+    private readonly WikipediaCoverService _wiki = new();
 
     private static readonly JsonSerializerOptions MetaJsonOptions = new()
     {
@@ -180,6 +183,14 @@ public class ExternalFolderScanner : IGameLibraryScanner
                             Platform = platform,
                             IsInstalled = true,
                             IsExternal = true,
+                            // An external copy carrying a numeric Steam appid gets the same
+                            // deterministic Steam CDN cover as a real Steam-library install.
+                            // Without this it would fall to the Steam scanner's bitmap-only
+                            // cover path (CoverImage), which the WebUI — which renders CoverUrl —
+                            // never shows, so the copy appeared cover-less.
+                            CoverUrl = platform == GamePlatform.Steam && int.TryParse(meta.AppId, out var steamId)
+                                ? $"https://cdn.cloudflare.steamstatic.com/steam/apps/{steamId}/header.jpg"
+                                : null,
                         };
                     }
                 }
@@ -218,9 +229,28 @@ public class ExternalFolderScanner : IGameLibraryScanner
             .ToList();
     }
 
-    public Task LoadCoverImageAsync(GameInfo game)
+    public async Task LoadCoverImageAsync(GameInfo game)
     {
-        return Task.CompletedTask;
+        // External (non-store) games have no local art, so resolve a cover online by title —
+        // the same high-confidence matcher used for Xbox/Epic titles. Messy folder names are
+        // cleaned before searching; an unconfident match stays blank.
+        await _coverArt.LoadAsync(game);
+
+        // Steam/Epic don't carry console/EA/Konami/retro catalogs. For titles still missing a
+        // cover, fall back to broader sources (same confidence guard on every result):
+        //   1. SteamGridDB — best game-shaped art, but only when a (free, optional) key is set.
+        //   2. Wikipedia — keyless: the article lead image, no key or hosting required.
+        if (string.IsNullOrEmpty(game.CoverUrl))
+        {
+            var searchTitle = TitleCoverArtService.CleanSearchTitle(game.Name);
+            string? url = null;
+            if (!string.IsNullOrWhiteSpace(_settings.SteamGridDbApiKey))
+                url = await _sgdb.ResolveCoverAsync(searchTitle, _settings.SteamGridDbApiKey!);
+            if (string.IsNullOrEmpty(url))
+                url = await _wiki.ResolveCoverAsync(searchTitle);
+            if (!string.IsNullOrEmpty(url))
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => game.CoverUrl = url);
+        }
     }
 
     private static string ComputePathId(string path)

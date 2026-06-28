@@ -24,6 +24,7 @@ export default function App() {
   const [incompleteTab, setIncompleteTab] = useState<'incomplete' | 'queue'>('incomplete');
   const [ctxMenu, setCtxMenu] = useState<GameContextMenu | null>(null);
   const [localGameFilter, setLocalGameFilter] = useState('');
+  const [localStoreFilter, setLocalStoreFilter] = useState<'all' | string>('all');
   const [peerGameFilter, setPeerGameFilter] = useState('');
   const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
   const [showDrives, setShowDrives] = useState(false);
@@ -34,9 +35,24 @@ export default function App() {
     return () => { (window as any).__openSettings = undefined; };
   }, []);
 
-  const filteredLocalGames = localGameFilter.trim()
-    ? s.localGames.filter(g => g.name.toLowerCase().includes(localGameFilter.toLowerCase()))
-    : s.localGames;
+  // Stores actually present in the library, in a stable display order. Drives the
+  // store-filter chips so we never show a chip for a store the user doesn't have.
+  const STORE_ORDER = ['Steam', 'EpicGames', 'Xbox', 'External'];
+  const STORE_LABELS: Record<string, string> = { Steam: 'Steam', EpicGames: 'Epic', Xbox: 'Xbox', External: 'External' };
+  const storesPresent = STORE_ORDER.filter(store => s.localGames.some(g => g.platform === store));
+
+  // Reset a now-empty store filter back to "all" (e.g. after a rescan removes a store).
+  useEffect(() => {
+    if (localStoreFilter !== 'all' && !storesPresent.includes(localStoreFilter)) {
+      setLocalStoreFilter('all');
+    }
+  }, [localStoreFilter, storesPresent]);
+
+  const filteredLocalGames = s.localGames.filter(g => {
+    if (localStoreFilter !== 'all' && g.platform !== localStoreFilter) return false;
+    if (localGameFilter.trim() && !g.name.toLowerCase().includes(localGameFilter.toLowerCase())) return false;
+    return true;
+  });
   const filteredPeerGames = peerGameFilter.trim()
     ? s.availableFromPeers.filter(g => g.name.toLowerCase().includes(peerGameFilter.toLowerCase()))
     : s.availableFromPeers;
@@ -153,7 +169,7 @@ export default function App() {
       </div>
 
       <div className="flex-1 overflow-auto p-3 sm:p-6">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 xl:h-full auto-rows-[minmax(0,70vh)] xl:auto-rows-auto">
+        <div className="max-w-[110rem] mx-auto grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4 h-full auto-rows-[minmax(16rem,1fr)]">
           <Panel title="My Games" count={s.localGames.length} icon={<Play className="w-4 h-4 text-white" />} gradient="from-blue-600 to-blue-700" subColor="text-blue-100">
             <div className="px-4 pt-3 pb-1 flex-shrink-0">
               <div className="relative">
@@ -171,6 +187,35 @@ export default function App() {
                   </button>
                 )}
               </div>
+              {storesPresent.length > 1 && (
+                <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                  <button
+                    onClick={() => setLocalStoreFilter('all')}
+                    className={`px-2 py-0.5 rounded-full text-[0.625rem] font-medium border transition-colors ${
+                      localStoreFilter === 'all'
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                        : 'bg-slate-900/50 text-slate-400 border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {storesPresent.map(store => (
+                    <button
+                      key={store}
+                      onClick={() => setLocalStoreFilter(store)}
+                      title={`Show only ${STORE_LABELS[store]} games`}
+                      className={`px-2 py-0.5 rounded-full text-[0.625rem] font-medium border transition-colors flex items-center gap-1 ${
+                        localStoreFilter === store
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                          : 'bg-slate-900/50 text-slate-400 border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      <PlatformIcon platform={store} className="w-3 h-3" />
+                      {STORE_LABELS[store]}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div key={`local-${filteredLocalGames.length}`} className="flex-1 overflow-auto p-4 pt-2 space-y-3 stagger-children">
               {filteredLocalGames.map((g) => (
@@ -199,14 +244,32 @@ export default function App() {
                         <h4 className="font-semibold text-white text-sm truncate group-hover:text-blue-400 transition-colors">{g.name}</h4>
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">build {g.buildId}</p>
-                      <p className="text-xs text-blue-400 mt-1 font-medium">{g.formattedSize}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-xs text-blue-400 font-medium">{g.formattedSize}</p>
+                        {driveOf(g.installPath) && (
+                          <span
+                            className="text-[0.625rem] font-semibold text-slate-300 bg-slate-700/60 border border-slate-600/50 rounded px-1.5 py-px leading-none"
+                            title={g.installPath}
+                          >
+                            {driveOf(g.installPath)}:
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               ))}
               {s.localGames.length === 0 && <Empty icon={<FileText className="w-12 h-12 text-slate-600 mb-3" />} title="No games found" sub='Click "Scan My Games"' />}
               {s.localGames.length > 0 && filteredLocalGames.length === 0 && (
-                <Empty icon={<Search className="w-12 h-12 text-slate-600 mb-3" />} title="No matches" sub={`No games match "${localGameFilter}"`} />
+                <Empty
+                  icon={<Search className="w-12 h-12 text-slate-600 mb-3" />}
+                  title="No matches"
+                  sub={
+                    localGameFilter.trim()
+                      ? `No ${localStoreFilter === 'all' ? '' : STORE_LABELS[localStoreFilter] + ' '}games match "${localGameFilter}"`
+                      : `No ${STORE_LABELS[localStoreFilter] ?? ''} games`
+                  }
+                />
               )}
             </div>
           </Panel>
@@ -306,7 +369,7 @@ export default function App() {
                             <PlatformIcon platform={game.platform} />
                             <p className="text-white text-xs font-medium truncate">{game.name}</p>
                           </div>
-                          <p className="text-slate-400 text-[10px] mt-0.5">{game.buildId} • {game.formattedSize}</p>
+                          <p className="text-slate-400 text-[0.625rem] mt-0.5">{game.buildId} • {game.formattedSize}</p>
                           {selected && (
                             game.platform === 'Xbox' ? (
                               <button
@@ -461,7 +524,7 @@ export default function App() {
                     <div key={q.gameAppId} className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-white truncate">{q.gameName}</p>
-                        <p className="text-[10px]" style={{ color: q.statusColor }}>{q.statusText}</p>
+                        <p className="text-[0.625rem]" style={{ color: q.statusColor }}>{q.statusText}</p>
                       </div>
                       <div className="flex items-center gap-0.5">
                         {canRetry && (
@@ -509,7 +572,7 @@ export default function App() {
               <div className="w-full bg-slate-800 rounded h-2 overflow-hidden">
                 <div className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all" style={{ width: `${s.currentTransferProgress}%` }} />
               </div>
-              {s.currentTransferFile && <p className="text-[10px] text-slate-400 mt-1 truncate font-mono">{s.currentTransferFile}</p>}
+              {s.currentTransferFile && <p className="text-[0.625rem] text-slate-400 mt-1 truncate font-mono">{s.currentTransferFile}</p>}
             </div>
             <div className="flex gap-1 flex-shrink-0">
               <button onClick={() => sendCommand('ToggleSpeedUnit')} title="Toggle Mbps/MBps" className="px-2 py-1 bg-slate-700/60 hover:bg-slate-700 rounded text-xs text-slate-200">{s.showSpeedInMbps ? 'Mbps' : 'MB/s'}</button>
@@ -575,7 +638,7 @@ export default function App() {
                     {awaitingResume
                       ? <>Click <strong className="text-yellow-200">RESUME</strong> in the Xbox app now</>
                       : <>{xt.gameName || 'Xbox Transfer'}</>}
-                    <span className="ml-2 text-[10px] text-green-400 font-mono">XBOX</span>
+                    <span className="ml-2 text-[0.625rem] text-green-400 font-mono">XBOX</span>
                   </span>
                   <span className="text-xs text-slate-300 font-mono ml-2 flex-shrink-0 flex items-center gap-1">
                     {showSpeed && (
@@ -605,7 +668,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                <p className={`text-[10px] mt-1 truncate ${failed ? 'text-red-300' : awaitingResume ? 'text-yellow-200' : 'text-slate-400'}`}>
+                <p className={`text-[0.625rem] mt-1 truncate ${failed ? 'text-red-300' : awaitingResume ? 'text-yellow-200' : 'text-slate-400'}`}>
                   {xt.errorMessage || xt.statusMessage}
                 </p>
               </div>
@@ -724,13 +787,21 @@ export default function App() {
 
       {ctxMenu && (
         <div
-          className="fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[200px] animate-pop-in origin-top-left"
-          style={{ left: Math.min(ctxMenu.x, window.innerWidth - 220), top: Math.min(ctxMenu.y, window.innerHeight - 120) }}
+          className="fixed z-50 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[12.5rem] animate-pop-in origin-top-left"
+          style={(() => {
+            // Menu is rem-sized (min-w 12.5rem), so it zooms with the root font.
+            // Keep the off-screen guard proportional by deriving it from 1rem.
+            const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+            return {
+              left: Math.min(ctxMenu.x, window.innerWidth - 13.75 * rem),
+              top: Math.min(ctxMenu.y, window.innerHeight - 7.5 * rem),
+            };
+          })()}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
         >
           <button
-            onClick={() => { sendCommand('OpenGameFolder', { appId: ctxMenu.game.appId }); setCtxMenu(null); }}
+            onClick={() => { sendCommand('OpenGameFolder', { appId: ctxMenu.game.appId, installPath: ctxMenu.game.installPath }); setCtxMenu(null); }}
             className="w-full text-left px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 flex items-center gap-2"
           >
             <FolderOpen className="w-4 h-4 text-blue-400" />
@@ -747,7 +818,7 @@ export default function App() {
       )}
 
       {s.isLogVisible && (
-        <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[500px] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden animate-fade-in-up">
+        <div className="absolute bottom-12 right-2 sm:right-6 left-2 sm:left-auto sm:w-[31.25rem] h-80 bg-slate-950 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden animate-fade-in-up">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-900">
             <span className="text-sm font-semibold text-slate-300">Log</span>
             <div className="flex gap-3 items-center">
@@ -806,6 +877,14 @@ function Panel({
       {children}
     </div>
   );
+}
+
+// Drive letter from an install path (e.g. "F:\\Games\\Slay The Spire" -> "F"), or
+// null when the path is missing/non-drive. Used to tell same-titled copies apart
+// when a game is installed on more than one drive.
+function driveOf(installPath?: string): string | null {
+  const m = /^([A-Za-z]):/.exec(installPath ?? '');
+  return m ? m[1].toUpperCase() : null;
 }
 
 function Empty({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {

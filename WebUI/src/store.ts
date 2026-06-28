@@ -313,6 +313,7 @@ export interface AppSettingsForm {
   cikExtractorPath: string;
   xboxSingleCopyAutoStart: boolean;
   xboxTransferMethod: 'Auto' | 'Smart' | 'Basic';
+  steamGridDbApiKey?: string;
 }
 
 export interface SettingsPayload {
