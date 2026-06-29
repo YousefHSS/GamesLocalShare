@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
@@ -10,6 +10,7 @@ import SettingsModal from './components/SettingsModal';
 import DrivesPanel from './components/DrivesPanel';
 import SkeletonPanel from './components/SkeletonPanel';
 import PlatformIcon from './components/PlatformIcon';
+import SyncView from './components/SyncView';
 
 
 interface GameContextMenu {
@@ -29,11 +30,33 @@ export default function App() {
   const [settingsPayload, setSettingsPayload] = useState<SettingsPayload | null>(null);
   const [showDrives, setShowDrives] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(false);
+  const [viewMode, setViewMode] = useState<'classic' | 'sync'>('sync');
 
   useEffect(() => {
     (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
     return () => { (window as any).__openSettings = undefined; };
   }, []);
+
+  // Auto-scan the local library and detect external drives once on startup, so the
+  // Sync view is populated without the user clicking "Scan My Games" first.
+  const didAutoScan = useRef(false);
+  useEffect(() => {
+    if (didAutoScan.current) return;
+    didAutoScan.current = true;
+    sendCommand('ScanLocalGames');
+    sendCommand('ScanExternalLibraries');
+  }, []);
+
+  // Auto-compare drive locations once games are scanned and at least one external
+  // library is configured, so the drive pane shows its games (and covers) automatically.
+  const didAutoCompare = useRef(false);
+  useEffect(() => {
+    if (didAutoCompare.current) return;
+    if (s.localGames.length > 0 && s.externalLibraries.length > 0) {
+      didAutoCompare.current = true;
+      sendCommand('CompareGameLocations');
+    }
+  }, [s.localGames.length, s.externalLibraries.length]);
 
   // Stores actually present in the library, in a stable display order. Drives the
   // store-filter chips so we never show a chip for a store the user doesn't have.
@@ -96,7 +119,19 @@ export default function App() {
           <span className="text-slate-200 font-semibold truncate">Games Local Share</span>
           <span className="text-slate-500 text-sm hidden md:inline">- LAN Game Sync</span>
         </div>
-        <div className="text-xs text-slate-500 font-mono truncate hidden sm:block">{s.statusMessage}</div>
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg p-0.5 text-xs flex-shrink-0">
+            <button
+              onClick={() => setViewMode('classic')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${viewMode === 'classic' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >Panels</button>
+            <button
+              onClick={() => setViewMode('sync')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${viewMode === 'sync' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >Sync</button>
+          </div>
+          <div className="text-xs text-slate-500 font-mono truncate hidden md:block">{s.statusMessage}</div>
+        </div>
       </div>
 
       <div className="bg-slate-900 border-b border-slate-800 px-3 sm:px-6 py-3 sm:py-4">
@@ -168,6 +203,7 @@ export default function App() {
         </div>
       </div>
 
+      {viewMode === 'sync' ? <SyncView /> : (
       <div className="flex-1 overflow-auto p-3 sm:p-6">
         <div className="max-w-[110rem] mx-auto grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-4 h-full auto-rows-[minmax(16rem,1fr)]">
           <Panel title="My Games" count={s.localGames.length} icon={<Play className="w-4 h-4 text-white" />} gradient="from-blue-600 to-blue-700" subColor="text-blue-100">
@@ -557,6 +593,7 @@ export default function App() {
           </Panel>
         </div>
       </div>
+      )}
 
       {s.isTransferring && (
         <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-3 sm:px-6 py-2.5 animate-slide-up">
