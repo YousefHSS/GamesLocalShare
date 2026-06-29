@@ -3,6 +3,7 @@ import {
   Wifi, WifiOff, Users, Download, AlertCircle, Settings,
   Play, Pause, RefreshCw, Plus, FileText, Signal, X,
   Square, Trash2, RotateCcw, FolderOpen, EyeOff, Eye, Search, HardDrive, Boxes,
+  Check, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { useAppState, type GameInfo, type SettingsPayload } from './store';
 import { sendCommand } from './bridge';
@@ -31,6 +32,8 @@ export default function App() {
   const [showDrives, setShowDrives] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(false);
   const [viewMode, setViewMode] = useState<'classic' | 'sync'>('sync');
+  // Footer transfer pill expands/collapses the detailed transfer strip(s).
+  const [showTransferDetails, setShowTransferDetails] = useState(false);
 
   useEffect(() => {
     (window as any).__openSettings = (p: SettingsPayload) => setSettingsPayload(p);
@@ -57,6 +60,16 @@ export default function App() {
       sendCommand('CompareGameLocations');
     }
   }, [s.localGames.length, s.externalLibraries.length]);
+
+  // Open the detailed transfer strip automatically the first time a transfer starts;
+  // after that the footer pill toggles it. Auto-collapse when nothing is transferring.
+  const anyTransfer = s.isTransferring || s.isXboxTransferActive;
+  const prevAnyTransfer = useRef(false);
+  useEffect(() => {
+    if (anyTransfer && !prevAnyTransfer.current) setShowTransferDetails(true);
+    if (!anyTransfer) setShowTransferDetails(false);
+    prevAnyTransfer.current = anyTransfer;
+  }, [anyTransfer]);
 
   // Stores actually present in the library, in a stable display order. Drives the
   // store-filter chips so we never show a chip for a store the user doesn't have.
@@ -134,6 +147,8 @@ export default function App() {
         </div>
       </div>
 
+      {viewMode === 'classic' && (
+      <>
       <div className="bg-slate-900 border-b border-slate-800 px-3 sm:px-6 py-3 sm:py-4">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 max-w-7xl mx-auto">
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
@@ -202,6 +217,8 @@ export default function App() {
           </p>
         </div>
       </div>
+      </>
+      )}
 
       {viewMode === 'sync' ? <SyncView /> : (
       <div className="flex-1 overflow-auto p-3 sm:p-6">
@@ -595,7 +612,7 @@ export default function App() {
       </div>
       )}
 
-      {s.isTransferring && (
+      {showTransferDetails && s.isTransferring && (
         <div className="bg-gradient-to-r from-blue-900/60 to-purple-900/60 border-t border-blue-700/50 px-3 sm:px-6 py-2.5 animate-slide-up">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3 sm:gap-4">
             <Download className="w-5 h-5 text-blue-400 animate-pulse flex-shrink-0" />
@@ -620,7 +637,7 @@ export default function App() {
         </div>
       )}
 
-      {s.isXboxTransferActive && s.xboxTransfer && (() => {
+      {showTransferDetails && s.isXboxTransferActive && s.xboxTransfer && (() => {
         const xt = s.xboxTransfer;
         const failed = xt.currentStep === 'Failed';
         const done = xt.currentStep === 'Complete';
@@ -775,6 +792,41 @@ export default function App() {
             <span className={`text-sm ${s.highSpeedMode ? 'text-amber-400' : 'text-slate-400 group-hover:text-slate-300'}`}>{s.highSpeedMode ? 'High-Speed' : 'WiFi Mode'}</span>
           </button>
         </div>
+
+        {/* Center transfer pill — summarizes active transfer; click to expand the detailed strip(s). */}
+        <button
+          onClick={() => { if (anyTransfer) setShowTransferDetails(v => !v); }}
+          disabled={!anyTransfer}
+          title={anyTransfer ? 'Click to show/hide transfer details' : undefined}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs transition-colors min-w-0 max-w-[28rem] ${
+            anyTransfer
+              ? 'bg-slate-900 border-blue-900/50 hover:border-blue-700 cursor-pointer'
+              : 'border-transparent text-slate-500 cursor-default'
+          }`}
+        >
+          {anyTransfer ? (
+            <>
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse flex-shrink-0" />
+              <span className="text-slate-300 font-medium truncate">
+                {s.isTransferring
+                  ? `Downloading ${s.currentTransferGameName || '…'}`
+                  : (s.xboxTransfer?.gameName || 'Xbox transfer')}
+              </span>
+              {s.isTransferring && s.currentTransferSpeed && (
+                <span className="text-[0.625rem] text-blue-400 font-mono flex-shrink-0">{s.currentTransferSpeed}</span>
+              )}
+              {showTransferDetails
+                ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                : <ChevronUp className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />}
+            </>
+          ) : (
+            <>
+              <Check className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+              <span className="truncate">All transfers complete. Drag games across panes to sync.</span>
+            </>
+          )}
+        </button>
+
         <div className="flex items-center gap-4">
           <span className="text-sm text-slate-500">{s.lastError || 'Games Local Share'}</span>
           <button onClick={() => sendCommand('ToggleLog')} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded transition-colors group">

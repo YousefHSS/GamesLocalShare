@@ -1184,7 +1184,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string GetTargetPathForNewGame(GameInfo game)
     {
         var safeName = string.Join("_", game.Name.Split(Path.GetInvalidFileNameChars()));
+        return Path.Combine(GetStoreInstallRoot(game), safeName);
+    }
 
+    /// <summary>
+    /// The "smart by store" install root for a game on THIS PC: Epic games go to the
+    /// configured/auto-detected Epic root; Steam (and External/unknown, as a fallback) go to
+    /// the first Steam library's "common" folder. Creates the folder if missing. Throws
+    /// InvalidOperationException if the store's location can't be resolved.
+    /// Shared by peer downloads (GetTargetPathForNewGame) and drive->PC copies (StartLocalCopyAsync).
+    /// </summary>
+    private string GetStoreInstallRoot(GameInfo game)
+    {
         if (game.Platform == GamePlatform.EpicGames)
         {
             var epicRoot = ResolveEpicInstallRoot();
@@ -1195,10 +1206,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     "Set EpicInstallRoot in settings.");
             }
             if (!Directory.Exists(epicRoot)) Directory.CreateDirectory(epicRoot);
-            return Path.Combine(epicRoot, safeName);
+            return epicRoot;
         }
 
-        // Default: Steam routing
+        // Default: Steam routing (also used for External/unknown as a fallback).
         var libraryFolders = _steamScanner.GetLibraryFolders();
         if (libraryFolders.Count == 0)
         {
@@ -1211,7 +1222,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Directory.CreateDirectory(commonPath);
         }
 
-        return Path.Combine(commonPath, safeName);
+        return commonPath;
     }
 
     /// <summary>
@@ -2581,13 +2592,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 AddLog($"StartLocalCopy: external copy missing for {appId} (direction={effectiveDirection})", LogMessageType.Error);
                 return;
             }
-            var libraryFolders = _steamScanner.GetLibraryFolders();
-            if (libraryFolders.Count == 0)
+            // Smart-by-store routing: send the game to its own store's install folder on this PC
+            // (Epic -> Epic root, Steam/External -> Steam library "common"), not always Steam.
+            try
             {
-                AddLog("StartLocalCopy: no Steam library folders found", LogMessageType.Error);
+                destPath = System.IO.Path.Combine(GetStoreInstallRoot(source), System.IO.Path.GetFileName(source.InstallPath));
+            }
+            catch (InvalidOperationException ex)
+            {
+                AddLog($"StartLocalCopy: {ex.Message}", LogMessageType.Error);
                 return;
             }
-            destPath = System.IO.Path.Combine(libraryFolders[0], "common", System.IO.Path.GetFileName(source.InstallPath));
         }
         else
         {

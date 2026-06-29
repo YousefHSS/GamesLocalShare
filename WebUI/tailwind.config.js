@@ -1,3 +1,5 @@
+import v4Palette from './tailwind.v4-palette.js';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -7,6 +9,10 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Exact Tailwind v4 default palette (oklch) so our v3 build renders the same
+        // shades as the Figma v11 design (which compiles with Tailwind v4). Spread first
+        // so our custom brand names below can still override/extend.
+        ...v4Palette,
         'dark-bg': '#1E1E1E',
         'dark-panel': '#2D2D30',
         'dark-item': '#3C3C3C',
