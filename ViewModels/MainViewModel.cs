@@ -441,7 +441,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
                 games.AddRange(scanned);
             }
-            games = games.OrderBy(g => g.Name).ToList();
+
+            // De-duplicate across scanners. Their coverage overlaps: an external drive
+            // registered as a Steam library is surfaced by both SteamLibraryScanner and
+            // ExternalFolderScanner, and XboxGames\ on any drive is seen by XboxLibraryScanner
+            // (and again by ExternalFolderScanner if that drive is an added library). Two
+            // entries pointing at the same folder on disk are the same install, so collapse
+            // by normalized InstallPath. Scanner order (Steam, Epic, Xbox, External) means the
+            // first kept occurrence is the more authoritative one — a real BuildId/StateFlags
+            // from the platform scanner wins over a generic External entry for the same folder.
+            static string DedupKey(GameInfo g) =>
+                !string.IsNullOrWhiteSpace(g.InstallPath)
+                    ? g.InstallPath.TrimEnd('\\', '/', ' ').ToLowerInvariant()
+                    : "appid:" + g.AppId;
+
+            var dedupedGames = games
+                .GroupBy(DedupKey)
+                .Select(grp => grp.First())
+                .ToList();
+
+            var duplicateCount = games.Count - dedupedGames.Count;
+            if (duplicateCount > 0)
+                AddLog($"Collapsed {duplicateCount} duplicate game entries (same install seen by multiple scanners)", LogMessageType.Info);
+
+            // "External" for the My Games panel filter is DRIVE-based: a game is external when it
+            // lives on a drive the user has registered an external library on (e.g. D:, E:, G:).
+            // This matches the user's model — C:/F: are this PC's internal drives, D:/E: are the
+            // external/extended ones. Keying on the drive (not the exact library root path) is
+            // essential: a platform scanner can report an install elsewhere on that same drive —
+            // e.g. an Xbox game surfaces at E:\XboxGames\… while the registered library is
+            // E:\Games\ — and a root-prefix test would wrongly treat that copy as internal.
+            static string? DriveOf(string path)
+            {
+                var root = string.IsNullOrEmpty(path) ? null : Path.GetPathRoot(path);
+                return string.IsNullOrEmpty(root) ? null : root.TrimEnd('\\', '/').ToUpperInvariant();
+            }
+            var externalDrives = _settings.ExternalLibraries
+                .Select(l => DriveOf(l.RootPath))
+                .Where(d => d != null)
+                .Select(d => d!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in dedupedGames)
+            {
+                var drive = DriveOf(g.InstallPath);
+                if (!g.IsExternal && drive != null && externalDrives.Contains(drive))
+                    g.IsExternal = true;
+            }
+
+            games = dedupedGames.OrderBy(g => g.Name).ToList();
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -3061,6 +3108,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _skeletonWatcher.Start(roots);
             IsSkeletonWatching = _skeletonWatcher.IsRunning;
         }
+    }
+
+    [RelayCommand]
+    private void RefreshSkeletons()
+    {
+        if (_skeletonWatcher == null)
+        {
+            StatusMessage = "Skeleton capture is only available on Windows";
+            return;
+        }
+
+        // Re-read the skeleton folder from disk so captures added, removed, or reconstructed
+        // outside this session (or by the proxy/another process) show up without a restart.
+        // The list is otherwise only built at startup and appended to live by the watcher.
+        SkeletonCaptures.Clear();
+        foreach (var s in _skeletonWatcher.GetCapturedSkeletons())
+        {
+            SkeletonCaptures.Add(new SkeletonCaptureEntry
+            {
+                Name = s.Name,
+                SkeletonPath = s.SkeletonPath,
+                SkeletonBytes = s.SkeletonBytes,
+                PackageBytes = s.PackageBytes,
+                SavedBytes = Math.Max(0, s.PackageBytes - s.SkeletonBytes),
+                CapturedAt = s.CapturedAt,
+            });
+        }
+        StatusMessage = $"Refreshed skeletons ({SkeletonCaptures.Count})";
     }
 
     [RelayCommand]

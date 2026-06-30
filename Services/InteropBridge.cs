@@ -754,6 +754,11 @@ public class InteropBridge : IDisposable
                         _viewModel.OpenSkeletonDropFolderCommand.Execute(null);
                     break;
 
+                case "RefreshSkeletons":
+                    if (_viewModel.RefreshSkeletonsCommand.CanExecute(null))
+                        _viewModel.RefreshSkeletonsCommand.Execute(null);
+                    break;
+
                 case "RestoreSkeleton":
                     if (payload?.TryGetProperty("name", out var skelRestoreEl) == true)
                     {

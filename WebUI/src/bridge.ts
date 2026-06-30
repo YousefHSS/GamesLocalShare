@@ -81,6 +81,7 @@ export type CommandName =
   | 'ResumeXboxTransfer'
   | 'ToggleSkeletonWatcher'
   | 'OpenSkeletonDropFolder'
+  | 'RefreshSkeletons'
   | 'RestoreSkeleton'
   | 'ReconstructSkeleton'
   | 'ToggleCacheProxy'

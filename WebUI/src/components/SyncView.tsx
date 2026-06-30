@@ -47,6 +47,8 @@ export default function SyncView() {
   const s = useAppState();
   const [leftFilter, setLeftFilter] = useState('');
   const [rightFilter, setRightFilter] = useState('');
+  // My PC pane: show/hide games that live on external drives/libraries (default: show).
+  const [showExternal, setShowExternal] = useState(true);
   // Store (platform) + sync-state filters per pane (matches the Figma v11 filter bar).
   const [leftStore, setLeftStore] = useState('all');
   const [leftState, setLeftState] = useState('all');
@@ -148,7 +150,9 @@ export default function SyncView() {
 
   const matches = (name: string, q: string) => !q.trim() || name.toLowerCase().includes(q.toLowerCase());
 
+  const hasExternalLocal = s.localGames.some(g => g.isExternal);
   const myGames = s.localGames.filter(g =>
+    (showExternal || !g.isExternal) &&
     (leftStore === 'all' || g.platform === leftStore) &&
     (leftState === 'all' || myStateOf(g) === leftState) &&
     matches(g.name, leftFilter));
@@ -351,13 +355,24 @@ export default function SyncView() {
           onDragLeave={() => setDropZone(z => (z === 'left' ? null : z))}
           onDrop={onDropLeft}
           header={
-            <button
-              onClick={() => sendCommand('ScanLocalGames')}
-              disabled={s.isScanning}
-              className="px-2.5 py-1 bg-black/20 hover:bg-black/30 disabled:opacity-60 rounded text-xs font-medium text-white flex items-center gap-1.5 flex-shrink-0"
-            >
-              <RefreshCw className={`w-3 h-3 ${s.isScanning ? 'animate-spin' : ''}`} /> Scan Local
-            </button>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {hasExternalLocal && (
+                <button
+                  onClick={() => setShowExternal(v => !v)}
+                  title={showExternal ? 'Hide games on external drives' : 'Show games on external drives'}
+                  className="px-2.5 py-1 bg-black/20 hover:bg-black/30 rounded text-xs font-medium text-white flex items-center gap-1.5"
+                >
+                  {showExternal ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />} External
+                </button>
+              )}
+              <button
+                onClick={() => sendCommand('ScanLocalGames')}
+                disabled={s.isScanning}
+                className="px-2.5 py-1 bg-black/20 hover:bg-black/30 disabled:opacity-60 rounded text-xs font-medium text-white flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3 h-3 ${s.isScanning ? 'animate-spin' : ''}`} /> Scan Local
+              </button>
+            </div>
           }
           search={
             <FilterBar
@@ -370,7 +385,11 @@ export default function SyncView() {
         >
           {myGames.map(g => (
             <Row
-              key={g.appId}
+              // The same game can exist on two drives (internal + external copy), which share
+              // an AppId (Xbox content GUID / Steam appid). Keying on AppId alone produces
+              // duplicate React keys, which breaks reconciliation so the list stops matching
+              // the filtered result. InstallPath is unique per copy, so combine them.
+              key={`${g.appId}|${g.installPath}`}
               draggable
               onDragStart={(e) => startDrag(e, g.appId, 'mine', !!g.isHidden)}
               onContextMenu={(e) => openCtx(e, g)}
@@ -457,7 +476,7 @@ export default function SyncView() {
           {/* Peer target, network on */}
           {target?.kind === 'peer' && networkActive && selectedPeer && peerGames.map(g => (
             <Row
-              key={g.appId}
+              key={`${g.appId}|${g.installPath}`}
               draggable
               onDragStart={(e) => startDrag(e, g.appId, 'peer', false)}
               cover={resolveCover(g.coverUrl, g.appId, g.platform)}

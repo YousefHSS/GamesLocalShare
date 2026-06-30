@@ -704,7 +704,7 @@ export default function App() {
                         >
                           {speedLabel}
                         </button>
-                        {infoParts.length > 0 && <span>\u00b7</span>}
+                        {infoParts.length > 0 && <span>{'\u00b7'}</span>}
                       </>
                     )}
                     {infoParts.join(' \u00b7 ')}

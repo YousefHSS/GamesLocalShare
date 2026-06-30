@@ -124,9 +124,18 @@ export default function SkeletonPanel() {
             <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
               <Archive className="w-3.5 h-3.5 text-blue-400" /> Games ready to transfer ({s.skeletonCaptures.length})
             </h4>
-            {totalSaved > 0 && (
-              <span className="text-[11px] text-green-400 font-medium">{fmtBytes(totalSaved)} saved</span>
-            )}
+            <div className="flex items-center gap-2">
+              {totalSaved > 0 && (
+                <span className="text-[11px] text-green-400 font-medium">{fmtBytes(totalSaved)} saved</span>
+              )}
+              <button
+                onClick={() => sendCommand('RefreshSkeletons')}
+                title="Re-read the skeletons folder from disk"
+                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded flex items-center"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
           {s.skeletonCaptures.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">

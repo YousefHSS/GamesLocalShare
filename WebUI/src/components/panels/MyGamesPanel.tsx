@@ -7,13 +7,15 @@ export default function MyGamesPanel() {
   const localGames = useAppState((state) => state.localGames);
   const selectedLocalGame = useAppState((state) => state.selectedLocalGame);
   const isScanning = useAppState((state) => state.isScanning);
+  const showExternalGames = useAppState((state) => state.showExternalGames);
+  const updateState = useAppState((state) => state.updateState);
   const [showTransferModal, setShowTransferModal] = useState(false);
 
-  console.log('[DEBUG] MyGamesPanel render, localGames:', localGames);
-  console.log('[DEBUG] MyGamesPanel render, localGames count:', localGames.length);
-  console.log('[DEBUG] MyGamesPanel render, first game:', localGames[0]);
-  console.log('[DEBUG] MyGamesPanel render, selectedLocalGame:', selectedLocalGame);
-  console.log('[DEBUG] MyGamesPanel render, isScanning:', isScanning);
+  // Filter: when "Show external" is off, hide games living on external drives/libraries.
+  const hasExternalGames = localGames.some((g) => g.isExternal);
+  const visibleGames = showExternalGames
+    ? localGames
+    : localGames.filter((g) => !g.isExternal);
 
   return (
     <div className="bg-dark-panel rounded flex flex-col h-full overflow-hidden">
@@ -22,8 +24,19 @@ export default function MyGamesPanel() {
         <div className="flex items-center gap-2">
           <span>🎮</span>
           <h2 className="font-bold text-white">My Games</h2>
-          <span className="text-xs opacity-80">({localGames.length})</span>
+          <span className="text-xs opacity-80">({visibleGames.length})</span>
         </div>
+        {hasExternalGames && (
+          <label className="flex items-center gap-1.5 text-xs text-white cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="accent-accent-purple"
+              checked={showExternalGames}
+              onChange={(e) => updateState({ showExternalGames: e.target.checked })}
+            />
+            Show external drives
+          </label>
+        )}
       </div>
 
       {/* Content */}
@@ -43,11 +56,16 @@ export default function MyGamesPanel() {
               Troubleshoot
             </button>
           </div>
+        ) : visibleGames.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2">
+            <div className="text-gray-400 text-sm">External games hidden</div>
+            <div className="text-gray-600 text-xs">Enable 'Show external drives' to see them</div>
+          </div>
         ) : (
           <div className="space-y-1 p-2">
-            {localGames.map((game) => (
+            {visibleGames.map((game) => (
               <div
-                key={game.appId}
+                key={`${game.appId}|${game.installPath}`}
                 onClick={() => sendCommand('SelectLocalGame', { appId: game.appId })}
                 className={`p-2 rounded cursor-pointer transition ${
                   selectedLocalGame?.appId === game.appId

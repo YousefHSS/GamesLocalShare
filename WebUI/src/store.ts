@@ -10,6 +10,7 @@ export interface GameInfo {
   platform: 'Steam' | 'EpicGames' | 'Xbox' | 'External';
   isInstalled: boolean;
   isAvailableFromPeer: boolean;
+  isExternal?: boolean;
   isHidden: boolean;
   isOverlaySupported?: boolean;
   xboxSmartReady?: boolean;
@@ -172,6 +173,10 @@ export interface AppState {
   showSpeedInMbps: boolean;
   lastError: string;
 
+  // My Games panel filter (frontend-only, not persisted): when false, games living on
+  // external drives/libraries are hidden from the local list.
+  showExternalGames: boolean;
+
   // Transfer progress
   currentTransferGameName: string;
   currentTransferProgress: number;
@@ -245,6 +250,8 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   isQueueProcessing: false,
   showSpeedInMbps: false,
   lastError: '',
+
+  showExternalGames: true,
 
   currentTransferGameName: '',
   currentTransferProgress: 0,
