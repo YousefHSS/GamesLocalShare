@@ -402,7 +402,7 @@ export default function XboxTransferModal({ onClose, mode = 'sender', initialPee
             <div className="space-y-1 max-h-48 overflow-y-auto">
               {xboxGames.map((g) => (
                 <button
-                  key={g.appId}
+                  key={`${g.appId}|${g.installPath}`}
                   onClick={() => {
                     setSelectedNetworkGame(g);
                     setStep(STEP_INSTRUCTIONS);

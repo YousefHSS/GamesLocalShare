@@ -99,7 +99,7 @@ export default function PeersPanel() {
             <div className="space-y-1">
               {availableFromPeers.map((game) => (
                 <div
-                  key={game.appId}
+                  key={`${game.appId}|${game.installPath}`}
                   onClick={() => sendCommand('SelectPeerGame', { appId: game.appId })}
                   className={`p-2 rounded cursor-pointer transition text-xs ${
                     selectedPeerGame?.appId === game.appId

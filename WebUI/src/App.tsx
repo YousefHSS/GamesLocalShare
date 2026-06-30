@@ -273,7 +273,10 @@ export default function App() {
             <div key={`local-${filteredLocalGames.length}`} className="flex-1 overflow-auto p-4 pt-2 space-y-3 stagger-children">
               {filteredLocalGames.map((g) => (
                 <div
-                  key={g.appId}
+                  // Same game on two drives (internal + external) shares an AppId, so keying on
+                  // AppId alone makes duplicate React keys that break reconciliation — the list
+                  // then stops matching the filtered count. InstallPath is unique per copy.
+                  key={`${g.appId}|${g.installPath}`}
                   onClick={() => sendCommand('SelectLocalGame', { appId: g.appId })}
                   onContextMenu={(e) => openGameMenu(e, g)}
                   className={`bg-slate-900/50 rounded-lg p-3 border transition-all group cursor-pointer ${
@@ -412,7 +415,7 @@ export default function App() {
                       const selected = s.selectedPeerGame?.appId === game.appId;
                       return (
                         <div
-                          key={game.appId}
+                          key={`${game.appId}|${game.installPath}`}
                           onClick={() => sendCommand('SelectPeerGame', { appId: game.appId })}
                           className={`bg-slate-900/50 rounded p-2 border cursor-pointer ${
                             selected ? 'border-purple-500' : 'border-slate-700/50 hover:border-purple-500/50'
