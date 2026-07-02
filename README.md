@@ -94,10 +94,17 @@ Installed Xbox / Microsoft Store (MSIXVC) games are encrypted per-device, so the
 
 Both of these need the encrypted package to be read and rebuilt, which is done **on the fly, on your own machine, against your own licensed content**, using two external tools:
 
-- **[xvdtool](https://github.com/emoose/xvdtool)** by emoose — the XVD/XVC container tool that GamesLocalShare bundles and shells out to for on-the-fly decrypt, skeleton capture, and byte-exact reconstruction of the package.
-- **[CikExtractor](https://github.com/LukeFZ/CikExtractor)** by LukeFZ — dumps the packed Content Instance Keys (CIK) from the local registry and derives your device key, producing the `.cik` files xvdtool selects by GUID. You point GamesLocalShare at it in Settings; it is run only when a key is needed, elevated, and its keys never leave your machine.
+- **[xvdtool](https://github.com/emoose/xvdtool)** by emoose — the XVD/XVC container tool GamesLocalShare shells out to for on-the-fly decrypt, skeleton capture, and byte-exact reconstruction of the package.
+- **[CikExtractor](https://github.com/LukeFZ/CikExtractor)** by LukeFZ — dumps the packed Content Instance Keys (CIK) from the local registry and derives your device key, producing the `.cik` files xvdtool selects by GUID. It is run only when a key is needed, elevated, and its keys never leave your machine.
 
 GamesLocalShare itself implements no cryptography — it orchestrates these tools to decrypt and re-encrypt content you already own. Both require administrator rights (hence the elevated startup task described above).
+
+**Setup (one-time):** these tools are not redistributed with GamesLocalShare — download them yourself from the links above and point the app at them:
+
+- **xvdtool** — build/download it and place `XVDTool.exe` (with its DLLs) in a `tools\xvdtool\` folder next to `GamesLocalShare.exe`.
+- **CikExtractor** — build/download it, then set its path in the app's **Settings**.
+
+Without these, the rest of GamesLocalShare (Steam/Epic scanning, LAN transfer, sync) works normally; only the Xbox MSIXVC features are disabled.
 
 ### Network Ports
 
@@ -142,7 +149,7 @@ The Xbox / Game Pass transfer and single-copy features are built on two excellen
 open-source tools. GamesLocalShare uses them to decrypt and rebuild content you
 already own; huge thanks to their authors:
 
-- **[xvdtool](https://github.com/emoose/xvdtool)** by [emoose](https://github.com/emoose) — XVD/XVC container tool, bundled and used for on-the-fly MSIXVC decrypt, skeleton capture, and byte-exact reconstruction.
+- **[xvdtool](https://github.com/emoose/xvdtool)** by [emoose](https://github.com/emoose) — XVD/XVC container tool, used for on-the-fly MSIXVC decrypt, skeleton capture, and byte-exact reconstruction.
 - **[CikExtractor](https://github.com/LukeFZ/CikExtractor)** by [LukeFZ](https://github.com/LukeFZ) — used to dump packed CIK data and derive the device key so xvdtool can decrypt your licensed content.
 
 Also thanks to:
