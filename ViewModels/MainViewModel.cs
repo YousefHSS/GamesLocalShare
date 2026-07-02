@@ -6,6 +6,8 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Gameloop.Vdf;
+using Gameloop.Vdf.Linq;
 using GamesLocalShare.Models;
 using GamesLocalShare.Services;
 
@@ -203,9 +205,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // fly; the app never implements the cipher itself).
         if (OperatingSystem.IsWindows())
         {
-            var cikExtractor = string.IsNullOrWhiteSpace(_settings.CikExtractorPath)
-                ? @"C:\Users\SIGMA\source\repos\CikExtractor"
-                : _settings.CikExtractorPath;
+            // When no CikExtractor path is configured, fall back to the historical dev-repo location
+            // ONLY if it still exists on this machine (keeps existing setups working); otherwise leave
+            // it empty and rely on a pre-populated CIK store. No hardcoded path is assumed to exist.
+            const string legacyCikExtractor = @"C:\Users\SIGMA\source\repos\CikExtractor";
+            var cikExtractor = !string.IsNullOrWhiteSpace(_settings.CikExtractorPath)
+                ? _settings.CikExtractorPath
+                : (Directory.Exists(legacyCikExtractor) ? legacyCikExtractor : string.Empty);
             _skeletonWatcher = new SkeletonWatcherService(
                 new SkeletonService(),
                 cacheRoot: _settings.XboxPackageCacheRoot,
@@ -235,7 +241,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             _cacheProxy = new XboxCacheProxyService();
             CacheProxyDir = string.IsNullOrWhiteSpace(_settings.XboxPackageCacheRoot)
-                ? @"F:\xbox-cache" : _settings.XboxPackageCacheRoot!;
+                ? AppSettings.DefaultXboxCacheDir : _settings.XboxPackageCacheRoot!;
+            _cacheProxy.Log += line => _lastCacheProxyLog = line;
             _cacheProxy.Log += OnSkeletonStatus;
             _cacheProxy.StatsChanged += OnCacheProxyStatsChanged;
         }
@@ -345,13 +352,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (_cacheProxy != null && !_cacheProxy.IsRunning)
             {
-                var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+                var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? AppSettings.DefaultXboxCacheDir : CacheProxyDir;
+                _lastCacheProxyLog = null;
                 var ok = await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
                 IsCacheProxyRunning = _cacheProxy.IsRunning;
                 AddLog(ok
                     ? "[Xbox] LAN cache proxy started"
                     : "[Xbox] cache proxy not started (elevation declined?) — capture/serve disabled until you start it",
                     ok ? LogMessageType.Info : LogMessageType.Warning);
+                if (!ok)
+                {
+                    var reason = string.IsNullOrWhiteSpace(_lastCacheProxyLog)
+                        ? "Elevation may have been declined. Start it from the Xbox panel when ready."
+                        : _lastCacheProxyLog;
+                    Notify("warning", "Xbox cache proxy not started", reason,
+                        actions: new[]
+                        {
+                            new { label = "Set cache folder…", style = "primary", command = "BrowseXboxCacheRoot",
+                                  payload = (object)new { retry = "ToggleCacheProxy" } },
+                        });
+                }
             }
         }
         catch (Exception ex)
@@ -375,6 +395,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     public void AddLogPublic(string message, LogMessageType type = LogMessageType.Info) => AddLog(message, type);
+
+    /// <summary>
+    /// Raised when the ViewModel wants to surface a toast/alert in the WebUI. The InteropBridge
+    /// subscribes and forwards to window.__notify. The payload is an anonymous object shaped like the
+    /// frontend's BackendNotification ({ level, variant, title, message, actions:[{label, command, payload, style}] }).
+    /// </summary>
+    public event Action<object>? NotificationRaised;
+
+    /// <summary>
+    /// Surface a toast (or alert) to the user. Use for user-facing failures/decisions so they are not
+    /// silently buried in the log. The log stays the record — this is the visible signal on top of it.
+    /// </summary>
+    /// <param name="level">"error" | "warning" | "success" | "info".</param>
+    /// <param name="variant">"toast" (corner, auto-dismiss) or "alert" (centered modal).</param>
+    /// <param name="actions">Optional action buttons, e.g. new[] { new { label = "Choose folder…", style = "primary", command = "BrowseXboxCacheRoot", payload = new { retry = "ToggleCacheProxy" } } }.</param>
+    public void Notify(string level, string title, string? message = null, object? actions = null, string variant = "toast")
+    {
+        NotificationRaised?.Invoke(new
+        {
+            level,
+            variant,
+            title,
+            message,
+            actions,
+        });
+    }
 
     [RelayCommand]
     private void ClearLog()
@@ -734,11 +780,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Propagate a changed Xbox package cache path to the live proxy + skeleton watcher. These were
         // captured once at construction, so without this a Settings change never reached them (the proxy kept
-        // using the default F:\xbox-cache — "cannot create cache dir" on a PC without that path).
+        // using the per-user default cache dir).
         if (_cacheProxy != null)
         {
             var newCache = string.IsNullOrWhiteSpace(_settings.XboxPackageCacheRoot)
-                ? @"F:\xbox-cache" : _settings.XboxPackageCacheRoot!;
+                ? AppSettings.DefaultXboxCacheDir : _settings.XboxPackageCacheRoot!;
             if (!string.Equals(CacheProxyDir, newCache, StringComparison.OrdinalIgnoreCase))
             {
                 CacheProxyDir = newCache;
@@ -1270,6 +1316,137 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         return commonPath;
+    }
+
+    /// <summary>A Steam library the user could install a copied game into.</summary>
+    private sealed record SteamLibCandidate(string SteamApps, string Common, long FreeBytes);
+
+    /// <summary>All Steam libraries on this PC (main install + libraryfolders.vdf entries), each with
+    /// its "common" folder and the free space on its drive — used to build the "choose destination" prompt.</summary>
+    private List<SteamLibCandidate> GetSteamLibraryCandidates()
+    {
+        var result = new List<SteamLibCandidate>();
+        foreach (var steamApps in _steamScanner.GetLibraryFolders())
+        {
+            try
+            {
+                var common = Path.Combine(steamApps, "common");
+                long free = 0;
+                try { free = new DriveInfo(Path.GetPathRoot(steamApps)!).AvailableFreeSpace; } catch { }
+                result.Add(new SteamLibCandidate(steamApps, common, free));
+            }
+            catch { }
+        }
+        return result;
+    }
+
+    /// <summary>Shows an actionable alert asking which Steam library a new game should install into. Each
+    /// library becomes a button that re-runs StartLocalCopy with an explicit targetRoot; a "Choose another
+    /// folder…" button opens a picker. Used when more than one Steam library exists.</summary>
+    private void RaiseCopyDestinationChooser(GameInfo source, string appId, Guid libraryId, CopyDirection dir, List<SteamLibCandidate> candidates)
+    {
+        var actions = new List<object>();
+        foreach (var c in candidates)
+        {
+            var drive = Path.GetPathRoot(c.SteamApps)?.TrimEnd('\\', '/') ?? c.SteamApps;
+            actions.Add(new
+            {
+                label = $"{drive}  ({FormatBytes(c.FreeBytes)} free)",
+                style = "default",
+                command = "StartLocalCopy",
+                payload = (object)new { appId, libraryId = libraryId.ToString(), direction = dir.ToString(), targetRoot = c.Common },
+            });
+        }
+        actions.Add(new
+        {
+            label = "Choose another folder…",
+            style = "primary",
+            command = "BrowseCopyDestination",
+            payload = (object)new { appId, libraryId = libraryId.ToString(), direction = dir.ToString() },
+        });
+        actions.Add(new { label = "Cancel", style = "default" });
+
+        Notify("info", $"Where should \"{source.Name}\" go?",
+            "You have more than one Steam library. Pick where to install this game.",
+            actions: actions, variant: "alert");
+    }
+
+    /// <summary>
+    /// Writes a Steam <c>appmanifest_&lt;appid&gt;.acf</c> next to a freshly-copied game so Steam recognizes
+    /// the files as installed (it will VERIFY them, not re-download). No-ops unless the game is a Steam title
+    /// with a numeric appid copied into a real <c>…\steamapps\common\</c> layout. Prefers adapting the source
+    /// manifest (keeps depot/build data) and falls back to a synthesized minimal manifest.
+    /// </summary>
+    private void WriteSteamAppManifest(GameInfo source, string destPath)
+    {
+        try
+        {
+            if (source.Platform != GamePlatform.Steam || !int.TryParse(source.AppId, out _))
+                return; // needs a real numeric Steam appid
+
+            var common = Path.GetDirectoryName(destPath);
+            if (common == null || !string.Equals(Path.GetFileName(common), "common", StringComparison.OrdinalIgnoreCase))
+                return; // not a Steam library layout — a manifest here wouldn't be read
+            var steamApps = Path.GetDirectoryName(common);
+            if (steamApps == null || !string.Equals(Path.GetFileName(steamApps), "steamapps", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var installDir = Path.GetFileName(destPath);
+            var acfPath = Path.Combine(steamApps, $"appmanifest_{source.AppId}.acf");
+
+            VObject appState;
+            var srcAcf = TryFindSourceAcf(source);
+            if (srcAcf != null && File.Exists(srcAcf))
+            {
+                appState = (VObject)VdfConvert.Deserialize(File.ReadAllText(srcAcf)).Value;
+            }
+            else
+            {
+                appState = new VObject
+                {
+                    ["appid"] = new VValue(source.AppId),
+                    ["Universe"] = new VValue("1"),
+                    ["name"] = new VValue(source.Name),
+                    ["buildid"] = new VValue(string.IsNullOrEmpty(source.BuildId) || source.BuildId == "unknown" ? "0" : source.BuildId),
+                };
+            }
+
+            // Point the manifest at the copied folder and mark it fully installed with nothing pending.
+            appState["installdir"] = new VValue(installDir);
+            appState["StateFlags"] = new VValue("4"); // 4 = fully installed
+            appState["SizeOnDisk"] = new VValue(source.SizeOnDisk.ToString());
+            appState["LastUpdated"] = new VValue(DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString());
+            appState["BytesToDownload"] = new VValue("0");
+            appState["BytesDownloaded"] = new VValue("0");
+            appState["BytesToStage"] = new VValue("0");
+            appState["BytesStaged"] = new VValue("0");
+
+            File.WriteAllText(acfPath, VdfConvert.Serialize(new VProperty("AppState", appState)));
+            AddLog($"Wrote Steam manifest {Path.GetFileName(acfPath)} (installdir={installDir})", LogMessageType.Success);
+            Notify("success", $"{source.Name} added to Steam",
+                "A Steam app manifest was written. Restart Steam (or refresh your library) to see the game — Steam will verify the copied files, not re-download them.");
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Could not write Steam manifest for {source.Name}: {ex.Message}", LogMessageType.Warning);
+            Notify("warning", "Couldn't write Steam manifest",
+                $"The game copied fine, but Steam may not auto-detect it ({ex.Message}). In Steam, install the game and it will verify the existing files.");
+        }
+    }
+
+    /// <summary>Locates the source Steam manifest for a drive game (…\steamapps\common\&lt;dir&gt; → the sibling
+    /// appmanifest), or null when the source isn't a real Steam library.</summary>
+    private static string? TryFindSourceAcf(GameInfo source)
+    {
+        try
+        {
+            var common = Path.GetDirectoryName(source.InstallPath);
+            var steamApps = common == null ? null : Path.GetDirectoryName(common);
+            if (steamApps == null) return null;
+            var acf = Path.Combine(steamApps, $"appmanifest_{source.AppId}.acf");
+            return File.Exists(acf) ? acf : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -2580,7 +2757,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return result;
     }
 
-    public async Task StartLocalCopyAsync(string appId, Guid libraryId, CopyDirection? overrideDirection = null)
+    public async Task StartLocalCopyAsync(string appId, Guid libraryId, CopyDirection? overrideDirection = null, string? targetRoot = null)
     {
         var lib = _settings.ExternalLibraries.FirstOrDefault(l => l.Id == libraryId);
         if (lib == null)
@@ -2639,17 +2816,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 AddLog($"StartLocalCopy: external copy missing for {appId} (direction={effectiveDirection})", LogMessageType.Error);
                 return;
             }
-            // Smart-by-store routing: send the game to its own store's install folder on this PC
-            // (Epic -> Epic root, Steam/External -> Steam library "common"), not always Steam.
-            try
+
+            // Resolve where the game lands on THIS PC. An explicit targetRoot (from the "choose
+            // destination" prompt or a browsed folder) is used verbatim. Otherwise: Epic goes to the
+            // Epic root; Steam/External games are prompted for a library when more than one exists,
+            // and use the only one when there's just a single library.
+            if (string.IsNullOrWhiteSpace(targetRoot))
             {
-                destPath = System.IO.Path.Combine(GetStoreInstallRoot(source), System.IO.Path.GetFileName(source.InstallPath));
+                if (source.Platform == GamePlatform.EpicGames)
+                {
+                    try { targetRoot = GetStoreInstallRoot(source); }
+                    catch (InvalidOperationException ex)
+                    {
+                        AddLog($"StartLocalCopy: {ex.Message}", LogMessageType.Error);
+                        Notify("error", "No install location", ex.Message);
+                        return;
+                    }
+                }
+                else
+                {
+                    var candidates = GetSteamLibraryCandidates();
+                    if (candidates.Count == 0)
+                    {
+                        const string m = "No Steam library was found to install into. Open Steam once (or add a library folder) and try again.";
+                        AddLog($"StartLocalCopy: {m}", LogMessageType.Error);
+                        Notify("error", "No Steam library found", m);
+                        return;
+                    }
+                    if (candidates.Count > 1)
+                    {
+                        // More than one library — let the user choose. The chooser's buttons re-invoke this
+                        // command with an explicit targetRoot, so we stop here and wait for the choice.
+                        RaiseCopyDestinationChooser(source, appId, libraryId, effectiveDirection, candidates);
+                        return;
+                    }
+                    targetRoot = candidates[0].Common;
+                }
             }
-            catch (InvalidOperationException ex)
-            {
-                AddLog($"StartLocalCopy: {ex.Message}", LogMessageType.Error);
-                return;
-            }
+
+            try { System.IO.Directory.CreateDirectory(targetRoot); } catch { /* surfaced by the copy if truly unwritable */ }
+            destPath = System.IO.Path.Combine(targetRoot, System.IO.Path.GetFileName(source.InstallPath));
         }
         else
         {
@@ -2695,6 +2901,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 StatusMessage = $"Local copy complete: {source.Name}";
                 AddLog($"Local copy finished: {source.Name}", LogMessageType.Success);
+
+                // For a drive->PC copy of a Steam game, write an appmanifest so Steam recognizes the copied
+                // files (verify, not re-download) instead of the game being invisible in the library.
+                if (effectiveDirection == CopyDirection.DriveToDevice || effectiveDirection == CopyDirection.OnlyOnDrive)
+                    WriteSteamAppManifest(source, destPath);
+
+                // Refresh My Games so the freshly-copied title appears without a manual rescan.
+                await ScanLocalGamesAsync();
             }
             else
             {
@@ -2897,6 +3111,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 "Use 'Restart as Administrator' first.";
             AddLog(msg, LogMessageType.Error);
             LastError = msg;
+            Notify("warning", "Administrator required",
+                "Xbox transfer needs the app running as Administrator.",
+                actions: new[] { new { label = "Restart as Administrator", style = "primary", command = "RequestElevation", payload = (object?)null } });
             return;
         }
 
@@ -2906,6 +3123,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             AddLog($"Xbox transfer validation failed: {error}", LogMessageType.Error);
             LastError = error;
+            Notify("error", "Xbox transfer can't start", error);
             return;
         }
 
@@ -2945,6 +3163,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             AddLog($"Xbox transfer error: {ex.Message}", LogMessageType.Error);
             LastError = ex.Message;
+            Notify("error", "Xbox transfer failed", ex.Message);
         }
         finally
         {
@@ -2970,6 +3189,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 "Use 'Restart as Administrator' first.";
             AddLog(msg, LogMessageType.Error);
             LastError = msg;
+            Notify("warning", "Administrator required",
+                "Xbox network transfer needs the app running as Administrator.",
+                actions: new[] { new { label = "Restart as Administrator", style = "primary", command = "RequestElevation", payload = (object?)null } });
             return;
         }
 
@@ -3203,6 +3425,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             AddLog($"Copy to drive: \"{game.Name}\" isn't ready for an updatable copy yet — reinstall it with " +
                    $"the app open, or use Basic (Stage to Drive).", LogMessageType.Warning);
+            Notify("warning", "No updatable copy available",
+                $"\"{game.Name}\" isn't ready for an updatable copy yet. Reinstall it while this app is open, " +
+                $"or use a Basic copy (Stage to Drive) from the Drives panel.");
             return;
         }
         AddLog($"Copy to drive (updatable): rebuilding \"{game.Name}\" → {lib.RootPath} …", LogMessageType.Info);
@@ -3253,6 +3478,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_cacheProxy == null)
         {
             StatusMessage = "The cache proxy is only available on Windows";
+            Notify("warning", "Xbox cache proxy unavailable", "The LAN cache proxy only runs on Windows.");
             return;
         }
         if (_cacheProxy.IsRunning)
@@ -3261,10 +3487,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
-            await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
+            // Guard the required path up front: if no cache folder is set (or its drive is gone), prompt the
+            // user to pick one on the spot and auto-retry, instead of silently defaulting to a folder that may
+            // not exist.
+            if (!IsCacheRootUsable(CacheProxyDir))
+            {
+                AddLog("Xbox cache proxy: no usable cache folder set", LogMessageType.Warning);
+                Notify("warning", "No Xbox cache folder set",
+                    "Pick a folder to store the Xbox LAN cache, then the proxy will start automatically.",
+                    actions: new[]
+                    {
+                        new { label = "Choose folder…", style = "primary", command = "BrowseXboxCacheRoot",
+                              payload = (object)new { retry = "ToggleCacheProxy" } },
+                    });
+                return;
+            }
+
+            _lastCacheProxyLog = null;
+            var ok = await _cacheProxy.StartAsync(CacheProxyDir, new[] { "assets1.xboxlive.com" });
+            if (!ok)
+            {
+                var reason = string.IsNullOrWhiteSpace(_lastCacheProxyLog)
+                    ? "See the log for details."
+                    : _lastCacheProxyLog;
+                AddLog($"Xbox cache proxy failed to start: {reason}", LogMessageType.Error);
+                Notify("error", "Xbox cache proxy didn't start", reason,
+                    actions: new[]
+                    {
+                        new { label = "Choose folder…", style = "primary", command = "BrowseXboxCacheRoot",
+                              payload = (object)new { retry = "ToggleCacheProxy" } },
+                    });
+            }
         }
         IsCacheProxyRunning = _cacheProxy.IsRunning;
+    }
+
+    /// <summary>True when a cache root is set and its drive is present (so the proxy can create/use it).</summary>
+    private static bool IsCacheRootUsable(string? cacheDir)
+    {
+        if (string.IsNullOrWhiteSpace(cacheDir)) return false;
+        try
+        {
+            var root = Path.GetPathRoot(cacheDir);
+            // A rooted path whose drive doesn't exist (e.g. F:\ when there is no F:) is not usable.
+            if (!string.IsNullOrEmpty(root) && root.Length >= 2 && root[1] == ':')
+                return Directory.Exists(root);
+            return true;
+        }
+        catch { return false; }
     }
 
     private void OnCacheProxyStatsChanged()
@@ -3409,6 +3679,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private DateTime _peerLastTick;
     private bool _peerFinishScheduled;                    // one-shot guard for the finalize safety-net
     private XboxTransferState? _driveCopyState;            // active "Copy to Drive" reconstruct → transfer bar
+    private string? _lastCacheProxyLog;                    // most recent proxy Log line (for failure toasts)
 
     private static string XvdToolPath =>
         Path.Combine(AppContext.BaseDirectory, "tools", "xvdtool", "XVDTool.exe");
@@ -3532,7 +3803,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Ensure the proxy is up (it intercepts the Store's CDN requests).
         if (!_cacheProxy.IsRunning)
         {
-            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? AppSettings.DefaultXboxCacheDir : CacheProxyDir;
             await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
             IsCacheProxyRunning = _cacheProxy.IsRunning;
         }
@@ -3675,7 +3946,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (!_cacheProxy.IsRunning)
         {
-            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? @"F:\xbox-cache" : CacheProxyDir;
+            var cacheDir = string.IsNullOrWhiteSpace(CacheProxyDir) ? AppSettings.DefaultXboxCacheDir : CacheProxyDir;
             await _cacheProxy.StartAsync(cacheDir, new[] { "assets1.xboxlive.com" });
             IsCacheProxyRunning = _cacheProxy.IsRunning;
         }

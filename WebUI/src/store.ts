@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { sendCommand } from './bridge';
+import type { CommandName, CommandPayload } from './bridge';
 
 export interface GameInfo {
   appId: string;
@@ -306,6 +308,81 @@ export const useAppState = create<AppState>((set) => ({
   reset: () => set(initialState),
 }));
 
+// ---- Notifications (toasts + actionable alerts) ---------------------------
+// A single global system for surfacing failures and decisions. Toasts appear in the
+// corner (auto-dismiss); alerts are centered modals that require an action. Both the
+// C# backend (via window.__notify) and frontend code (via the notify() helper) push
+// through the same store so the UI is identical regardless of origin.
+
+export type NotifyLevel = 'error' | 'warning' | 'success' | 'info';
+
+export interface NotifyAction {
+  label: string;
+  style?: 'primary' | 'default';
+  // Backend-raised actions carry a command to send; frontend-raised actions carry a
+  // client callback. Either (or neither, for a plain "OK"/dismiss button) may be set.
+  command?: CommandName;
+  payload?: CommandPayload;
+  run?: () => void;
+  // Whether acting also dismisses the notification (default true).
+  dismiss?: boolean;
+}
+
+export interface AppNotification {
+  id: string;
+  level: NotifyLevel;
+  variant: 'toast' | 'alert';
+  title: string;
+  message?: string;
+  actions?: NotifyAction[];
+  // Auto-dismiss delay in ms. Ignored for alerts and sticky levels (error/warning).
+  timeout?: number;
+}
+
+interface NotificationsState {
+  notifications: AppNotification[];
+  push: (n: Partial<AppNotification> & { title: string }) => string;
+  dismiss: (id: string) => void;
+  clear: () => void;
+}
+
+let notifySeq = 0;
+const nextNotifyId = () =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `n${Date.now()}-${notifySeq++}`;
+
+// Sticky by default for errors/warnings and for any alert; transient otherwise.
+const defaultTimeout = (level: NotifyLevel, variant: 'toast' | 'alert') =>
+  variant === 'alert' || level === 'error' || level === 'warning'
+    ? 0
+    : level === 'success' ? 3500 : 4500;
+
+export const useNotifications = create<NotificationsState>((set) => ({
+  notifications: [],
+  push: (n) => {
+    const id = n.id ?? nextNotifyId();
+    const level: NotifyLevel = n.level ?? 'info';
+    const variant: 'toast' | 'alert' = n.variant ?? 'toast';
+    const notification: AppNotification = {
+      id,
+      level,
+      variant,
+      title: n.title,
+      message: n.message,
+      actions: n.actions,
+      timeout: n.timeout ?? defaultTimeout(level, variant),
+    };
+    set((s) => ({
+      // Replace any existing notification with the same id so callers can update in place.
+      notifications: [...s.notifications.filter((x) => x.id !== id), notification],
+    }));
+    return id;
+  },
+  dismiss: (id) => set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) })),
+  clear: () => set({ notifications: [] }),
+}));
+
 // Setup C# → JS global functions
 export interface AppSettingsForm {
   autoStartNetwork: boolean;
@@ -331,10 +408,30 @@ export interface SettingsPayload {
   settingsPath: string;
 }
 
+// Shape the C# backend sends to window.__notify. Backend actions carry a command name;
+// the frontend maps it to a sendCommand call (see below).
+export interface BackendNotifyAction {
+  label: string;
+  style?: 'primary' | 'default';
+  command?: CommandName;
+  payload?: CommandPayload;
+  dismiss?: boolean;
+}
+export interface BackendNotification {
+  id?: string;
+  level?: NotifyLevel;
+  variant?: 'toast' | 'alert';
+  title: string;
+  message?: string;
+  actions?: BackendNotifyAction[];
+  timeout?: number;
+}
+
 declare global {
   function __initState(state: AppState): void;
   function __updateState(patch: Partial<AppState>): void;
   function __openSettings(payload: SettingsPayload): void;
+  function __notify(n: BackendNotification): void;
   function __epicBrowseResult(path: string): void;
   function __driveBrowseResult(path: string): void;
   function __driveListResult(drives: DriveCandidate[]): void;
@@ -347,6 +444,18 @@ declare global {
 
 (window as any).__updateState = (patch: Partial<AppState>) => {
   useAppState.setState(patch);
+};
+
+// C# → JS notification bridge. Maps backend action commands to sendCommand calls so
+// backend-raised toasts/alerts can carry actionable buttons (e.g. "Choose folder…").
+(window as any).__notify = (n: BackendNotification) => {
+  const actions = n.actions?.map((a) => ({
+    label: a.label,
+    style: a.style,
+    dismiss: a.dismiss,
+    run: a.command ? () => sendCommand(a.command as CommandName, a.payload) : undefined,
+  }));
+  useNotifications.getState().push({ ...n, actions });
 };
 
 // Signal to the C# backend that the WebUI is mounted and ready to receive state.

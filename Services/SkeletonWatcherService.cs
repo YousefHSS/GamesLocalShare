@@ -55,7 +55,7 @@ public sealed class SkeletonWatcherService : IDisposable
     /// pick it up immediately; if the watcher is already running, the cache-folder watcher is re-pointed too.</summary>
     public void UpdateCacheRoot(string? cacheRoot)
     {
-        var newRoot = string.IsNullOrWhiteSpace(cacheRoot) ? @"F:\xbox-cache" : cacheRoot!;
+        var newRoot = string.IsNullOrWhiteSpace(cacheRoot) ? Models.AppSettings.DefaultXboxCacheDir : cacheRoot!;
         if (string.Equals(_cacheRoot, newRoot, StringComparison.OrdinalIgnoreCase)) return;
         _cacheRoot = newRoot;
         Report($"package cache root changed to: {_cacheRoot}");
@@ -96,7 +96,7 @@ public sealed class SkeletonWatcherService : IDisposable
         _cikStore = cikStore ?? Path.Combine(baseDir, "cik");
         // Default the package cache root to the LAN-cache proxy's CacheDir (xbox-cache-proxy.ps1),
         // where downloaded <PackageFullName>.msixvc packages are persisted. Configurable via settings.
-        _cacheRoot = string.IsNullOrWhiteSpace(cacheRoot) ? @"F:\xbox-cache" : cacheRoot;
+        _cacheRoot = string.IsNullOrWhiteSpace(cacheRoot) ? Models.AppSettings.DefaultXboxCacheDir : cacheRoot;
         _cikExtractorPath = string.IsNullOrWhiteSpace(cikExtractorPath) ? null : cikExtractorPath;
         _captureLog = Path.Combine(baseDir, "capture.log");
         Directory.CreateDirectory(DropFolder);

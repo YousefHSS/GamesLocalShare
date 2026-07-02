@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAppState, type GameInfo, type NetworkPeer, type ExternalLibrary, type CrossLocationGame } from '../store';
 import { sendCommand } from '../bridge';
+import { confirmBasicCopy } from '../lib/notify';
 import PlatformIcon from './PlatformIcon';
 
 /**
@@ -222,9 +223,18 @@ export default function SyncView() {
 
   const copyToDrive = (g: GameInfo) => {
     if (!selectedLib) return;
-    if (g.platform === 'Xbox') sendCommand('CopyXboxGameToDrive', { appId: g.appId, libraryId: selectedLib.id });
-    else sendCommand('StartLocalCopy', { appId: g.appId, libraryId: selectedLib.id, direction: 'DeviceToDrive' });
-    flash(`Copying ${g.name} → ${selectedLib.displayName}…`);
+    const lib = selectedLib;
+    const doCopy = () => {
+      if (g.platform === 'Xbox') sendCommand('CopyXboxGameToDrive', { appId: g.appId, libraryId: lib.id });
+      else sendCommand('StartLocalCopy', { appId: g.appId, libraryId: lib.id, direction: 'DeviceToDrive' });
+      flash(`Copying ${g.name} → ${lib.displayName}…`);
+    };
+    // Warn before a Basic (non-updatable) Xbox copy; Updatable (smart-ready) copies proceed directly.
+    if (g.platform === 'Xbox' && !g.xboxSmartReady) {
+      confirmBasicCopy(g.name, doCopy);
+      return;
+    }
+    doCopy();
   };
 
   const shareWithNetwork = (g: GameInfo) => {

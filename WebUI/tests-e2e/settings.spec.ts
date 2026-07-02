@@ -26,9 +26,12 @@ test('SettingsModal save flow', async ({ page, bridge }) => {
 
   // Modal opens with sections rendered
   await expect(page.getByRole('heading', { name: 'Application Settings' })).toBeVisible();
+  // Hidden Games now lives on the "Games" tab.
+  await page.getByRole('button', { name: 'Games', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Hidden Games' })).toBeVisible();
 
-  // Toggle "Auto-start network"
+  // Back to General to toggle "Auto-start network" (form state persists across tabs).
+  await page.getByRole('button', { name: 'General', exact: true }).click();
   await page.getByText('Auto-start network on application startup').click();
 
   // Save
@@ -66,6 +69,8 @@ test('Reset to defaults reverts the form', async ({ page, bridge }) => {
 test('UnhideAllGames is wired to the Show all button', async ({ page, bridge }) => {
   await bridge.openSettings(basePayload);
 
+  // Hidden Games now lives on the "Games" tab.
+  await page.getByRole('button', { name: 'Games', exact: true }).click();
   await expect(page.getByText(/1 game/)).toBeVisible();
   await page.getByRole('button', { name: /Show all/i }).click();
   expect((await bridge.lastCommand()).cmd).toBe('UnhideAllGames');

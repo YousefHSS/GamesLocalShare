@@ -397,4 +397,13 @@ public class AppSettings
     /// Gets the settings file path (for display in UI)
     /// </summary>
     public static string GetSettingsFilePath() => SettingsPath;
+
+    /// <summary>
+    /// Per-user default folder for the Xbox LAN cache / package cache, used when
+    /// <see cref="XboxPackageCacheRoot"/> isn't set. Lives under LocalApplicationData so it
+    /// exists on any machine (replaces the old hardcoded <c>F:\xbox-cache</c>).
+    /// </summary>
+    public static string DefaultXboxCacheDir => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GamesLocalShare", "xbox-cache");
 }

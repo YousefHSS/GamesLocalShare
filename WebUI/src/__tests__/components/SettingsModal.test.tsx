@@ -37,6 +37,7 @@ beforeEach(() => {
 afterEach(() => {
   delete (window as any).__epicBrowseResult;
   delete (window as any).__driveBrowseResult;
+  delete (window as any).__xboxCacheBrowseResult;
 });
 
 function lastCommand() {
@@ -44,15 +45,36 @@ function lastCommand() {
   return JSON.parse(arg) as { cmd: string; payload?: any };
 }
 
+// Settings are split across a left tab rail; click a tab (by its button label) to reveal
+// that tab's sections. Tab labels are distinct from section headings (which are <h3>).
+function goTab(user: ReturnType<typeof userEvent.setup>, label: string) {
+  return user.click(screen.getByRole('button', { name: label }));
+}
+
 describe('SettingsModal', () => {
-  it('renders the settings sections', () => {
+  it('renders the tab rail and switches sections when a tab is clicked', async () => {
+    const user = userEvent.setup();
     render(<SettingsModal payload={basePayload} onClose={() => {}} />);
     expect(screen.getByText('Application Settings')).toBeInTheDocument();
-    expect(screen.getByText('General')).toBeInTheDocument();
-    expect(screen.getByText('Auto-Update')).toBeInTheDocument();
-    expect(screen.getByText('Game Stores')).toBeInTheDocument();
-    expect(screen.getByText('External Drive Libraries')).toBeInTheDocument();
-    expect(screen.getByText('Hidden Games')).toBeInTheDocument();
+
+    // Tab rail buttons.
+    for (const label of ['General', 'Game Stores', 'Xbox', 'Drives', 'Games', 'About']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+
+    // Default tab (General) shows the General + Auto-Update sections.
+    expect(screen.getByRole('heading', { name: 'General' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Auto-Update' })).toBeInTheDocument();
+
+    // Each tab reveals its own section.
+    await goTab(user, 'Game Stores');
+    expect(screen.getByRole('heading', { name: 'Game Stores' })).toBeInTheDocument();
+
+    await goTab(user, 'Drives');
+    expect(screen.getByRole('heading', { name: 'External Drive Libraries' })).toBeInTheDocument();
+
+    await goTab(user, 'Games');
+    expect(screen.getByRole('heading', { name: 'Hidden Games' })).toBeInTheDocument();
   });
 
   it('clicking Save sends the SaveSettings command with the form values', async () => {
@@ -104,12 +126,15 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     render(<SettingsModal payload={basePayload} onClose={() => {}} />);
 
+    await goTab(user, 'Game Stores');
     await user.click(screen.getByRole('button', { name: /Browse\.\.\./i }));
     expect(lastCommand().cmd).toBe('BrowseEpicFolder');
   });
 
   it('Epic browse result populates the install root field', async () => {
+    const user = userEvent.setup();
     render(<SettingsModal payload={basePayload} onClose={() => {}} />);
+    await goTab(user, 'Game Stores');
     const callback = (window as any).__epicBrowseResult as (path: string) => void;
     expect(typeof callback).toBe('function');
 
@@ -126,6 +151,7 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     render(<SettingsModal payload={basePayload} onClose={() => {}} />);
 
+    await goTab(user, 'Drives');
     await user.click(screen.getByRole('button', { name: /Browse & Add Library/i }));
     expect(lastCommand().cmd).toBe('BrowseDriveFolder');
 
@@ -160,6 +186,7 @@ describe('SettingsModal', () => {
     });
     render(<SettingsModal payload={basePayload} onClose={() => {}} />);
 
+    await goTab(user, 'Drives');
     expect(screen.getByText('My Drive')).toBeInTheDocument();
     await user.click(screen.getByTitle('Remove library'));
 
@@ -179,6 +206,7 @@ describe('SettingsModal', () => {
     };
     render(<SettingsModal payload={payload} onClose={() => {}} />);
 
+    await goTab(user, 'Games');
     expect(screen.getByText(/2 games/)).toBeInTheDocument();
     expect(screen.getByText('Dota 2')).toBeInTheDocument();
     expect(screen.getByText('TF2')).toBeInTheDocument();

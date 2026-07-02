@@ -12,6 +12,7 @@ import DrivesPanel from './components/DrivesPanel';
 import SkeletonPanel from './components/SkeletonPanel';
 import PlatformIcon from './components/PlatformIcon';
 import SyncView from './components/SyncView';
+import Notifications from './components/Notifications';
 
 
 interface GameContextMenu {
@@ -32,6 +33,8 @@ export default function App() {
   const [showDrives, setShowDrives] = useState(false);
   const [showSkeleton, setShowSkeleton] = useState(false);
   const [viewMode, setViewMode] = useState<'classic' | 'sync'>('sync');
+  // Session-only dismissal for the "firewall not configured" banner so it can be hidden after acting.
+  const [firewallDismissed, setFirewallDismissed] = useState(false);
   // Footer transfer pill expands/collapses the detailed transfer strip(s).
   const [showTransferDetails, setShowTransferDetails] = useState(false);
 
@@ -146,6 +149,31 @@ export default function App() {
           <div className="text-xs text-slate-500 font-mono truncate hidden md:block">{s.statusMessage}</div>
         </div>
       </div>
+
+      {/* Firewall not configured — peers usually can't connect without the LAN rules. Surface a
+          reachable one-click fix (the ConfigureFirewall command relaunches elevated to add them). */}
+      {s.isWindows && !s.firewallConfigured && !firewallDismissed && (
+        <div className="bg-amber-950/60 border-b border-amber-700/50 px-3 sm:px-6 py-2 flex items-center gap-3">
+          <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <p className="text-xs text-amber-200 flex-1 min-w-0">
+            <span className="font-semibold">Firewall not configured.</span>{' '}
+            Other computers may not be able to find or connect to this PC until the LAN rules are added.
+          </p>
+          <button
+            onClick={() => sendCommand('ConfigureFirewall')}
+            className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-medium flex-shrink-0"
+          >
+            Configure Firewall
+          </button>
+          <button
+            onClick={() => setFirewallDismissed(true)}
+            className="text-amber-400/70 hover:text-amber-200 flex-shrink-0"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {viewMode === 'classic' && (
       <>
@@ -825,7 +853,11 @@ export default function App() {
           ) : (
             <>
               <Check className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
-              <span className="truncate">All transfers complete. Drag games across panes to sync.</span>
+              <span className="truncate">
+                {viewMode === 'sync'
+                  ? 'All transfers complete. Drag games across panes to sync.'
+                  : 'All transfers complete.'}
+              </span>
             </>
           )}
         </button>
@@ -842,6 +874,8 @@ export default function App() {
       {settingsPayload && (
         <SettingsModal payload={settingsPayload} onClose={() => setSettingsPayload(null)} />
       )}
+
+      <Notifications />
 
       {showDrives && (
         <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-4 animate-fade-in" onClick={e => { if (e.target === e.currentTarget) setShowDrives(false); }}>

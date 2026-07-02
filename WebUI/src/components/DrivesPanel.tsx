@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { HardDrive, Copy, RefreshCw, ArrowRight, ArrowLeft, Check, HelpCircle, Info, Search, X } from 'lucide-react';
 import { useAppState, type CrossLocationGame, type ExternalLibrary, type DriveCandidate } from '../store';
 import { sendCommand } from '../bridge';
+import { confirmBasicCopy } from '../lib/notify';
 import PlatformIcon from './PlatformIcon';
 import XboxTransferModal from './XboxTransferModal';
 
@@ -374,7 +375,7 @@ export default function DrivesPanel() {
                                     Basic only
                                   </span>
                                   <button
-                                    onClick={() => handleXboxStage(game)}
+                                    onClick={() => confirmBasicCopy(game.displayName, () => handleXboxStage(game))}
                                     className="px-1.5 py-0.5 bg-slate-600 hover:bg-slate-500 rounded text-[10px] font-medium text-white"
                                     title="Basic copy — the transferred game won't be updatable. Reinstall with the app open for an updatable copy."
                                   >

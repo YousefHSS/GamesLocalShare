@@ -91,7 +91,7 @@ public sealed class XboxCacheProxyService : IDisposable
     public async Task<bool> StartAsync(string cacheDir, IEnumerable<string>? originHosts = null)
     {
         if (IsRunning) return true;
-        _cacheDir = string.IsNullOrWhiteSpace(cacheDir) ? @"F:\xbox-cache" : cacheDir;
+        _cacheDir = string.IsNullOrWhiteSpace(cacheDir) ? Models.AppSettings.DefaultXboxCacheDir : cacheDir;
         var hosts = (originHosts ?? Enumerable.Empty<string>()).Where(h => !string.IsNullOrWhiteSpace(h)).ToArray();
         _hosts = hosts.Length > 0 ? hosts : new[] { "assets1.xboxlive.com" };
 

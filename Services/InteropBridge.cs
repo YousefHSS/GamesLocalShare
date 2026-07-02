@@ -59,6 +59,12 @@ public class InteropBridge : IDisposable
             }
         };
 
+        // Forward ViewModel-raised toasts/alerts to the WebUI (window.__notify).
+        _viewModel.NotificationRaised += notification =>
+        {
+            Dispatcher.UIThread.Post(() => _ = PushNotificationAsync(notification));
+        };
+
         // Subscribe to collection changes
         SubscribeToCollection(_viewModel.LocalGames, "localGames");
         SubscribeToCollection(_viewModel.NetworkPeers, "networkPeers");
@@ -703,9 +709,17 @@ public class InteropBridge : IDisposable
                         {
                             overrideDir = parsedDir;
                         }
-                        _viewModel.AddLogPublic($"StartLocalCopy received: appId={copyAppId}, libraryId={copyLibGuid}, direction={overrideDir?.ToString() ?? "auto"}", LogMessageType.Info);
-                        await _viewModel.StartLocalCopyAsync(copyAppId, copyLibGuid, overrideDir);
+                        // Optional explicit destination (from the "choose destination" chooser button).
+                        string? copyTargetRoot = payload.Value.TryGetProperty("targetRoot", out var trEl)
+                            && trEl.ValueKind == JsonValueKind.String
+                            ? trEl.GetString() : null;
+                        _viewModel.AddLogPublic($"StartLocalCopy received: appId={copyAppId}, libraryId={copyLibGuid}, direction={overrideDir?.ToString() ?? "auto"}, target={copyTargetRoot ?? "auto"}", LogMessageType.Info);
+                        await _viewModel.StartLocalCopyAsync(copyAppId, copyLibGuid, overrideDir, copyTargetRoot);
                     }
+                    break;
+
+                case "BrowseCopyDestination":
+                    await HandleBrowseCopyDestinationAsync(payload);
                     break;
 
                 // Xbox transfer commands (receiver + sender)
@@ -817,6 +831,14 @@ public class InteropBridge : IDisposable
                     await HandleBrowseXboxRootAsync();
                     break;
 
+                case "BrowseXboxCacheRoot":
+                    {
+                        string? retry = payload?.TryGetProperty("retry", out var retryEl) == true
+                            ? retryEl.GetString() : null;
+                        await HandleBrowseXboxCacheRootAsync(retry);
+                    }
+                    break;
+
                 case "SetXboxPath":
                     if (payload.HasValue)
                     {
@@ -899,6 +921,8 @@ public class InteropBridge : IDisposable
         {
             System.Diagnostics.Debug.WriteLine($"Command execution error: {ex}");
             try { _viewModel.AddLogPublic($"Command '{cmd}' failed: {ex.Message}", LogMessageType.Error); }
+            catch { }
+            try { _viewModel.Notify("error", "Something went wrong", ex.Message); }
             catch { }
         }
     }
@@ -989,6 +1013,67 @@ public class InteropBridge : IDisposable
         }
     }
 
+    /// <summary>Pick + persist the Xbox LAN cache folder, then (optionally) re-run the command that needed it
+    /// (auto-retry). Raised from a "no cache folder set" / "proxy didn't start" toast action.</summary>
+    private async Task HandleBrowseXboxCacheRootAsync(string? retryCommand)
+    {
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose a folder for the Xbox LAN cache (stores cached game packages)",
+            AllowMultiple = false
+        });
+        if (result.Count == 0) return;
+
+        var path = result[0].Path.LocalPath;
+
+        // Called from the Settings modal (no retry): just fill the form field; the modal's Save persists it,
+        // so Cancel still discards. Called from a toast action (retry set): persist immediately + auto-retry.
+        if (string.IsNullOrEmpty(retryCommand))
+        {
+            var json = JsonSerializer.Serialize(path, JsonOptions);
+            await ExecuteJavaScriptAsync($"window.__xboxCacheBrowseResult && window.__xboxCacheBrowseResult({json});");
+            return;
+        }
+
+        _viewModel.Settings.XboxPackageCacheRoot = string.IsNullOrWhiteSpace(path) ? null : path;
+        _viewModel.Settings.Save();
+        _viewModel.CacheProxyDir = path;
+        _viewModel.AddLogPublic($"Xbox cache folder set to {path}", LogMessageType.Info);
+        _viewModel.Notify("success", "Cache folder set", path);
+
+        // Auto-retry the original action (e.g. start the proxy) now that the path is set.
+        await HandleCommandAsync(retryCommand, null);
+    }
+
+    /// <summary>Opens a folder picker for the "Choose another folder…" option in the copy-destination chooser,
+    /// then runs the drive→PC copy into the chosen folder.</summary>
+    private async Task HandleBrowseCopyDestinationAsync(JsonElement? payload)
+    {
+        if (payload == null) return;
+        if (!payload.Value.TryGetProperty("appId", out var aEl)) return;
+        if (!payload.Value.TryGetProperty("libraryId", out var lEl) || !Guid.TryParse(lEl.GetString(), out var libGuid)) return;
+
+        CopyDirection? dir = null;
+        if (payload.Value.TryGetProperty("direction", out var dEl) && dEl.ValueKind == JsonValueKind.String
+            && Enum.TryParse<CopyDirection>(dEl.GetString(), out var parsed))
+            dir = parsed;
+
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return;
+
+        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose where to install the game",
+            AllowMultiple = false
+        });
+        if (result.Count == 0) return;
+
+        await _viewModel.StartLocalCopyAsync(aEl.GetString() ?? string.Empty, libGuid, dir, result[0].Path.LocalPath);
+    }
+
     private async Task PushSettingsAsync()
     {
         var s = _viewModel.Settings;
@@ -1036,6 +1121,14 @@ public class InteropBridge : IDisposable
 
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         await ExecuteJavaScriptAsync($"window.__openSettings && window.__openSettings({json});");
+    }
+
+    /// <summary>Forwards a ViewModel-raised notification to the WebUI's global toast/alert system.</summary>
+    private async Task PushNotificationAsync(object notification)
+    {
+        if (_webView == null) return;
+        var json = JsonSerializer.Serialize(notification, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__notify && window.__notify({json});");
     }
 
     private async Task HandleListDrivesAsync()

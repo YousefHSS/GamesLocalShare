@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { X, Settings as SettingsIcon, FolderOpen, RotateCcw, HardDrive, Trash2 } from 'lucide-react';
+import {
+  X, Settings as SettingsIcon, FolderOpen, RotateCcw, HardDrive, Trash2,
+  SlidersHorizontal, Gamepad2, Boxes, EyeOff, Info,
+} from 'lucide-react';
 import { useAppState } from '../store';
 import { sendCommand } from '../bridge';
 import type { AppSettingsForm, SettingsPayload } from '../store';
@@ -20,6 +23,17 @@ const DEFAULTS: AppSettingsForm = {
   steamGridDbApiKey: '',
 };
 
+type TabId = 'general' | 'stores' | 'xbox' | 'drives' | 'games' | 'about';
+
+const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'stores', label: 'Game Stores', icon: Gamepad2 },
+  { id: 'xbox', label: 'Xbox', icon: Boxes },
+  { id: 'drives', label: 'Drives', icon: HardDrive },
+  { id: 'games', label: 'Games', icon: EyeOff },
+  { id: 'about', label: 'About', icon: Info },
+];
+
 export default function SettingsModal({
   payload,
   onClose,
@@ -29,6 +43,7 @@ export default function SettingsModal({
 }) {
   const s = useAppState();
   const [form, setForm] = useState<AppSettingsForm>(payload.settings);
+  const [tab, setTab] = useState<TabId>('general');
   const [pendingLibraryPath, setPendingLibraryPath] = useState<string | null>(null);
   const [pendingLibraryName, setPendingLibraryName] = useState('');
 
@@ -41,6 +56,20 @@ export default function SettingsModal({
     return () => {
       if ((window as any).__epicBrowseResult === handler) {
         (window as any).__epicBrowseResult = prev;
+      }
+    };
+  }, []);
+
+  // Fill the Xbox cache-root field when the backend folder picker returns (settings context).
+  useEffect(() => {
+    const handler = (path: string) => {
+      setForm(prev => ({ ...prev, xboxPackageCacheRoot: path }));
+    };
+    const prev = (window as any).__xboxCacheBrowseResult;
+    (window as any).__xboxCacheBrowseResult = handler;
+    return () => {
+      if ((window as any).__xboxCacheBrowseResult === handler) {
+        (window as any).__xboxCacheBrowseResult = prev;
       }
     };
   }, []);
@@ -95,7 +124,7 @@ export default function SettingsModal({
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-fade-in"
       onClick={onBackdrop}
     >
-      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-scale-in">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-3xl h-[90vh] max-h-[42rem] flex flex-col overflow-hidden animate-scale-in">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-5 py-4 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -107,302 +136,340 @@ export default function SettingsModal({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-auto p-5 space-y-5">
-          {/* General */}
-          <Section title="General">
-            <Toggle
-              label="Auto-start network on application startup"
-              hint="Automatically start network discovery when the app launches"
-              checked={form.autoStartNetwork}
-              onChange={v => set('autoStartNetwork', v)}
-            />
-            <Toggle
-              label="Start application with Windows"
-              hint="Auto-start the application when Windows starts"
-              checked={form.startWithWindows}
-              onChange={v => set('startWithWindows', v)}
-              disabled={!payload.isWindows}
-            />
-            <Toggle
-              label="Minimize to system tray instead of closing"
-              hint="X button minimizes to the tray instead of exiting"
-              checked={form.minimizeToTray}
-              onChange={v => set('minimizeToTray', v)}
-            />
-          </Section>
-
-          {/* Auto-Update */}
-          <Section title="Auto-Update">
-            <Toggle
-              label="Automatically download game updates from peers"
-              checked={form.autoUpdateGames}
-              onChange={v => set('autoUpdateGames', v)}
-            />
-            <Toggle
-              label="Auto-resume incomplete downloads on startup"
-              checked={form.autoResumeDownloads}
-              onChange={v => set('autoResumeDownloads', v)}
-            />
-            <div className="space-y-1.5">
-              <label className="text-sm text-slate-200">Check for updates every</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={5}
-                  max={1440}
-                  step={5}
-                  value={form.autoUpdateCheckInterval}
-                  onChange={e => {
-                    const n = parseInt(e.target.value, 10);
-                    if (!isNaN(n)) set('autoUpdateCheckInterval', n);
-                  }}
-                  className="w-32 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                />
-                <span className="text-xs text-slate-400">minutes (5-1440)</span>
-              </div>
-            </div>
-          </Section>
-
-          {/* Game Stores */}
-          <Section title="Game Stores">
-            <div className="space-y-1.5">
-              <label className="text-sm text-slate-200">Epic Games install folder</label>
-              <p className="text-xs text-slate-500">
-                Where transferred Epic Games titles will be installed. Leave blank to auto-detect from existing Epic installs.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={form.epicInstallRoot}
-                  onChange={e => set('epicInstallRoot', e.target.value)}
-                  placeholder="e.g. D:\Epic Games"
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                />
+        {/* Body: left tab rail + right content pane */}
+        <div className="flex-1 flex min-h-0">
+          <nav className="w-40 flex-shrink-0 border-r border-slate-700/70 bg-slate-900/60 py-3 overflow-y-auto">
+            {TABS.map(t => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
                 <button
-                  onClick={() => sendCommand('BrowseEpicFolder')}
-                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-1.5"
-                >
-                  <FolderOpen className="w-3.5 h-3.5" /> Browse...
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm text-slate-200">SteamGridDB API key <span className="text-slate-500 font-normal">(optional)</span></label>
-              <p className="text-xs text-slate-500">
-                Covers for games not on Steam/Epic/Microsoft Store already work automatically (via
-                Wikipedia, no key needed). Add a free SteamGridDB key only if you want nicer,
-                game-shaped art: <span className="text-blue-400">steamgriddb.com</span> → Preferences → API.
-              </p>
-              <input
-                type="password"
-                value={form.steamGridDbApiKey ?? ''}
-                onChange={e => set('steamGridDbApiKey', e.target.value)}
-                placeholder="Paste your SteamGridDB API key"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
-            </div>
-          </Section>
-
-          {/* Xbox */}
-          <Section title="Xbox Game Pass">
-            <Toggle
-              label="Auto-start single-copy on launch (recommended)"
-              hint="Automatically prepare Xbox games for transfer (and run the local cache) when the app launches, so games become transferable with no manual steps. One UAC per session."
-              checked={form.xboxSingleCopyAutoStart}
-              onChange={v => set('xboxSingleCopyAutoStart', v)}
-              disabled={!payload.isWindows}
-            />
-
-            <div className="space-y-2">
-              <label className="text-sm text-slate-200">Xbox transfer method</label>
-              <p className="text-xs text-slate-500">
-                How Xbox games are moved to another PC or drive.
-              </p>
-              {([
-                { v: 'Auto', t: 'Auto (recommended)', d: 'Use Smart when the game qualifies; otherwise fall back to Basic and warn you.' },
-                { v: 'Smart', t: 'Smart transfer (updatable)', d: 'Keeps the game genuine so it can still be updated. Only available if this app was running when the game was installed.' },
-                { v: 'Basic', t: 'Basic transfer (no updates)', d: 'Works for any installed game, but the transferred game cannot be updated — an update re-downloads the whole game.' },
-              ] as const).map(opt => (
-                <label
-                  key={opt.v}
-                  className={`flex items-start gap-2 rounded border px-3 py-2 cursor-pointer ${
-                    form.xboxTransferMethod === opt.v
-                      ? 'border-blue-500 bg-blue-900/20'
-                      : 'border-slate-700 hover:border-slate-600'
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors border-l-2 ${
+                    active
+                      ? 'bg-blue-600/15 text-blue-300 border-blue-500'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border-transparent'
                   }`}
                 >
-                  <input
-                    type="radio"
-                    name="xboxTransferMethod"
-                    className="mt-0.5 accent-blue-500"
-                    checked={form.xboxTransferMethod === opt.v}
-                    onChange={() => set('xboxTransferMethod', opt.v)}
+                  <Icon className="w-4 h-4 flex-shrink-0" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="flex-1 overflow-auto p-5 space-y-5">
+            {tab === 'general' && (
+              <>
+                <Section title="General">
+                  <Toggle
+                    label="Auto-start network on application startup"
+                    hint="Automatically start network discovery when the app launches"
+                    checked={form.autoStartNetwork}
+                    onChange={v => set('autoStartNetwork', v)}
+                  />
+                  <Toggle
+                    label="Start application with Windows"
+                    hint="Auto-start the application when Windows starts"
+                    checked={form.startWithWindows}
+                    onChange={v => set('startWithWindows', v)}
                     disabled={!payload.isWindows}
                   />
-                  <span>
-                    <span className="text-sm text-slate-200">{opt.t}</span>
-                    <span className="block text-xs text-slate-500">{opt.d}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
+                  <Toggle
+                    label="Minimize to system tray instead of closing"
+                    hint="X button minimizes to the tray instead of exiting"
+                    checked={form.minimizeToTray}
+                    onChange={v => set('minimizeToTray', v)}
+                  />
+                </Section>
 
-            <div className="space-y-1.5">
-              <label className="text-sm text-slate-200">Xbox install root</label>
-              <p className="text-xs text-slate-500">
-                Override where Xbox installs games (e.g. D:\XboxGames). Leave blank for default location.
-              </p>
-              <input
-                type="text"
-                value={form.xboxRootPath}
-                onChange={e => set('xboxRootPath', e.target.value)}
-                placeholder="e.g. D:\XboxGames"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm text-slate-200">Package cache root (skeleton capture)</label>
-              <p className="text-xs text-slate-500">
-                Folder searched for cached encrypted packages (&lt;PackageFullName&gt;.msixvc) when capturing a skeleton.
-                Should match the LAN-cache proxy's CacheDir. Leave blank to default to F:\xbox-cache.
-              </p>
-              <input
-                type="text"
-                value={form.xboxPackageCacheRoot}
-                onChange={e => set('xboxPackageCacheRoot', e.target.value)}
-                placeholder="e.g. F:\xbox-cache"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm text-slate-200">CikExtractor path</label>
-              <p className="text-xs text-slate-500">
-                Repo root or CikExtractor.exe used (elevated, on demand) to populate the CIK store for skeleton capture.
-                Leave blank to rely on a pre-populated CIK store.
-              </p>
-              <input
-                type="text"
-                value={form.cikExtractorPath}
-                onChange={e => set('cikExtractorPath', e.target.value)}
-                placeholder="e.g. C:\Users\you\source\repos\CikExtractor"
-                className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
-            </div>
-          </Section>
-
-          {/* External Drive Libraries */}
-          <Section title="External Drive Libraries">
-            <p className="text-xs text-slate-400">
-              Add folders on external drives to scan for games. These are shown in the Drives panel.
-            </p>
-
-            {/* Configured libraries */}
-            {s.externalLibraries && s.externalLibraries.length > 0 ? (
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {s.externalLibraries.map(lib => (
-                  <div key={lib.id} className="flex items-center justify-between bg-slate-800/60 border border-slate-700 rounded px-3 py-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <HardDrive className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                        <span className="text-sm text-white truncate">{lib.displayName}</span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 font-mono truncate mt-0.5">{lib.rootPath}</p>
+                <Section title="Auto-Update">
+                  <Toggle
+                    label="Automatically download game updates from peers"
+                    checked={form.autoUpdateGames}
+                    onChange={v => set('autoUpdateGames', v)}
+                  />
+                  <Toggle
+                    label="Auto-resume incomplete downloads on startup"
+                    checked={form.autoResumeDownloads}
+                    onChange={v => set('autoResumeDownloads', v)}
+                  />
+                  <div className="space-y-1.5">
+                    <label className="text-sm text-slate-200">Check for updates every</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={5}
+                        max={1440}
+                        step={5}
+                        value={form.autoUpdateCheckInterval}
+                        onChange={e => {
+                          const n = parseInt(e.target.value, 10);
+                          if (!isNaN(n)) set('autoUpdateCheckInterval', n);
+                        }}
+                        className="w-32 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                      />
+                      <span className="text-xs text-slate-400">minutes (5-1440)</span>
                     </div>
-                    <button
-                      onClick={() => sendCommand('RemoveExternalLibrary', { id: lib.id })}
-                      className="ml-2 p-1 hover:bg-red-900/40 rounded text-slate-400 hover:text-red-400"
-                      title="Remove library"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 italic">No external libraries configured.</p>
+                </Section>
+              </>
             )}
 
-            {/* Pending confirmation after browse */}
-            {pendingLibraryPath && (
-              <div className="bg-blue-900/20 border border-blue-700/50 rounded p-3 space-y-2 animate-fade-in-up">
-                <p className="text-xs text-blue-300">Selected folder: <span className="font-mono">{pendingLibraryPath}</span></p>
-                <div className="space-y-1">
-                  <label className="text-xs text-slate-300">Display name</label>
+            {tab === 'stores' && (
+              <Section title="Game Stores">
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-200">Epic Games install folder</label>
+                  <p className="text-xs text-slate-500">
+                    Where transferred Epic Games titles will be installed. Leave blank to auto-detect from existing Epic installs.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={form.epicInstallRoot}
+                      onChange={e => set('epicInstallRoot', e.target.value)}
+                      placeholder="e.g. D:\Epic Games"
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      onClick={() => sendCommand('BrowseEpicFolder')}
+                      className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-1.5"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" /> Browse...
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-200">SteamGridDB API key <span className="text-slate-500 font-normal">(optional)</span></label>
+                  <p className="text-xs text-slate-500">
+                    Covers for games not on Steam/Epic/Microsoft Store already work automatically (via
+                    Wikipedia, no key needed). Add a free SteamGridDB key only if you want nicer,
+                    game-shaped art: <span className="text-blue-400">steamgriddb.com</span> → Preferences → API.
+                  </p>
                   <input
-                    type="text"
-                    value={pendingLibraryName}
-                    onChange={e => setPendingLibraryName(e.target.value)}
+                    type="password"
+                    value={form.steamGridDbApiKey ?? ''}
+                    onChange={e => set('steamGridDbApiKey', e.target.value)}
+                    placeholder="Paste your SteamGridDB API key"
                     className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
-                <div className="flex gap-2">
+              </Section>
+            )}
+
+            {tab === 'xbox' && (
+              <Section title="Xbox Game Pass">
+                <Toggle
+                  label="Auto-start single-copy on launch (recommended)"
+                  hint="Automatically prepare Xbox games for transfer (and run the local cache) when the app launches, so games become transferable with no manual steps. One UAC per session."
+                  checked={form.xboxSingleCopyAutoStart}
+                  onChange={v => set('xboxSingleCopyAutoStart', v)}
+                  disabled={!payload.isWindows}
+                />
+
+                <div className="space-y-2">
+                  <label className="text-sm text-slate-200">Xbox transfer method</label>
+                  <p className="text-xs text-slate-500">
+                    How Xbox games are moved to another PC or drive.
+                  </p>
+                  {([
+                    { v: 'Auto', t: 'Auto (recommended)', d: 'Use Smart when the game qualifies; otherwise fall back to Basic and warn you.' },
+                    { v: 'Smart', t: 'Smart transfer (updatable)', d: 'Keeps the game genuine so it can still be updated. Only available if this app was running when the game was installed.' },
+                    { v: 'Basic', t: 'Basic transfer (no updates)', d: 'Works for any installed game, but the transferred game cannot be updated — an update re-downloads the whole game.' },
+                  ] as const).map(opt => (
+                    <label
+                      key={opt.v}
+                      className={`flex items-start gap-2 rounded border px-3 py-2 cursor-pointer ${
+                        form.xboxTransferMethod === opt.v
+                          ? 'border-blue-500 bg-blue-900/20'
+                          : 'border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="xboxTransferMethod"
+                        className="mt-0.5 accent-blue-500"
+                        checked={form.xboxTransferMethod === opt.v}
+                        onChange={() => set('xboxTransferMethod', opt.v)}
+                        disabled={!payload.isWindows}
+                      />
+                      <span>
+                        <span className="text-sm text-slate-200">{opt.t}</span>
+                        <span className="block text-xs text-slate-500">{opt.d}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-200">Xbox install root</label>
+                  <p className="text-xs text-slate-500">
+                    Override where Xbox installs games (e.g. D:\XboxGames). Leave blank for default location.
+                  </p>
+                  <input
+                    type="text"
+                    value={form.xboxRootPath}
+                    onChange={e => set('xboxRootPath', e.target.value)}
+                    placeholder="e.g. D:\XboxGames"
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-200">Package cache root (skeleton capture)</label>
+                  <p className="text-xs text-slate-500">
+                    Folder searched for cached encrypted packages (&lt;PackageFullName&gt;.msixvc) when capturing a skeleton.
+                    Should match the LAN-cache proxy's CacheDir. Leave blank to default to %LOCALAPPDATA%\GamesLocalShare\xbox-cache.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={form.xboxPackageCacheRoot}
+                      onChange={e => set('xboxPackageCacheRoot', e.target.value)}
+                      placeholder="e.g. D:\xbox-cache"
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      onClick={() => sendCommand('BrowseXboxCacheRoot')}
+                      className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-1.5"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" /> Browse...
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-200">CikExtractor path</label>
+                  <p className="text-xs text-slate-500">
+                    Repo root or CikExtractor.exe used (elevated, on demand) to populate the CIK store for skeleton capture.
+                    Leave blank to rely on a pre-populated CIK store.
+                  </p>
+                  <input
+                    type="text"
+                    value={form.cikExtractorPath}
+                    onChange={e => set('cikExtractorPath', e.target.value)}
+                    placeholder="e.g. C:\Users\you\source\repos\CikExtractor"
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </Section>
+            )}
+
+            {tab === 'drives' && (
+              <Section title="External Drive Libraries">
+                <p className="text-xs text-slate-400">
+                  Add folders on external drives to scan for games. These are shown in the Drives panel.
+                </p>
+
+                {/* Configured libraries */}
+                {s.externalLibraries && s.externalLibraries.length > 0 ? (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {s.externalLibraries.map(lib => (
+                      <div key={lib.id} className="flex items-center justify-between bg-slate-800/60 border border-slate-700 rounded px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <HardDrive className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                            <span className="text-sm text-white truncate">{lib.displayName}</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-mono truncate mt-0.5">{lib.rootPath}</p>
+                        </div>
+                        <button
+                          onClick={() => sendCommand('RemoveExternalLibrary', { id: lib.id })}
+                          className="ml-2 p-1 hover:bg-red-900/40 rounded text-slate-400 hover:text-red-400"
+                          title="Remove library"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">No external libraries configured.</p>
+                )}
+
+                {/* Pending confirmation after browse */}
+                {pendingLibraryPath && (
+                  <div className="bg-blue-900/20 border border-blue-700/50 rounded p-3 space-y-2 animate-fade-in-up">
+                    <p className="text-xs text-blue-300">Selected folder: <span className="font-mono">{pendingLibraryPath}</span></p>
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-300">Display name</label>
+                      <input
+                        type="text"
+                        value={pendingLibraryName}
+                        onChange={e => setPendingLibraryName(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={confirmAddLibrary}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded font-medium"
+                      >
+                        Add Library
+                      </button>
+                      <button
+                        onClick={cancelAddLibrary}
+                        className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => sendCommand('BrowseDriveFolder')}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-1.5 self-start"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" /> Browse & Add Library...
+                </button>
+              </Section>
+            )}
+
+            {tab === 'games' && (
+              <Section title="Hidden Games">
+                <p className="text-xs text-slate-400">
+                  Hidden games are not shared with other computers. Right-click a game in "My Games" to hide/show it.
+                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-200">
+                    Currently hidden:{' '}
+                    <span className="text-blue-400 font-semibold">
+                      {payload.hiddenGames.length === 1 ? '1 game' : `${payload.hiddenGames.length} games`}
+                    </span>
+                  </span>
                   <button
-                    onClick={confirmAddLibrary}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded font-medium"
+                    onClick={() => sendCommand('UnhideAllGames')}
+                    disabled={payload.hiddenGames.length === 0}
+                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs"
                   >
-                    Add Library
-                  </button>
-                  <button
-                    onClick={cancelAddLibrary}
-                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs rounded"
-                  >
-                    Cancel
+                    Show all
                   </button>
                 </div>
-              </div>
-            )}
-
-            <button
-              onClick={() => sendCommand('BrowseDriveFolder')}
-              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm flex items-center gap-1.5 self-start"
-            >
-              <FolderOpen className="w-3.5 h-3.5" /> Browse & Add Library...
-            </button>
-          </Section>
-
-          {/* Hidden Games */}
-          <Section title="Hidden Games">
-            <p className="text-xs text-slate-400">
-              Hidden games are not shared with other computers. Right-click a game in "My Games" to hide/show it.
-            </p>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-200">
-                Currently hidden:{' '}
-                <span className="text-blue-400 font-semibold">
-                  {payload.hiddenGames.length === 1 ? '1 game' : `${payload.hiddenGames.length} games`}
-                </span>
-              </span>
-              <button
-                onClick={() => sendCommand('UnhideAllGames')}
-                disabled={payload.hiddenGames.length === 0}
-                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs"
-              >
-                Show all
-              </button>
-            </div>
-            {payload.hiddenGames.length > 0 && (
-              <div className="bg-slate-800/60 border border-slate-700 rounded p-2 max-h-32 overflow-auto">
-                {payload.hiddenGames.map(g => (
-                  <div key={g.appId} className="text-xs text-slate-400 py-0.5 truncate">
-                    {g.name}
+                {payload.hiddenGames.length > 0 && (
+                  <div className="bg-slate-800/60 border border-slate-700 rounded p-2 max-h-32 overflow-auto">
+                    {payload.hiddenGames.map(g => (
+                      <div key={g.appId} className="text-xs text-slate-400 py-0.5 truncate">
+                        {g.name}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </Section>
             )}
-          </Section>
 
-          {/* About */}
-          <Section title="About">
-            <div className="text-sm text-white">Games Local Share</div>
-            <div className="text-xs text-slate-400">Version 1.0.0 · Share & sync games over LAN</div>
-            <div className="text-[10px] text-slate-500 font-mono break-all mt-1">
-              {payload.settingsPath}
-            </div>
-          </Section>
+            {tab === 'about' && (
+              <Section title="About">
+                <div className="text-sm text-white">Games Local Share</div>
+                <div className="text-xs text-slate-400">Version 1.0.0 · Share & sync games over LAN</div>
+                <div className="text-[10px] text-slate-500 font-mono break-all mt-1">
+                  {payload.settingsPath}
+                </div>
+              </Section>
+            )}
+          </div>
         </div>
 
         {/* Footer */}

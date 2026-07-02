@@ -84,12 +84,10 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // Dispose bridge
-        _bridge?.Dispose();
-
-        // If we're explicitly allowing close (for app shutdown), let it through
+        // If we're explicitly allowing close (for app shutdown), let it through.
         if (_allowClose)
         {
+            _bridge?.Dispose();
             base.OnClosing(e);
             return;
         }
@@ -99,17 +97,18 @@ public partial class MainWindow : Window
 
         if (settings.MinimizeToTray && _hasBeenShown)
         {
-            // Prevent closing, hide to tray instead
-            // Only do this if the window has been shown at least once
+            // Prevent closing, hide to tray instead (only once the window has been shown).
+            // Crucially, DO NOT dispose the bridge here — the window stays alive and must
+            // keep its WebView interop working when restored from the tray.
             e.Cancel = true;
             Hide();
             ShowInTaskbar = false;
+            return;
         }
-        else if (!settings.MinimizeToTray)
-        {
-            // Normal close behavior
-            base.OnClosing(e);
-        }
+
+        // Real close: tear down the bridge, then let the close proceed.
+        _bridge?.Dispose();
+        base.OnClosing(e);
     }
 
     /// <summary>
