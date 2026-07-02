@@ -496,43 +496,11 @@ public sealed class XboxCacheProxyService : IDisposable
 
     private async Task<bool> RunElevatedPowerShellAsync(string psScript)
     {
-        // When the app is already elevated, run the urlacl/hosts steps in-process (no UAC). Otherwise spawn a
-        // single elevated helper (one UAC) via runas.
-        bool alreadyElevated = false;
-        try { alreadyElevated = ElevationHelper.IsElevated(); } catch { }
-
-        try
-        {
-            var enc = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
-            var psi = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {enc}",
-                WindowStyle = ProcessWindowStyle.Hidden,
-                CreateNoWindow = true,
-            };
-            if (alreadyElevated)
-            {
-                // No elevation prompt needed; capture output so failures are diagnosable.
-                psi.UseShellExecute = false;
-                psi.RedirectStandardOutput = true;
-                psi.RedirectStandardError = true;
-            }
-            else
-            {
-                psi.UseShellExecute = true;   // required for Verb=runas
-                psi.Verb = "runas";           // triggers the UAC prompt
-            }
-            using var p = Process.Start(psi);
-            if (p == null) return false;
-            await p.WaitForExitAsync();
-            return p.ExitCode == 0;
-        }
-        catch (Exception ex)
-        {
-            Log?.Invoke($"elevation failed (declined?): {ex.Message}");
-            return false;
-        }
+        // When the app is already elevated the script runs in-process (no UAC); otherwise
+        // the app's own exe is elevated (one UAC, app icon) to run it. See ElevationHelper.
+        var ok = await Task.Run(() => ElevationHelper.RunPowerShellElevated(psScript));
+        if (!ok) Log?.Invoke("elevation failed (declined?)");
+        return ok;
     }
 
     // ---- DNS (A record via a public resolver, bypassing hosts) -----------

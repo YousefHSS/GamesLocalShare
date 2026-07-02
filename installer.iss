@@ -47,10 +47,22 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"" --minimized"; Flags: uninsdeletevalue; Tasks: startupicon
+; Startup is handled by an elevated scheduled task (see [Run] --register-startup).
+; Remove legacy Run-key entries so the app isn't launched twice at logon: the old
+; installer wrote "{#MyAppName}" (with spaces), the app's fallback writes "GamesLocalShare".
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "{#MyAppName}"; ValueType: none; Flags: deletevalue; Tasks: startupicon
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "GamesLocalShare"; ValueType: none; Flags: deletevalue; Tasks: startupicon
 
 [Run]
+; Register the RunLevel=Highest logon task via the app's own helper mode. The installer
+; is already elevated, so this shows no UAC prompt. Must run before the launch entry.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--register-startup"; Flags: runhidden waituntilterminated; Tasks: startupicon
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Remove the startup task (and any Run-key fallback) on uninstall; runs before files
+; are deleted and the uninstaller is elevated, so this is silent.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-startup"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterStartupTask"
 
 [Code]
 // Check if .NET 8 is installed (for framework-dependent builds)
