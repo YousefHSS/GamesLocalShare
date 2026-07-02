@@ -2,7 +2,19 @@
 
 A cross-platform desktop app for sharing and syncing game installs across your devices and external drives. Built with Avalonia and a React-based WebUI.
 
-## What's New in 2.0.0
+## What's New in 3.0.0
+
+The Xbox release. Highlights since 2.0.0:
+
+- **Xbox PC Game Pass (MSIXVC) transfer** *(Windows only)* — move installed Game Pass / Microsoft Store games between your PCs over the LAN without re-downloading them from Microsoft. Pre-staged files are overlaid onto an app-initiated paused install; when you Resume, Gaming Services sees the bytes are already present and skips the download (measured ~8 MB of network traffic to place a 7.7 GB title).
+- **Single-copy storage** — keep just one copy of an Xbox title on disk. Instead of storing a second full encrypted package, the app captures a compact (~17 MB) *skeleton* and rebuilds the byte-identical `.msixvc` on demand from the skeleton + the installed files — a ~99% space saving with no re-download. Decryption/encryption are performed on the fly by **xvdtool** using your own device keys.
+- **LAN cache proxy** — a local proxy that intercepts this PC's Xbox download requests and serves cached/peer content on your network, so repeat downloads across your machines stay off the internet.
+- **CIK integration** — Content Instance Keys are supplied by **CikExtractor**, which derives your device key locally so xvdtool can decrypt *your own licensed content*. The app never implements the cipher itself.
+- **Prompt-free elevated startup** — "Start with Windows" now registers a Task Scheduler logon task with highest privileges, so the app starts already elevated and the Xbox flows run without a UAC prompt every session. The installer registers this task directly; if elevation is declined it falls back to a normal (non-elevated) startup entry.
+- **Friendlier UAC** — on-demand elevation now relaunches the app's own signed-name executable instead of `powershell.exe`, so UAC prompts show the app's name and icon.
+- **Desktop notifications** — actionable notifications for transfer progress, Xbox copy results, and setup steps that need your attention.
+
+### Previously, in 2.0.0
 
 A major release. Highlights since 1.3.0:
 
@@ -21,6 +33,7 @@ A major release. Highlights since 1.3.0:
 
 - **Steam library scanning** — detects installed Steam games via Steam's manifest files and `libraryfolders.vdf`.
 - **Epic Games library scanning** — detects installed Epic Games Launcher titles.
+- **Xbox / Game Pass transfer** *(Windows)* — transfer installed MSIXVC titles between PCs without re-downloading, plus single-copy skeleton storage and a LAN download cache. See [Xbox / Game Pass (MSIXVC) transfer](#xbox--game-pass-msixvc-transfer).
 - **External drive support** — register any folder or drive as an external library and compare against your local installs.
 - **Network discovery** — find other GamesLocalShare instances on your LAN.
 - **Peer-to-peer transfer** — pull games or updates from peers who have newer versions.
@@ -70,6 +83,22 @@ docker run -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix gameslocalshare
 4. **Copy** — transfer in either direction, with incremental sync skipping files that already match.
 5. **Network mode** *(optional)* — start network discovery to share with peers on your LAN.
 
+### Xbox / Game Pass (MSIXVC) transfer
+
+*Windows only. Xbox PC Game Pass is a Windows-exclusive platform.*
+
+Installed Xbox / Microsoft Store (MSIXVC) games are encrypted per-device, so they can't just be copied like a Steam folder. GamesLocalShare works within that model to let you move a title between your own PCs — and keep a single copy on disk — without re-downloading gigabytes from Microsoft:
+
+1. **Transfer** — the receiver starts a paused install from the Xbox app; GamesLocalShare overlays the pre-staged files onto it. On Resume, Gaming Services validates the bytes are already present and skips the download.
+2. **Single-copy storage** — rather than keeping a second full encrypted package, the app stores a compact skeleton and reconstructs the byte-identical package on demand from the skeleton plus your installed files.
+
+Both of these need the encrypted package to be read and rebuilt, which is done **on the fly, on your own machine, against your own licensed content**, using two external tools:
+
+- **[xvdtool](https://github.com/emoose/xvdtool)** by emoose — the XVD/XVC container tool that GamesLocalShare bundles and shells out to for on-the-fly decrypt, skeleton capture, and byte-exact reconstruction of the package.
+- **[CikExtractor](https://github.com/LukeFZ/CikExtractor)** by LukeFZ — dumps the packed Content Instance Keys (CIK) from the local registry and derives your device key, producing the `.cik` files xvdtool selects by GUID. You point GamesLocalShare at it in Settings; it is run only when a key is needed, elevated, and its keys never leave your machine.
+
+GamesLocalShare itself implements no cryptography — it orchestrates these tools to decrypt and re-encrypt content you already own. Both require administrator rights (hence the elevated startup task described above).
+
 ### Network Ports
 
 GamesLocalShare uses the following ports for LAN sharing:
@@ -95,6 +124,7 @@ Allow these through your firewall if you want LAN sharing.
 - **MVVM:** CommunityToolkit.Mvvm
 - **WebUI:** React 18, Vite, Tailwind, Zustand
 - **Steam manifest parsing:** [Gameloop.Vdf](https://github.com/shravan2x/Gameloop.Vdf)
+- **Xbox MSIXVC decrypt/reconstruct:** [xvdtool](https://github.com/emoose/xvdtool) (emoose), with keys from [CikExtractor](https://github.com/LukeFZ/CikExtractor) (LukeFZ)
 - **Tests:** xUnit + FluentAssertions (C#), Vitest + React Testing Library (TS)
 - **Target:** .NET 8.0
 
@@ -107,6 +137,15 @@ PRs welcome. Run `dotnet test` and `npm test` (in `WebUI/`) before submitting.
 MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
+
+The Xbox / Game Pass transfer and single-copy features are built on two excellent
+open-source tools. GamesLocalShare uses them to decrypt and rebuild content you
+already own; huge thanks to their authors:
+
+- **[xvdtool](https://github.com/emoose/xvdtool)** by [emoose](https://github.com/emoose) — XVD/XVC container tool, bundled and used for on-the-fly MSIXVC decrypt, skeleton capture, and byte-exact reconstruction.
+- **[CikExtractor](https://github.com/LukeFZ/CikExtractor)** by [LukeFZ](https://github.com/LukeFZ) — used to dump packed CIK data and derive the device key so xvdtool can decrypt your licensed content.
+
+Also thanks to:
 
 - [Avalonia UI](https://avaloniaui.net/)
 - [Gameloop.Vdf](https://github.com/shravan2x/Gameloop.Vdf)
