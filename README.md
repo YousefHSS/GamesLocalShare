@@ -99,12 +99,11 @@ Both of these need the encrypted package to be read and rebuilt, which is done *
 
 GamesLocalShare itself implements no cryptography — it orchestrates these tools to decrypt and re-encrypt content you already own. Both require administrator rights (hence the elevated startup task described above).
 
-**Setup (one-time):** these tools are not redistributed with GamesLocalShare — download them yourself from the links above and point the app at them:
+**Availability in the public release:** the Xbox MSIXVC transfer and single-copy features depend on external tools ([xvdtool](https://github.com/emoose/xvdtool), [CikExtractor](https://github.com/LukeFZ/CikExtractor)) and helper scripts that are **not redistributed** in the published builds or this repository. The released app fully supports Steam/Epic library management, LAN discovery/transfer, and sync out of the box; the Xbox MSIXVC features stay inert unless you provide those components yourself:
 
 - **xvdtool** — build/download it and place `XVDTool.exe` (with its DLLs) in a `tools\xvdtool\` folder next to `GamesLocalShare.exe`.
 - **CikExtractor** — build/download it, then set its path in the app's **Settings**.
-
-Without these, the rest of GamesLocalShare (Steam/Epic scanning, LAN transfer, sync) works normally; only the Xbox MSIXVC features are disabled.
+- **Helper scripts** — the transfer/reconstruct PowerShell scripts must be present in the app's `xbox-scripts\` folder.
 
 ### Network Ports
 
