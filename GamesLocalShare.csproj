@@ -108,7 +108,7 @@
        tools\xvdtool\XVDTool.exe as a separate process (so its deps never load in-process). The folder
        holds a self-contained single-file publish (win-x64) of XVDTool, so end users need no installed
        .NET runtime, and is copied verbatim to the build output. Rebuild with:
-       dotnet publish XVDTool.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -->
+       dotnet publish XVDTool.csproj -c Release -r win-x64 -p:SelfContained=true -p:PublishSingleFile=true -->
 
   <ItemGroup>
     <Content Include="tools\xvdtool\**\*.*">
