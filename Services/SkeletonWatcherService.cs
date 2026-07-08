@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace GamesLocalShare.Services;
 
@@ -220,6 +221,12 @@ public sealed class SkeletonWatcherService : IDisposable
         // watcher started would never be captured.)
         var ct = _cts?.Token ?? CancellationToken.None;
         _ = Task.Run(() => CaptureExistingInstallsAsync(ct), ct);
+
+        // Periodic reconcile: an update rewrites the install in place (bumping the version in
+        // Content\appxmanifest.xml) and may not raise a watcher event we catch. Re-check installed
+        // versions against captured skeletons on an interval so a title that updated while running
+        // (or whose install event was missed) still gets re-captured.
+        _ = Task.Run(() => ReconcileLoopAsync(ct), ct);
     }
 
     /// <summary>
@@ -227,7 +234,7 @@ public sealed class SkeletonWatcherService : IDisposable
     /// Runs sequentially (one capture at a time) to avoid hammering the disk; <see cref="TryCaptureAsync"/>'s
     /// single-flight guard prevents overlap with watcher-triggered captures.
     /// </summary>
-    private async Task CaptureExistingInstallsAsync(CancellationToken ct)
+    private async Task CaptureExistingInstallsAsync(CancellationToken ct, bool announceIdle = true)
     {
         int candidates = 0;
         foreach (var kv in _installs.ToArray())
@@ -235,15 +242,90 @@ public sealed class SkeletonWatcherService : IDisposable
             if (ct.IsCancellationRequested) return;
             var name = kv.Key;
             var installDir = kv.Value;
-            if (File.Exists(Path.Combine(SkeletonStore, name + ".skl"))) continue; // already captured
-            var pkg = LocatePackage(installDir);
-            if (pkg == null) continue;
+            if (!NeedsCapture(name, installDir, out var why)) continue; // up-to-date skeleton already present
+            var pkg = FindDropFor(name) ?? LocatePackage(installDir);
+            if (pkg == null)
+            {
+                // New title, or an update landed (installed version > skeleton version), but there's no
+                // encrypted package cached to (re)capture from. Log the reason so it's visible; the cache
+                // watcher picks the package up if it appears later.
+                Report($"{name}: {why}, but no cached package present to capture from " +
+                       "(route its download/update through the proxy, or drop its .msixvc)");
+                continue;
+            }
             candidates++;
-            Report($"existing install with cached package: {name}  ({Path.GetFileName(pkg)})");
+            Report($"{name}: {why} — capturing from {Path.GetFileName(pkg)}");
             await TryCaptureAsync(name, installDir, pkg);
         }
-        if (candidates == 0)
-            Report("no existing installs have a cached package to capture (install/redownload one to trigger)");
+        if (candidates == 0 && announceIdle)
+            Report("no existing installs need capture (skeletons up to date, or none has a cached package)");
+    }
+
+    /// <summary>Periodically re-checks installed titles against their captured skeletons so an update that
+    /// landed while the watcher was running (install rewritten in place, version bumped) triggers a
+    /// re-capture even when no file-watch event was raised for it. Cheap: reads Content\appxmanifest.xml.</summary>
+    private async Task ReconcileLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try { await Task.Delay(TimeSpan.FromMinutes(10), ct); }
+                catch { return; }
+                foreach (var root in _roots) SeedInstalls(root); // also pick up newly installed titles
+                await CaptureExistingInstallsAsync(ct, announceIdle: false);
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>Decides whether a title needs (re)capturing: true if it has no skeleton yet, or if the
+    /// installed version (Content\appxmanifest.xml) is newer than the version its existing skeleton was
+    /// captured for — i.e. an update landed. When either version can't be determined, an existing skeleton
+    /// is treated as up-to-date so we never spuriously re-capture. <paramref name="reason"/> is a
+    /// log-friendly explanation of the decision.</summary>
+    private bool NeedsCapture(string name, string installDir, out string reason)
+    {
+        var skel = Path.Combine(SkeletonStore, name + ".skl");
+        if (!File.Exists(skel)) { reason = "no skeleton yet"; return true; }
+
+        var installedVer = GetInstalledVersion(installDir);
+        var capturedVer = ParseVer(ReadManifest(skel)?.CapturedVersion);
+        if (installedVer != null && capturedVer != null && installedVer > capturedVer)
+        {
+            reason = $"update detected (installed v{installedVer} > skeleton v{capturedVer})";
+            return true;
+        }
+        reason = capturedVer == null
+            ? "skeleton present (its captured version is unknown — re-capture once to enable update tracking)"
+            : $"skeleton up to date (v{capturedVer})";
+        return false;
+    }
+
+    private static Version? ParseVer(string? s) => Version.TryParse(s, out var v) ? v : null;
+
+    private static readonly Regex IdentityVersionRx = new(
+        @"<Identity\b[^>]*?\bVersion=""([0-9]+(?:\.[0-9]+){1,3})""",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Reads the installed package version from the title's <c>Content\appxmanifest.xml</c>
+    /// (falling back to <c>Content\MicrosoftGame.Config</c>), both of which carry the
+    /// <c>&lt;Identity … Version="a.b.c.d"/&gt;</c> that an update bumps. Returns null when it can't be read
+    /// or parsed (e.g. restrictive ACLs), so callers fall back to "skeleton present = up to date".</summary>
+    internal static Version? GetInstalledVersion(string installDir)
+    {
+        foreach (var rel in new[] { "appxmanifest.xml", "MicrosoftGame.Config" })
+        {
+            try
+            {
+                var p = Path.Combine(installDir, "Content", rel);
+                if (!File.Exists(p)) continue;
+                var m = IdentityVersionRx.Match(File.ReadAllText(p));
+                if (m.Success && Version.TryParse(m.Groups[1].Value, out var v)) return v;
+            }
+            catch { }
+        }
+        return null;
     }
 
     public void Stop()
@@ -337,23 +419,24 @@ public sealed class SkeletonWatcherService : IDisposable
             // the peer). The check below only skips re-CAPTURING, not detection.
             if (isNew) InstallDetected?.Invoke(installDir);
 
-            // Already have a verified skeleton for this title — nothing more to do (don't re-capture).
-            if (File.Exists(Path.Combine(SkeletonStore, name + ".skl")))
+            // (Re)capture only when there's no skeleton yet, or the install has been updated past the version
+            // the existing skeleton was captured for. An up-to-date skeleton is left alone.
+            if (!NeedsCapture(name, installDir, out var captureReason))
                 return;
 
             // Prefer a manually dropped package; otherwise auto-locate it in the cache.
             var pkg = FindDropFor(name) ?? LocatePackage(installDir);
             if (pkg != null)
             {
-                if (isNew) Report($"install detected: {name}  (package: {Path.GetFileName(pkg)})");
+                Report($"{name}: {captureReason} (package: {Path.GetFileName(pkg)}) — capturing");
                 _ = TryCaptureAsync(name, installDir, pkg);
             }
             else
             {
-                // Install completed but the package isn't in the cache yet — the proxy may still be filling it
-                // (.part not yet renamed to final .msixvc), especially for small/fast games. Don't give up:
+                // Needs capture but the package isn't in the cache yet — the proxy may still be filling it
+                // (.part not yet renamed to final .msixvc), or an update only pulled a delta. Don't give up:
                 // poll for it (and the cache-root watcher will also catch it).
-                if (isNew) Report($"install detected: {name}  (package not cached yet — watching for it)");
+                Report($"{name}: {captureReason} — package not cached yet, watching for it");
                 ScheduleCaptureWhenReady(name, installDir);
             }
         }
@@ -386,7 +469,7 @@ public sealed class SkeletonWatcherService : IDisposable
     /// </summary>
     private void ScheduleCaptureWhenReady(string name, string installDir)
     {
-        if (File.Exists(Path.Combine(SkeletonStore, name + ".skl"))) return;
+        if (!NeedsCapture(name, installDir, out _)) return;
         if (!_pending.TryAdd(name, true)) return; // already waiting on this title
         var ct = _cts?.Token ?? CancellationToken.None;
         _ = Task.Run(async () =>
@@ -395,7 +478,7 @@ public sealed class SkeletonWatcherService : IDisposable
             {
                 for (int i = 0; i < 180 && !ct.IsCancellationRequested; i++) // ~15 min @ 5 s
                 {
-                    if (File.Exists(Path.Combine(SkeletonStore, name + ".skl"))) return;
+                    if (!NeedsCapture(name, installDir, out _)) return;
                     if (!Directory.Exists(installDir))
                     {
                         Report($"{name}: install removed before its package finished caching — capture aborted " +
@@ -439,7 +522,7 @@ public sealed class SkeletonWatcherService : IDisposable
                     if (ct.IsCancellationRequested) return;
                     var name = kv.Key;
                     var installDir = kv.Value;
-                    if (File.Exists(Path.Combine(SkeletonStore, name + ".skl"))) continue;
+                    if (!NeedsCapture(name, installDir, out _)) continue;
                     if (!Directory.Exists(installDir)) continue;
                     var pkg = LocatePackage(installDir);
                     if (pkg != null && string.Equals(
@@ -585,9 +668,12 @@ public sealed class SkeletonWatcherService : IDisposable
                 // Record where this title's genuine package lived + how to rebuild it, so the package can be
                 // RESTORED on demand (skeleton + install -> genuine .msixvc back into the served cache path)
                 // for a Gaming Services Verify/update HIT after the user deletes the multi-GB package.
-                WriteManifest(name, skel, installDir, packagePath, res.USize);
+                // The installed version is stamped in too, so a later update is detected and re-captured.
+                var ver = GetInstalledVersion(installDir);
+                WriteManifest(name, skel, installDir, packagePath, res.USize, ver?.ToString());
                 CaptureCompleted?.Invoke(res);
-                Report($"✓ {name}: skeleton {res.SkelFileSize / 1048576.0:F2} MB " +
+                var vtag = ver != null ? $" v{ver}" : "";
+                Report($"✓ {name}{vtag}: skeleton {res.SkelFileSize / 1048576.0:F2} MB " +
                                $"replaces a {res.USize / 1048576.0:F0} MB package - safe to delete the package");
             }
             else
@@ -638,6 +724,9 @@ public sealed class SkeletonWatcherService : IDisposable
         public string CacheRoot { get; init; } = "";
         public long PackageBytes { get; init; }
         public string CapturedAt { get; init; } = "";
+        /// <summary>Installed package version (Content\appxmanifest.xml Identity) at capture time, so a later
+        /// update (a higher version) can be detected and the skeleton re-captured.</summary>
+        public string CapturedVersion { get; init; } = "";
     }
 
     private static string ManifestPathFor(string skelPath) => skelPath + ".json";
@@ -652,7 +741,8 @@ public sealed class SkeletonWatcherService : IDisposable
         return Path.GetFileName(man.CachePath);
     }
 
-    private void WriteManifest(string name, string skelPath, string installDir, string packagePath, long uSize)
+    private void WriteManifest(string name, string skelPath, string installDir, string packagePath, long uSize,
+        string? capturedVersion)
     {
         try
         {
@@ -664,6 +754,7 @@ public sealed class SkeletonWatcherService : IDisposable
                 CacheRoot = _cacheRoot,
                 PackageBytes = uSize,
                 CapturedAt = DateTime.Now.ToString("o"),
+                CapturedVersion = capturedVersion ?? "",
             };
             File.WriteAllText(ManifestPathFor(skelPath),
                 JsonSerializer.Serialize(m, new JsonSerializerOptions { WriteIndented = true }));
