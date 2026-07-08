@@ -106,8 +106,10 @@
 
   <!-- Bundled xvdtool (on-the-fly decrypt + skeleton capture/reconstruct). The app shells out to
        tools\xvdtool\XVDTool.exe as a separate process (so its deps never load in-process). The folder
-       is produced by publishing XVDTool (framework-dependent, win-x64) into tools\xvdtool and is copied
-       verbatim to the build output. -->
+       holds a self-contained single-file publish (win-x64) of XVDTool, so end users need no installed
+       .NET runtime, and is copied verbatim to the build output. Rebuild with:
+       dotnet publish XVDTool.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -->
+
   <ItemGroup>
     <Content Include="tools\xvdtool\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
