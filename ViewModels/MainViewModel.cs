@@ -207,7 +207,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             // When no CikExtractor path is configured, fall back to the historical dev-repo location
             // ONLY if it still exists on this machine (keeps existing setups working); otherwise leave
-            // it empty and rely on a pre-populated CIK store. No hardcoded path is assumed to exist.
+            // it empty, in which case SkeletonWatcherService resolves the CikExtractor bundled next to
+            // the app (tools\cikextractor), or falls back to a pre-populated CIK store. No hardcoded
+            // path is assumed to exist.
             const string legacyCikExtractor = @"C:\Users\SIGMA\source\repos\CikExtractor";
             var cikExtractor = !string.IsNullOrWhiteSpace(_settings.CikExtractorPath)
                 ? _settings.CikExtractorPath

@@ -98,11 +98,36 @@ public sealed class SkeletonWatcherService : IDisposable
         // Default the package cache root to the LAN-cache proxy's CacheDir (xbox-cache-proxy.ps1),
         // where downloaded <PackageFullName>.msixvc packages are persisted. Configurable via settings.
         _cacheRoot = string.IsNullOrWhiteSpace(cacheRoot) ? Models.AppSettings.DefaultXboxCacheDir : cacheRoot;
-        _cikExtractorPath = string.IsNullOrWhiteSpace(cikExtractorPath) ? null : cikExtractorPath;
+        // Prefer an explicit user setting; otherwise fall back to the CikExtractor bundled next to the app
+        // (tools\cikextractor) so a fresh install can dump CIKs without the user configuring anything.
+        _cikExtractorPath = string.IsNullOrWhiteSpace(cikExtractorPath)
+            ? ResolveBundledCikExtractor()
+            : cikExtractorPath;
         _captureLog = Path.Combine(baseDir, "capture.log");
         Directory.CreateDirectory(DropFolder);
         Directory.CreateDirectory(SkeletonStore);
         Directory.CreateDirectory(_cikStore);
+    }
+
+    /// <summary>
+    /// Locates the CikExtractor bundled next to the app (tools\cikextractor\CikExtractor.exe), used when
+    /// the user hasn't configured an explicit <see cref="CikExtractorPath"/>. Mirrors how
+    /// <see cref="SkeletonService"/> resolves the bundled xvdtool. Returns null if no bundled copy exists.
+    /// </summary>
+    private static string? ResolveBundledCikExtractor()
+    {
+        var beside = Path.Combine(AppContext.BaseDirectory, "tools", "cikextractor", "CikExtractor.exe");
+        if (File.Exists(beside)) return beside;
+
+        // Dev fallback: walk up to the in-repo bundled tool.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            var devPath = Path.Combine(dir.FullName, "tools", "cikextractor", "CikExtractor.exe");
+            if (File.Exists(devPath)) return devPath;
+            dir = dir.Parent;
+        }
+        return null;
     }
 
     /// <summary>Path of the persistent capture log (every status line is appended here).</summary>
