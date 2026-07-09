@@ -224,17 +224,26 @@ export default function SyncView() {
   const copyToDrive = (g: GameInfo) => {
     if (!selectedLib) return;
     const lib = selectedLib;
-    const doCopy = () => {
-      if (g.platform === 'Xbox') sendCommand('CopyXboxGameToDrive', { appId: g.appId, libraryId: lib.id });
-      else sendCommand('StartLocalCopy', { appId: g.appId, libraryId: lib.id, direction: 'DeviceToDrive' });
+    // Basic (non-updatable) Xbox copy: stage the content-protected package to the drive via the
+    // StartXboxStage -> CompleteXboxStage sequence (progress shown by the global Xbox transfer bar).
+    // NOTE: CopyXboxGameToDrive is the Smart-only command and rejects non-smart-ready games with a
+    // "No updatable copy available" warning, so it must not be used for the Basic path.
+    const doBasicXboxStage = () => {
+      sendCommand('StartXboxStage', { sourcePath: g.installPath });
+      // StartXboxStage validates and prepares; CompleteXboxStage does the copy.
+      setTimeout(() => {
+        sendCommand('CompleteXboxStage', { destinationPath: lib.rootPath });
+      }, 500);
       flash(`Copying ${g.name} → ${lib.displayName}…`);
     };
     // Warn before a Basic (non-updatable) Xbox copy; Updatable (smart-ready) copies proceed directly.
     if (g.platform === 'Xbox' && !g.xboxSmartReady) {
-      confirmBasicCopy(g.name, doCopy);
+      confirmBasicCopy(g.name, doBasicXboxStage);
       return;
     }
-    doCopy();
+    if (g.platform === 'Xbox') sendCommand('CopyXboxGameToDrive', { appId: g.appId, libraryId: lib.id });
+    else sendCommand('StartLocalCopy', { appId: g.appId, libraryId: lib.id, direction: 'DeviceToDrive' });
+    flash(`Copying ${g.name} → ${lib.displayName}…`);
   };
 
   const shareWithNetwork = (g: GameInfo) => {
