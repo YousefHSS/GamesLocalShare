@@ -105,10 +105,15 @@
   </ItemGroup>
 
   <!-- Bundled xvdtool (on-the-fly decrypt + skeleton capture/reconstruct). The app shells out to
-       tools\xvdtool\XVDTool.exe as a separate process (so its deps never load in-process). The folder
-       holds a self-contained single-file publish (win-x64) of XVDTool, so end users need no installed
-       .NET runtime, and is copied verbatim to the build output. Rebuild with:
-       dotnet publish XVDTool.csproj -c Release -r win-x64 -p:SelfContained=true -p:PublishSingleFile=true -->
+       tools\xvdtool\XVDTool.exe as a separate process (so its deps never load in-process). This is the
+       CUSTOM XVDTool fork with the capture/reconstruct/skel/cikfolder skeleton support, published
+       framework-dependent (win-x64): XVDTool.exe (~150 KB) + XVDTool.dll + LibXboxOne.dll + DiscUtils/
+       BouncyCastle/NDesk deps. The whole folder is copied verbatim to output and packaged recursively by
+       the installer. It needs .NET 8 on the target — the same requirement as this app (SelfContained=false).
+       DO NOT replace it with a stock/self-contained single-file XVDTool: the upstream build has NO capture
+       support and silently fails every capture with "input file doesn't exist" (regressed once in 3ef373c). -->
+
+
 
   <ItemGroup>
     <Content Include="tools\xvdtool\**\*.*">
