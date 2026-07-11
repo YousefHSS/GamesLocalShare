@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Boxes, FolderOpen, Play, Square, Info, Archive, RotateCcw, HardDriveDownload,
-  Server, ChevronDown, ChevronRight, CheckCircle2,
+  Server, ChevronDown, ChevronRight, CheckCircle2, Loader2,
 } from 'lucide-react';
-import { useAppState } from '../store';
+import { useAppState, type SkeletonCaptureProgress } from '../store';
 import { sendCommand } from '../bridge';
 
 function fmtBytes(n: number): string {
@@ -27,9 +27,48 @@ function StatusPill({ on, onLabel, offLabel }: { on: boolean; onLabel: string; o
   );
 }
 
+function CapturingCard({ cap, now }: { cap: SkeletonCaptureProgress; now: number }) {
+  const total = cap.totalSteps || 5;
+  const pct = Math.min(100, Math.max(0, (cap.step / total) * 100));
+  const elapsed = Math.max(0, Math.floor((now - cap.startedAtMs) / 1000));
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  return (
+    <div className="bg-blue-950/40 border border-blue-800/50 rounded-lg px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <p className="text-sm text-blue-100 flex items-center gap-1.5 min-w-0">
+          <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin flex-shrink-0" />
+          <span className="truncate">Preparing <span className="font-medium">"{cap.name}"</span>…</span>
+        </p>
+        <span className="text-[11px] text-blue-300/80 font-mono flex-shrink-0 tabular-nums">{mm}:{ss}</span>
+      </div>
+      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+        <div
+          className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full transition-all duration-500 relative overflow-hidden"
+          style={{ width: `${pct}%` }}
+        >
+          <div className="absolute inset-0 bg-white/20 animate-pulse" />
+        </div>
+      </div>
+      <p className="text-[11px] text-blue-300/70 mt-1">
+        Step {cap.step}/{total} · {cap.phase}
+      </p>
+    </div>
+  );
+}
+
 export default function SkeletonPanel() {
   const s = useAppState();
   const [advanced, setAdvanced] = useState(false);
+
+  // Tick once a second while a capture is running so the elapsed timer advances without new state pushes.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!s.skeletonCapturing) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [s.skeletonCapturing]);
 
   const watching = s.isSkeletonWatching;
   const proxy = s.isCacheProxyRunning;
@@ -119,6 +158,9 @@ export default function SkeletonPanel() {
 
       {/* Content: captures + log */}
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
+        {/* In-progress capture progress bar */}
+        {s.skeletonCapturing && <CapturingCard cap={s.skeletonCapturing} now={now} />}
+
         <div>
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">

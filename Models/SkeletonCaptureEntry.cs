@@ -24,3 +24,26 @@ public sealed class SkeletonCaptureEntry
     /// <summary>Local time the capture completed (round-trip "o" format).</summary>
     public string CapturedAt { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// Live progress of a skeleton capture in flight, surfaced to the WebUI so the user sees a "Preparing…"
+/// progress bar. xvdtool reports named phases rather than an exact percentage, so progress is a monotonic
+/// <see cref="Step"/> out of <see cref="TotalSteps"/> plus a human phase label; the bar fills by step.
+/// </summary>
+public sealed class SkeletonCaptureProgress
+{
+    /// <summary>Title being prepared (the installed folder / skeleton name).</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Current phase index, 1..<see cref="TotalSteps"/>. Only ever advances.</summary>
+    public int Step { get; set; }
+
+    /// <summary>Total number of phases (fixed at 5).</summary>
+    public int TotalSteps { get; set; } = 5;
+
+    /// <summary>Human-readable current phase, e.g. "Matching installed files".</summary>
+    public string Phase { get; set; } = string.Empty;
+
+    /// <summary>Unix epoch ms when the capture started, so the client can show elapsed time.</summary>
+    public long StartedAtMs { get; set; }
+}

@@ -54,6 +54,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isSkeletonWatching;
 
+    /// <summary>Non-null while a skeleton capture is in progress; drives the WebUI "Preparing…" progress bar.
+    /// xvdtool emits named phases (not an exact %), so this tracks a monotonic step (1..TotalSteps).</summary>
+    [ObservableProperty]
+    private SkeletonCaptureProgress? _skeletonCapturing;
+
     [ObservableProperty]
     private string _skeletonDropFolder = string.Empty;
 
@@ -3627,8 +3632,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     OnPropertyChanged(nameof(XboxTransfer));
                 }
             }
+
+            // Drive the "Preparing…" capture progress bar (a capture is NOT a drive copy, so this is separate
+            // from the transfer bar above). Start on the watcher's "capturing skeleton for <name> …" line, then
+            // advance a monotonic phase as xvdtool prints its stage markers.
+            UpdateSkeletonCaptureProgress(line);
         });
         AddLog($"[Skeleton] {line}", LogMessageType.Info);
+    }
+
+    // xvdtool prints these stage markers (in this order) during a capture. Mapped to a monotonic 1..5 step so
+    // the bar only ever advances; the file-matching phase (3) is the long one and is where it visibly dwells.
+    private static readonly (string needle, int step, string phase)[] CapturePhaseMarkers =
+    {
+        ("SELF-VERIFY",               5, "Verifying result"),
+        ("rebuilt sha",               5, "Verifying result"),
+        ("skeleton.skl size",         4, "Writing skeleton"),
+        ("skeleton bytes",            4, "Writing skeleton"),
+        ("files matched",             4, "Writing skeleton"),
+        ("genuine structural region", 3, "Matching installed files"),
+        ("hashing genuine package",   2, "Hashing package"),
+        ("Capturing skeleton:",       2, "Hashing package"),
+        ("Verifying data hashes",     1, "Reading package"),
+        ("Loading file",              1, "Reading package"),
+    };
+
+    private void UpdateSkeletonCaptureProgress(string line)
+    {
+        const string startTag = "capturing skeleton for ";
+        if (line.StartsWith(startTag, StringComparison.OrdinalIgnoreCase))
+        {
+            var name = line.Substring(startTag.Length).TrimEnd(' ', '…', '.').Trim();
+            SkeletonCapturing = new SkeletonCaptureProgress
+            {
+                Name = name,
+                Step = 1,
+                TotalSteps = 5,
+                Phase = "Reading package",
+                StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            };
+            return;
+        }
+
+        var cur = SkeletonCapturing;
+        if (cur == null) return; // markers only count while a capture is active
+        foreach (var (needle, step, phase) in CapturePhaseMarkers)
+        {
+            if (line.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            if (step > cur.Step) // monotonic — never regress (e.g. a CIK-refresh retry restarts xvdtool's output)
+                SkeletonCapturing = new SkeletonCaptureProgress
+                {
+                    Name = cur.Name, Step = step, TotalSteps = cur.TotalSteps, Phase = phase, StartedAtMs = cur.StartedAtMs,
+                };
+            return;
+        }
     }
 
     private void OnSkeletonCaptureCompleted(SkeletonCaptureResult res)
@@ -3645,12 +3702,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SavedBytes = Math.Max(0, res.USize - res.SkelFileSize),
                 CapturedAt = DateTime.Now.ToString("o"),
             });
+            SkeletonCapturing = null; // capture done — hide the "Preparing…" bar
         });
     }
 
     private void OnSkeletonCaptureFailed(string message)
     {
         AddLog($"[Skeleton] {message}", LogMessageType.Error);
+        Dispatcher.UIThread.Post(() => SkeletonCapturing = null); // clear the "Preparing…" bar on failure
     }
 
     private void OnXboxTransferStateChanged(object? sender, XboxTransferState state)

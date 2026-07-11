@@ -223,6 +223,7 @@ public class InteropBridge : IDisposable
 
             // Skeleton capture
             ["isSkeletonWatching"]   = _viewModel.IsSkeletonWatching,
+            ["skeletonCapturing"]    = _viewModel.SkeletonCapturing,
             ["skeletonDropFolder"]   = _viewModel.SkeletonDropFolder,
 
             // LAN cache proxy
@@ -308,6 +309,7 @@ public class InteropBridge : IDisposable
 
             // Skeleton capture
             isSkeletonWatching = _viewModel.IsSkeletonWatching,
+            skeletonCapturing = _viewModel.SkeletonCapturing,
             skeletonDropFolder = _viewModel.SkeletonDropFolder,
             skeletonCaptures = _viewModel.SkeletonCaptures.ToList(),
             skeletonLog = _viewModel.SkeletonLog.ToList(),

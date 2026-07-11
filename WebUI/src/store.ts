@@ -146,6 +146,15 @@ export interface SkeletonCaptureEntry {
   capturedAt: string;
 }
 
+/** Live progress of a skeleton capture in flight (drives the "Preparing…" bar). null when idle. */
+export interface SkeletonCaptureProgress {
+  name: string;
+  step: number;        // 1..totalSteps, monotonic
+  totalSteps: number;  // 5
+  phase: string;       // e.g. "Matching installed files"
+  startedAtMs: number; // epoch ms, for elapsed time
+}
+
 export interface CrossLocationGame {
   deviceCopy: GameInfo | null;
   externalCopy: GameInfo | null;
@@ -224,6 +233,7 @@ export interface AppState {
 
   // Skeleton capture
   isSkeletonWatching: boolean;
+  skeletonCapturing: SkeletonCaptureProgress | null;
   skeletonDropFolder: string;
   skeletonCaptures: SkeletonCaptureEntry[];
   skeletonLog: string[];
@@ -294,6 +304,7 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   xboxRootPath: '',
 
   isSkeletonWatching: false,
+  skeletonCapturing: null,
   skeletonDropFolder: '',
   skeletonCaptures: [],
   skeletonLog: [],
