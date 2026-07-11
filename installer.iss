@@ -65,24 +65,40 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-startup"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterStartupTask"
 
 [Code]
-// Check if .NET 8 is installed (for framework-dependent builds)
+// The app AND the bundled xvdtool are framework-dependent net8.0 (see GamesLocalShare.csproj:
+// SelfContained=false; xvdtool is the custom capture fork, no self-contained source on hand). Both need the
+// Microsoft.NETCore.App 8.x shared runtime — neither needs WindowsDesktop.App. Detect it by scanning the
+// output of `dotnet --list-runtimes` (checking the exit code alone gives a false positive when only .NET
+// 6/7 is installed).
 function IsDotNet8Installed: Boolean;
 var
-  Success: Boolean;
   ResultCode: Integer;
+  TmpFile: String;
+  Output: AnsiString;
 begin
-  Success := Exec('dotnet', '--list-runtimes', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := Success and (ResultCode = 0);
+  Result := False;
+  TmpFile := ExpandConstant('{tmp}\gls_dotnet_runtimes.txt');
+  if Exec(ExpandConstant('{cmd}'), '/C dotnet --list-runtimes > "' + TmpFile + '" 2>&1', '',
+          SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    if LoadStringFromFile(TmpFile, Output) then
+      Result := Pos('Microsoft.NETCore.App 8.', Output) > 0;
+  end;
+  DeleteFile(TmpFile);
 end;
 
 function InitializeSetup: Boolean;
+var
+  ErrorCode: Integer;
 begin
-  // Uncomment this for framework-dependent builds
-  // if not IsDotNet8Installed then
-  // begin
-  //   MsgBox('.NET 8 Runtime is required. Please install it from https://dotnet.microsoft.com/download/dotnet/8.0', mbError, MB_OK);
-  //   Result := False;
-  // end
-  // else
-    Result := True;
+  Result := True; // never block the install — the runtime can be added before first launch
+  if not IsDotNet8Installed then
+  begin
+    if MsgBox('GamesLocalShare needs the Microsoft .NET 8 Runtime (x64), which was not detected.' + #13#10 + #13#10 +
+              'Without it, the app and its Xbox skeleton tool (xvdtool) will not run.' + #13#10 + #13#10 +
+              'Open the .NET 8 download page now? You can finish installing this app either way.',
+              mbConfirmation, MB_YESNO) = IDYES then
+      ShellExec('open', 'https://dotnet.microsoft.com/download/dotnet/8.0/runtime', '', '',
+                SW_SHOW, ewNoWait, ErrorCode);
+  end;
 end;
