@@ -43,6 +43,25 @@ public sealed class XboxCacheProxyService : IDisposable
     private readonly Dictionary<string, string> _dns = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private readonly HashSet<string> _inProgress = new(StringComparer.OrdinalIgnoreCase);
+    // Single-download tee: per-object fill state, keyed by the final cache path. Created on the first MISS
+    // for an object and shared by every concurrent ranged request for it. The install stream is teed into a
+    // sparse <file>.part at each chunk's Content-Range offset; the file is promoted (atomic rename) only when
+    // the merged filled ranges cover [0, Total). A background sweep gap-fills any bytes the Store never
+    // requested. This avoids the second full download that StartFill did — and keeps the package byte-for-byte
+    // matched to what was installed. Guarded per-object by FillState.Lock; the dictionary itself by _gate.
+    private sealed class FillState
+    {
+        public string File = "", Part = "", Host = "", RawPath = "", Ip = "";
+        public long Total = -1;                              // full object size (Content-Range total / 200 Content-Length)
+        public FileStream? Sparse;                           // single owner; all tee-writes go through Lock
+        public readonly List<(long s, long e)> Filled = new(); // merged, sorted, half-open [s,e)
+        public bool Promoted;
+        public DateTime LastWriteUtc = DateTime.UtcNow;
+        public readonly object Lock = new();
+    }
+    private readonly Dictionary<string, FillState> _fills = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _fillCts;
+    private Thread? _fillSweep;
     // Active peer-origin overrides: when a request's URL path contains one of these keys (e.g. a title's
     // PackageFullName / content GUID), forward it to a peer's streaming-reconstruct endpoint instead of the CDN
     // and serve it transiently (NO disk fill) - the streaming single-copy receive path.
@@ -134,6 +153,9 @@ public sealed class XboxCacheProxyService : IDisposable
         Hits = Misses = Cached = Filling = Errors = Bytes = 0;
         IsRunning = true;
         _ = Task.Run(() => AcceptLoopAsync(_cts.Token));
+        _fillCts = new CancellationTokenSource();
+        _fillSweep = new Thread(() => GapFillSweep(_fillCts.Token)) { IsBackground = true, Name = "xbox-gapfill" };
+        _fillSweep.Start();
         Log?.Invoke($"LAN cache proxy listening on :80  (cache: {_cacheDir})");
         StatsChanged?.Invoke();
         return true;
@@ -146,6 +168,21 @@ public sealed class XboxCacheProxyService : IDisposable
         if (!IsRunning && !_hostsApplied) return;
         IsRunning = false;
         try { _cts?.Cancel(); } catch { }
+        try { _fillCts?.Cancel(); } catch { }
+        // Discard any in-flight tee fills: an incomplete .part must never survive to look promotable.
+        List<FillState> pending;
+        lock (_gate) { pending = _fills.Values.ToList(); _fills.Clear(); }
+        foreach (var st in pending)
+        {
+            lock (st.Lock)
+            {
+                if (st.Promoted) continue;
+                try { st.Sparse?.Dispose(); } catch { }
+                st.Sparse = null;
+                try { if (File.Exists(st.Part)) File.Delete(st.Part); } catch { }
+            }
+            Interlocked.Decrement(ref Filling);
+        }
         try { _listener?.Stop(); _listener?.Close(); } catch { }
         _listener = null;
         if (_hostsApplied)
@@ -333,20 +370,21 @@ public sealed class XboxCacheProxyService : IDisposable
                 // forward live to the real CDN and background-fill the package to disk as usual.
                 bool viaPeer = TryGetPeerOrigin(rawPath, out var peerHost, out var peerPort);
                 string target;
+                string ip = "";
                 if (viaPeer)
                 {
                     target = $"http://{peerHost}:{peerPort}{rawPath}";
                 }
                 else
                 {
-                    string ip = _dns[hostHdr];
-                    StartFill(file, hostHdr, rawPath, ip);
+                    ip = _dns[hostHdr];
                     target = "http://" + ip + rawPath;
                 }
                 var msg = new HttpRequestMessage(HttpMethod.Get, target);
                 if (!viaPeer) msg.Headers.Host = hostHdr; // CDN needs the real host; the peer endpoint ignores it
                 if (!string.IsNullOrEmpty(range)) msg.Headers.TryAddWithoutValidation("Range", range);
                 long sent = 0; int sc;
+                FillState? tee = null; long teeBase = 0;
                 using (var resp = _live.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
                 {
                     sc = (int)resp.StatusCode;
@@ -359,20 +397,36 @@ public sealed class XboxCacheProxyService : IDisposable
                     if (cl != null) res.ContentLength64 = cl.Value;
                     res.Headers["Accept-Ranges"] = "bytes";
                     started = true;
+
+                    // Single-download tee: cache the install bytes as they stream to the Store (no second pull).
+                    // Learn the full object size from Content-Range total (206) or Content-Length (200). When it's
+                    // known, tee this request's body into the shared sparse .part at its absolute offset; when it
+                    // isn't, fall back to the legacy whole-object StartFill so the object is still cached (it
+                    // self-guards against a tee already owning this file).
+                    if (!viaPeer && (sc == 200 || sc == 206))
+                    {
+                        long objTotal = crange != null ? (crange.Length ?? -1) : (cl ?? -1);
+                        teeBase = crange?.From ?? 0;
+                        if (objTotal > 0) tee = GetOrCreateFill(file, hostHdr, rawPath, ip, objTotal);
+                        else StartFill(file, hostHdr, rawPath, ip);
+                    }
+
                     // Never write more than the declared Content-Length: if the upstream body runs longer than
                     // its header, HttpListener throws "Bytes to be written to the stream exceed the Content-Length"
                     // and aborts the response, corrupting the Store's download. Bound the copy to cl (when known).
                     long cap = cl ?? long.MaxValue;
                     using var stream = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
-                    byte[] buf = new byte[262144]; int rn;
+                    byte[] buf = new byte[262144]; int rn; long teeOff = teeBase;
                     while (sent < cap)
                     {
                         int want = (int)Math.Min(buf.Length, cap - sent);
                         rn = stream.Read(buf, 0, want);
                         if (rn <= 0) break;
                         res.OutputStream.Write(buf, 0, rn);
+                        if (tee != null) { TeeWrite(tee, teeOff, buf, rn); teeOff += rn; }
                         sent += rn;
                     }
+                    if (tee != null) EndTeeRange(tee, teeBase, sent);
                 }
                 Interlocked.Increment(ref Misses);
                 Interlocked.Add(ref Bytes, sent);
@@ -400,7 +454,7 @@ public sealed class XboxCacheProxyService : IDisposable
     {
         lock (_gate)
         {
-            if (_inProgress.Contains(file) || File.Exists(file)) return;
+            if (_inProgress.Contains(file) || File.Exists(file) || _fills.ContainsKey(file)) return;
             _inProgress.Add(file);
         }
         Interlocked.Increment(ref Filling);
@@ -453,6 +507,186 @@ public sealed class XboxCacheProxyService : IDisposable
         })
         { IsBackground = true };
         th.Start();
+    }
+
+    // ---- single-download tee (capture the install stream) ----------------
+
+    /// <summary>Gets (or creates) the tee state for an object, sizing a sparse <c>.part</c> to
+    /// <paramref name="total"/>. Returns null when the object is already cached, is being handled by a legacy
+    /// <see cref="StartFill"/>, or the sparse file can't be created — in which case this request simply isn't
+    /// teed (another request, or the gap-fill, still completes it).</summary>
+    private FillState? GetOrCreateFill(string file, string host, string rawPath, string ip, long total)
+    {
+        lock (_gate)
+        {
+            if (File.Exists(file) || _inProgress.Contains(file)) return null; // cached, or a StartFill owns it
+            if (_fills.TryGetValue(file, out var existing)) return existing.Promoted ? null : existing;
+            var part = file + ".part";
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                try { if (File.Exists(part)) File.Delete(part); } catch { } // discard a stale prior-run .part
+                var fs = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20);
+                fs.SetLength(total); // NTFS zero-fills lazily, so sizing a 10 GB file here is cheap
+                var st = new FillState { File = file, Part = part, Host = host, RawPath = rawPath, Ip = ip, Total = total, Sparse = fs };
+                _fills[file] = st;
+                Interlocked.Increment(ref Filling);
+                StatsChanged?.Invoke();
+                return st;
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"TEE init failed {Path.GetFileName(file)}: {ex.Message}");
+                return null;
+            }
+        }
+    }
+
+    /// <summary>Writes one chunk of the live install stream into the object's sparse .part at its absolute
+    /// offset. A disk error just leaves that span unfilled (the gap-fill covers it); it never corrupts the
+    /// promoted file, which is gated on complete coverage.</summary>
+    private static void TeeWrite(FillState st, long absOffset, byte[] buf, int count)
+    {
+        if (count <= 0) return;
+        lock (st.Lock)
+        {
+            if (st.Promoted || st.Sparse == null) return;
+            try { st.Sparse.Seek(absOffset, SeekOrigin.Begin); st.Sparse.Write(buf, 0, count); }
+            catch { /* leave the range unmarked below is the caller's job; nothing is promoted early */ }
+        }
+    }
+
+    /// <summary>Marks <c>[start, start+length)</c> as filled and promotes the object when the merged ranges
+    /// cover <c>[0, Total)</c>.</summary>
+    private void EndTeeRange(FillState st, long start, long length)
+    {
+        if (length <= 0) return;
+        bool complete;
+        lock (st.Lock)
+        {
+            if (st.Promoted) return;
+            AddRangeLocked(st.Filled, start, start + length);
+            st.LastWriteUtc = DateTime.UtcNow;
+            complete = st.Total > 0 && st.Filled.Count == 1 && st.Filled[0].s <= 0 && st.Filled[0].e >= st.Total;
+        }
+        if (complete) Promote(st);
+    }
+
+    /// <summary>Flushes and atomically renames a fully-filled <c>.part</c> to the final cache file, then drops
+    /// the tee state. Firing this makes the file a HIT and triggers the skeleton watcher's auto-capture.</summary>
+    private void Promote(FillState st)
+    {
+        bool removed = false;
+        lock (st.Lock)
+        {
+            if (st.Promoted) return;
+            st.Promoted = true;
+            try { st.Sparse?.Flush(); st.Sparse?.Dispose(); } catch { }
+            st.Sparse = null;
+            try
+            {
+                if (File.Exists(st.File)) { try { File.Delete(st.Part); } catch { } }
+                else File.Move(st.Part, st.File);
+                Interlocked.Increment(ref Cached);
+                Log?.Invoke($"FILL DONE (tee) {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F1} MB)");
+                removed = true;
+            }
+            catch (Exception ex) { Log?.Invoke($"TEE promote failed {Path.GetFileName(st.File)}: {ex.Message}"); }
+        }
+        lock (_gate) { _fills.Remove(st.File); }
+        Interlocked.Decrement(ref Filling);
+        if (removed) StatsChanged?.Invoke();
+    }
+
+    /// <summary>Adds a half-open interval and re-merges the (kept sorted, non-overlapping) list in place.</summary>
+    private static void AddRangeLocked(List<(long s, long e)> list, long s, long e)
+    {
+        if (e <= s) return;
+        list.Add((s, e));
+        list.Sort((a, b) => a.s.CompareTo(b.s));
+        var merged = new List<(long s, long e)>();
+        foreach (var iv in list)
+        {
+            if (merged.Count > 0 && iv.s <= merged[^1].e)
+            {
+                var last = merged[^1];
+                if (iv.e > last.e) merged[^1] = (last.s, iv.e);
+            }
+            else merged.Add(iv);
+        }
+        list.Clear();
+        list.AddRange(merged);
+    }
+
+    /// <summary>The complement of the filled ranges within <c>[0, total)</c> — the bytes the Store never
+    /// requested, which the gap-fill fetches to complete the object.</summary>
+    private static List<(long s, long e)> ComplementLocked(List<(long s, long e)> filled, long total)
+    {
+        var gaps = new List<(long s, long e)>();
+        long cursor = 0;
+        foreach (var iv in filled) // filled is merged & sorted
+        {
+            if (iv.s > cursor) gaps.Add((cursor, Math.Min(iv.s, total)));
+            cursor = Math.Max(cursor, iv.e);
+            if (cursor >= total) break;
+        }
+        if (cursor < total) gaps.Add((cursor, total));
+        return gaps;
+    }
+
+    /// <summary>Background sweep: for any tee object that has gone idle (the install stopped requesting bytes)
+    /// but isn't complete, fetch ONLY the missing ranges from the CDN so the object promotes. Typically a
+    /// tiny transfer (trailing padding), never the whole package.</summary>
+    private void GapFillSweep(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { Thread.Sleep(10000); } catch { }
+            if (ct.IsCancellationRequested) break;
+            List<FillState> snapshot;
+            lock (_gate) { snapshot = _fills.Values.ToList(); }
+            foreach (var st in snapshot)
+            {
+                if (ct.IsCancellationRequested) break;
+                bool idle; long total; List<(long s, long e)> gaps = new();
+                lock (st.Lock)
+                {
+                    if (st.Promoted) continue;
+                    total = st.Total;
+                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > 30;
+                    if (idle) gaps = ComplementLocked(st.Filled, total);
+                }
+                if (!idle || gaps.Count == 0) continue;
+                Log?.Invoke($"GAP-FILL {Path.GetFileName(st.File)}: {gaps.Count} missing range(s)");
+                foreach (var g in gaps)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    try { FetchRange(st, g.s, g.e, ct); }
+                    catch (Exception ex) { Log?.Invoke($"GAP-FILL ERR {Path.GetFileName(st.File)} [{g.s},{g.e}): {ex.Message}"); }
+                }
+            }
+        }
+    }
+
+    /// <summary>Fetches a single byte range from the CDN and tees it into the object's sparse .part, promoting
+    /// when this completes coverage.</summary>
+    private void FetchRange(FillState st, long start, long endExcl, CancellationToken ct)
+    {
+        long len = endExcl - start;
+        if (len <= 0) return;
+        var msg = new HttpRequestMessage(HttpMethod.Get, "http://" + st.Ip + st.RawPath);
+        msg.Headers.Host = st.Host;
+        msg.Headers.Range = new RangeHeaderValue(start, endExcl - 1);
+        using var resp = _bg.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, ct).GetAwaiter().GetResult();
+        int sc = (int)resp.StatusCode;
+        if (sc != 200 && sc != 206) { Log?.Invoke($"GAP-FILL skip code={sc} {st.RawPath}"); return; }
+        using var s = resp.Content.ReadAsStreamAsync(ct).GetAwaiter().GetResult();
+        byte[] buf = new byte[1 << 20]; int n; long abs = start, got = 0;
+        while (got < len && (n = s.Read(buf, 0, (int)Math.Min(buf.Length, len - got))) > 0)
+        {
+            TeeWrite(st, abs, buf, n); abs += n; got += n;
+        }
+        EndTeeRange(st, start, got);
     }
 
     // ---- elevation (URL ACL + hosts) -------------------------------------
