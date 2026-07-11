@@ -418,9 +418,10 @@ public sealed class SkeletonWatcherService : IDisposable
         {
             foreach (var dir in Directory.GetDirectories(root))
             {
-                var name = Path.GetFileName(dir);
-                if (!IsGuid(name) && SafeHasXvi(dir))
-                    _installs[name] = dir;
+                if (!SafeHasXvi(dir)) continue;
+                var name = ResolveInstallName(dir);
+                if (name == null) continue; // unresolved GUID staging folder — skip until it names itself
+                _installs[name] = dir;
             }
         }
         catch { }
@@ -432,9 +433,9 @@ public sealed class SkeletonWatcherService : IDisposable
     {
         try
         {
-            var name = Path.GetFileName(installDir);
-            if (string.IsNullOrEmpty(name) || IsGuid(name)) return; // still in the GUID staging stage
             if (!SafeHasXvi(installDir)) return; // not an MSIXVC install (no envelope yet)
+            var name = ResolveInstallName(installDir);
+            if (name == null) return; // still in the GUID staging stage (no title resolvable from the manifest yet)
 
             bool isNew = !_installs.ContainsKey(name);
             _installs[name] = installDir;
@@ -503,13 +504,18 @@ public sealed class SkeletonWatcherService : IDisposable
             {
                 for (int i = 0; i < 180 && !ct.IsCancellationRequested; i++) // ~15 min @ 5 s
                 {
-                    if (!NeedsCapture(name, installDir, out _)) return;
-                    if (!Directory.Exists(installDir))
+                    // Re-resolve the live folder each tick: a staging install may be renamed (GUID -> friendly)
+                    // between ticks, so never pin to a path that has moved. null = not present right now
+                    // (mid-rename or uninstalled); keep waiting — the loop timeout below covers a real uninstall.
+                    var live = ResolveLiveInstallDir(name, installDir);
+                    if (live == null)
                     {
-                        Report($"{name}: install removed before its package finished caching — capture aborted " +
-                               $"(reinstall and keep it installed to capture)");
-                        return;
+                        try { await Task.Delay(5000, ct); } catch { return; }
+                        continue;
                     }
+                    installDir = live;
+                    _installs[name] = live;
+                    if (!NeedsCapture(name, installDir, out _)) return;
                     var pkg = FindDropFor(name) ?? LocatePackage(installDir);
                     if (pkg != null)
                     {
@@ -659,6 +665,20 @@ public sealed class SkeletonWatcherService : IDisposable
             var ct = _cts?.Token ?? CancellationToken.None;
             var skel = Path.Combine(SkeletonStore, name + ".skl");
 
+            // The tee promotes the cached package the instant its download completes — which is during Xbox's
+            // install staging, before the content-GUID staging folder is renamed to the friendly title. Re-resolve
+            // the folder that exists right now; if none does yet, the install hasn't settled, so defer instead of
+            // capturing against a path that's about to move (which xvdtool reports as "install root not found").
+            var live = ResolveLiveInstallDir(name, installDir);
+            if (live == null)
+            {
+                Report($"{name}: install still staging (folder not settled) — will capture once it finalizes");
+                ScheduleCaptureWhenReady(name, installDir);
+                return;
+            }
+            installDir = live;
+            _installs[name] = live;
+
             // Ensure the CIK store has keys (invokes CikExtractor elevated only if needed).
             var cikFolder = await EnsureCikFolderAsync(ct);
 
@@ -685,6 +705,29 @@ public sealed class SkeletonWatcherService : IDisposable
                         packagePath, installDir, skel, cikFolder,
                         onOutput: line => Report(line),
                         ct: ct);
+                }
+            }
+
+            // If the capture failed because the install folder was renamed out from under xvdtool mid-run
+            // (GUID staging -> friendly title), re-resolve the now-settled folder and retry once.
+            if (!res.Ok && !res.KeyMissing && !Directory.Exists(installDir))
+            {
+                var settled = ResolveLiveInstallDir(name, installDir);
+                if (settled != null && !string.Equals(settled, installDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    installDir = settled;
+                    _installs[name] = settled;
+                    Report($"{name}: install folder was renamed during capture — retrying against \"{Path.GetFileName(settled)}\" …");
+                    res = await _skeleton.CaptureAsync(
+                        packagePath, installDir, skel, cikFolder,
+                        onOutput: line => Report(line),
+                        ct: ct);
+                }
+                else
+                {
+                    Report($"{name}: install folder moved during capture and hasn't settled — will retry when it finalizes");
+                    ScheduleCaptureWhenReady(name, installDir);
+                    return;
                 }
             }
 
@@ -985,6 +1028,92 @@ public sealed class SkeletonWatcherService : IDisposable
     }
 
     private static bool IsGuid(string s) => Guid.TryParse(s, out _);
+
+    /// <summary>
+    /// Resolves the tracking name for an install folder. A friendly-named folder (e.g. "Rematch") keeps its
+    /// name. A GUID-named folder is an Xbox title that was never renamed from its content-GUID install-staging
+    /// name; instead of skipping it forever (some titles keep the GUID name permanently), resolve the real
+    /// title from its <c>Content\appxmanifest.xml</c> so it is tracked like any other game. Returns null when
+    /// the folder is an unresolved GUID (genuinely mid-install — no readable manifest title yet), so callers
+    /// skip it until it becomes resolvable.
+    /// </summary>
+    private static string? ResolveInstallName(string dir)
+    {
+        var folder = Path.GetFileName(dir);
+        if (string.IsNullOrEmpty(folder)) return null;
+        if (!IsGuid(folder)) return folder;
+        return ReadTitleFromManifest(dir); // null while still staging
+    }
+
+    /// <summary>
+    /// Returns the install folder that currently exists on disk for <paramref name="name"/>. Xbox stages a
+    /// fresh install under a content-GUID folder and renames it to the friendly title when it finalizes, so a
+    /// path recorded earlier can vanish mid-install. If <paramref name="recordedDir"/> still exists it wins;
+    /// otherwise the library roots are re-scanned for the folder that resolves to this title. Returns null when
+    /// no matching folder exists right now (the install is mid-rename, or was uninstalled).
+    /// </summary>
+    private string? ResolveLiveInstallDir(string name, string recordedDir)
+    {
+        if (Directory.Exists(recordedDir)) return recordedDir;
+        foreach (var root in _roots)
+        {
+            try
+            {
+                foreach (var dir in Directory.GetDirectories(root))
+                {
+                    if (!SafeHasXvi(dir)) continue;
+                    if (string.Equals(ResolveInstallName(dir), name, StringComparison.OrdinalIgnoreCase))
+                        return dir;
+                }
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    private static readonly Regex ManifestDisplayNameRx = new(
+        @"<DisplayName>\s*([^<]+?)\s*</DisplayName>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ManifestIdentityNameRx = new(
+        @"<Identity\b[^>]*?\bName=""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Reads a filesystem-safe title from a title's <c>Content\appxmanifest.xml</c>: the
+    /// <c>&lt;Properties&gt;&lt;DisplayName&gt;</c> (e.g. "Buckshot Roulette"), falling back to the friendly
+    /// tail of the package <c>Identity</c> Name (e.g. "CRITICALREFLEX.BuckshotRoulette" → "BuckshotRoulette").
+    /// Returns null when no manifest/name is available (an ms-resource placeholder is treated as unavailable).</summary>
+    private static string? ReadTitleFromManifest(string installDir)
+    {
+        try
+        {
+            var p = Path.Combine(installDir, "Content", "appxmanifest.xml");
+            if (!File.Exists(p)) return null;
+            var xml = File.ReadAllText(p);
+
+            var dn = ManifestDisplayNameRx.Match(xml);
+            if (dn.Success)
+            {
+                var v = dn.Groups[1].Value.Trim();
+                if (v.Length > 0 && !v.StartsWith("ms-resource", StringComparison.OrdinalIgnoreCase))
+                    return SanitizeName(v);
+            }
+
+            var idn = ManifestIdentityNameRx.Match(xml);
+            if (idn.Success)
+            {
+                var id = idn.Groups[1].Value;
+                var dot = id.LastIndexOf('.');
+                var friendly = (dot >= 0 && dot < id.Length - 1) ? id.Substring(dot + 1) : id;
+                if (friendly.Length > 0) return SanitizeName(friendly);
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string SanitizeName(string s)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, ' ');
+        return s.Trim();
+    }
 
     public void Dispose() => Stop();
 }
