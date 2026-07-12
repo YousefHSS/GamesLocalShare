@@ -81,9 +81,10 @@ jobs:
           - **GamesLocalShare-win-x64-fd.zip** (~15MB)
           - Requires [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)
           
-          ### Self-Contained (No .NET Required)
+          ### Self-Contained (app needs no .NET)
           - **GamesLocalShare-win-x64-sc.zip** (~60MB)
-          - Everything included, no dependencies needed
+          - The app itself bundles the runtime. Note: the optional Xbox skeleton tool (xvdtool) is
+            framework-dependent, so skeleton capture still needs the .NET 8 Runtime.
           
           ### Installer
           - **GamesLocalShare-Setup-*.exe**
@@ -91,16 +92,17 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
-          ## What's New in 3.0.0
+          ## What's New in 3.0.5
 
-          The Xbox release.
+          Hotfix restoring Xbox single-copy skeleton capture and improving the download cache.
 
-          - **Xbox PC Game Pass (MSIXVC) transfer** *(Windows)* — move installed Game Pass / Microsoft Store games between your PCs over the LAN without re-downloading them from Microsoft. Pre-staged files are overlaid onto an app-initiated paused install; on Resume, Gaming Services skips the download.
-          - **Single-copy storage** — keep one copy of an Xbox title on disk. A compact (~17 MB) skeleton reconstructs the byte-identical package on demand from the skeleton + installed files (~99% space saving, no re-download).
-          - **LAN download cache** — a local proxy serves cached/peer Xbox content on your network so repeat downloads stay off the internet.
-          - **Prompt-free elevated startup** — "Start with Windows" registers a Task Scheduler logon task with highest privileges; the app starts already elevated and Xbox flows run without a per-session UAC prompt (falls back to a normal startup entry if elevation is declined).
-          - **Friendlier UAC** — on-demand elevation relaunches the app itself instead of `powershell.exe`, so prompts show the app's name and icon.
-          - **Desktop notifications** — actionable notifications for transfer progress, Xbox copy results, and setup steps.
+          - **Fixed: skeleton capture was silently broken** — a prior release bundled a stock build of xvdtool without the capture feature, so every capture failed with "input file doesn't exist". Restored the capture-capable build; single-copy storage works again.
+          - **Single-download cache** — the LAN cache proxy no longer pulls each Xbox package twice. It captures the package from the install stream as it downloads, so it's fetched once and always matches the installed version (smaller, correct skeletons; no wasted bandwidth).
+          - **Reliable auto-capture on fresh installs** — titles whose folder is renamed during Xbox's install staging are now tracked and captured without failing.
+          - **Live progress bar** — the app shows a "Preparing…" progress bar with phase and elapsed time while a game is being prepared for single-copy/transfer.
+          - **Installer** — now detects the required .NET 8 runtime and points you to it if missing.
+
+          Underlying 3.0.x Xbox features (LAN transfer, single-copy storage, download cache, prompt-free elevated startup) are unchanged.
 
           > **Note:** the Xbox MSIXVC features depend on [xvdtool](https://github.com/emoose/xvdtool) (emoose), [CikExtractor](https://github.com/LukeFZ/CikExtractor) (LukeFZ), and helper scripts that are **not redistributed** in these builds. Steam/Epic library management, LAN discovery/transfer, and sync work out of the box. See the README for setup.
 
