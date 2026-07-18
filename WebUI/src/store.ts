@@ -413,10 +413,21 @@ export interface AppSettingsForm {
   steamGridDbApiKey?: string;
 }
 
+export interface DriveInfo {
+  installRoot: string;
+  cacheRoot: string;
+  installDrive: string;
+  cacheDrive: string;
+  sameDrive: boolean;
+  installFreeGb: number;
+  cacheFreeGb: number;
+}
+
 export interface SettingsPayload {
   settings: AppSettingsForm;
   hiddenGames: { appId: string; name: string }[];
   externalLibraries: ExternalLibrary[];
+  driveInfo?: DriveInfo;
   isWindows: boolean;
   settingsPath: string;
 }

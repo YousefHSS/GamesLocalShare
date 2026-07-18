@@ -1081,6 +1081,25 @@ public class InteropBridge : IDisposable
         await _viewModel.StartLocalCopyAsync(aEl.GetString() ?? string.Empty, libGuid, dir, result[0].Path.LocalPath);
     }
 
+    /// <summary>The drive root (e.g. "C:\") of a path, or "" if it can't be resolved.</summary>
+    private static string DriveRootOf(string path)
+    {
+        try { return string.IsNullOrWhiteSpace(path) ? "" : (Path.GetPathRoot(Path.GetFullPath(path)) ?? ""); }
+        catch { return ""; }
+    }
+
+    /// <summary>Free space (whole GB) on the drive holding <paramref name="path"/>, or -1 if unknown.</summary>
+    private static long DriveFreeGb(string path)
+    {
+        try
+        {
+            var root = DriveRootOf(path);
+            if (string.IsNullOrEmpty(root)) return -1;
+            return new DriveInfo(root).AvailableFreeSpace / (1024L * 1024 * 1024);
+        }
+        catch { return -1; }
+    }
+
     private async Task PushSettingsAsync()
     {
         var s = _viewModel.Settings;
@@ -1101,6 +1120,29 @@ public class InteropBridge : IDisposable
             isRemovable = lib.IsRemovable,
             scanSubfolders = lib.ScanSubfolders,
         }).ToList();
+
+        // Drive-split hint: the effective install drive vs the package-cache drive. When they're the same, a
+        // download needs 2x space on one drive; the UI advises putting the cache on a different drive.
+        string effInstall = !string.IsNullOrWhiteSpace(s.XboxRootPath)
+            ? s.XboxRootPath!
+            : (OperatingSystem.IsWindows()
+                ? (new XboxLibraryScanner().GetLibraryFolders().FirstOrDefault() ?? @"C:\XboxGames")
+                : "");
+        string effCache = string.IsNullOrWhiteSpace(s.XboxPackageCacheRoot)
+            ? AppSettings.DefaultXboxCacheDir : s.XboxPackageCacheRoot!;
+        string installDrive = DriveRootOf(effInstall);
+        string cacheDrive = DriveRootOf(effCache);
+        var driveInfo = new
+        {
+            installRoot = effInstall,
+            cacheRoot = effCache,
+            installDrive,
+            cacheDrive,
+            sameDrive = !string.IsNullOrEmpty(installDrive)
+                        && installDrive.Equals(cacheDrive, StringComparison.OrdinalIgnoreCase),
+            installFreeGb = DriveFreeGb(effInstall),
+            cacheFreeGb = DriveFreeGb(effCache),
+        };
 
         var payload = new
         {
@@ -1123,6 +1165,7 @@ public class InteropBridge : IDisposable
             },
             hiddenGames,
             externalLibraries,
+            driveInfo,
             isWindows = OperatingSystem.IsWindows(),
             settingsPath = AppSettings.GetSettingsFilePath(),
         };

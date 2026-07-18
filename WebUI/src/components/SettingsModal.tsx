@@ -380,6 +380,18 @@ export default function SettingsModal({
                       <FolderOpen className="w-3.5 h-3.5" /> Browse...
                     </button>
                   </div>
+                  {payload.driveInfo?.sameDrive && (
+                    <div className="flex items-start gap-2 rounded border border-amber-600/50 bg-amber-900/20 px-3 py-2 text-xs text-amber-200">
+                      <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-amber-400" />
+                      <span>
+                        Your games and the package cache are both on drive <span className="font-mono">{payload.driveInfo.installDrive}</span>
+                        {payload.driveInfo.installFreeGb >= 0 && <> ({payload.driveInfo.installFreeGb} GB free)</>}.
+                        Installing a game briefly needs <b>2× its size</b> on that drive (the install + the cached package).
+                        Point this cache at a <b>different drive</b> so a download never needs 2× space on one drive — the LAN
+                        cache still works. Restart the proxy (Stop/Start) after changing it.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </Section>
             )}
