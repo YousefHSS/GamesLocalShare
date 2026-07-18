@@ -141,6 +141,14 @@ export default function SkeletonPanel() {
             >
               <FolderOpen className="w-3.5 h-3.5" /> Drop Folder
             </button>
+            <button
+              onClick={() => sendCommand('CaptureMissingSkeletons')}
+              disabled={!watching}
+              title={watching ? 'Capture skeletons now for installed games whose package is already cached but has no skeleton yet' : 'Start watching first'}
+              className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-medium flex items-center gap-1.5"
+            >
+              <Boxes className="w-3.5 h-3.5" /> Capture from Cache
+            </button>
           </div>
           {s.skeletonDropFolder && (
             <p className="text-[11px] text-slate-500">

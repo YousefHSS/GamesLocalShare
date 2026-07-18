@@ -775,6 +775,11 @@ public class InteropBridge : IDisposable
                         _viewModel.RefreshSkeletonsCommand.Execute(null);
                     break;
 
+                case "CaptureMissingSkeletons":
+                    if (_viewModel.CaptureMissingSkeletonsCommand.CanExecute(null))
+                        _viewModel.CaptureMissingSkeletonsCommand.Execute(null);
+                    break;
+
                 case "RestoreSkeleton":
                     if (payload?.TryGetProperty("name", out var skelRestoreEl) == true)
                     {

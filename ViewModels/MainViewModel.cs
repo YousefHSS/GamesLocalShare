@@ -3372,6 +3372,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StatusMessage = $"Refreshed skeletons ({SkeletonCaptures.Count})";
     }
 
+    /// <summary>Capture skeletons on demand for installed titles that have a cached package but no skeleton
+    /// yet (e.g. a game whose package is cached but was never captured). Reuses the watcher's existing sweep.</summary>
+    [RelayCommand]
+    private void CaptureMissingSkeletons()
+    {
+        if (_skeletonWatcher == null)
+        {
+            StatusMessage = "Skeleton capture is only available on Windows";
+            return;
+        }
+        _skeletonWatcher.CaptureMissingNow();
+        StatusMessage = "Capturing skeletons from cached packages …";
+    }
+
     [RelayCommand]
     private void OpenSkeletonDropFolder()
     {

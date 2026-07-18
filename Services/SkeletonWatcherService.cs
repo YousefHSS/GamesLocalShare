@@ -254,6 +254,26 @@ public sealed class SkeletonWatcherService : IDisposable
         _ = Task.Run(() => ReconcileLoopAsync(ct), ct);
     }
 
+    /// <summary>On-demand: re-scan installed titles and capture any that have a cached package but no
+    /// (up-to-date) skeleton — the same sweep that runs on start/reconcile, triggered now from the UI so the
+    /// user doesn't wait for the periodic pass. Requires the watcher to be running. The per-title
+    /// single-flight guard prevents overlap with automatic captures.</summary>
+    public void CaptureMissingNow()
+    {
+        if (!IsRunning)
+        {
+            Report("capture from cache: start watching first (the watcher must be running to capture)");
+            return;
+        }
+        var ct = _cts?.Token ?? CancellationToken.None;
+        _ = Task.Run(async () =>
+        {
+            foreach (var root in _roots) SeedInstalls(root); // pick up newly installed titles first
+            Report("capturing skeletons from cached packages (installed titles without one) …");
+            await CaptureExistingInstallsAsync(ct, announceIdle: true);
+        }, ct);
+    }
+
     /// <summary>
     /// On start, captures any already-installed title that has a cached package and no skeleton yet.
     /// Runs sequentially (one capture at a time) to avoid hammering the disk; <see cref="TryCaptureAsync"/>'s
