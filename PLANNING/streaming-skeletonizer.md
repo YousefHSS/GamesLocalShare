@@ -229,9 +229,10 @@ package). Storage win confirmed: materialize ~1–4.5% of the package, not ~200%
   (`SkeletonWatcherService.UnreadableInstallBytes`); falls back to non-elevated on UAC decline. Fixes
   GameMaker-style titles (whole game in one protected .exe → was a whole-package skeleton). Elevated capture
   reads its outcome from result.json (no stdout streaming → no live progress bar for those). Commit 8a41296.
-- **B2b (next): reliable tee promotion** — ensure the matched-version package is actually produced/promoted so
-  capture doesn't wait forever (overlaps with B3). Needs a live install repro to diagnose the July-12
-  "nothing cached" case.
+- **B2b DONE (tee promotion validated).** Live-tested a real cache MISS: uninstalled Donut + deleted its
+  cached package, Started the proxy, reinstalled through it — the proxy teed the fresh download, promoted a
+  matched-version `.msixvc`, and it captured to a small skeleton. Repeated successfully. The fresh-download /
+  update path works end to end.
 - **B2 safety net (optional): early-bloat abort in the capture engine** — if matched files cover < ~15% of U
   (skeleton > ~85%), abort with a clear reason rather than writing a near-useless skeleton (threshold high
   enough to not false-positive legit large skeletons, e.g. Buckshot 59%).
