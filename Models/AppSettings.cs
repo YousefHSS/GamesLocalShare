@@ -163,6 +163,14 @@ public class AppSettings
     public CaptureCpuLimit CaptureCpuLimit { get; set; } = CaptureCpuLimit.Balanced;
 
     /// <summary>
+    /// Whether the watcher automatically captures skeletons for installed titles whose package is already in
+    /// the cache but which have no skeleton yet (the startup + periodic sweep). Default true. When false,
+    /// existing cached packages are only captured on demand via the "Capture from Cache" action; capturing a
+    /// game as it installs is unaffected.
+    /// </summary>
+    public bool CaptureFromCache { get; set; } = true;
+
+    /// <summary>
     /// List of external drive libraries to scan for games
     /// </summary>
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];

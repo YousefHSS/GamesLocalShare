@@ -45,6 +45,12 @@ public sealed class SkeletonWatcherService : IDisposable
     private CancellationTokenSource? _cts;
 
     public bool IsRunning { get; private set; }
+
+    /// <summary>When true (default), automatically sweeps installed titles with a cached package but no
+    /// skeleton (on start + periodically). When false, that sweep is skipped — cached packages are captured
+    /// only on demand via <see cref="CaptureMissingNow"/>; capturing a game as it installs is unaffected.</summary>
+    public bool CaptureFromCache { get; set; } = true;
+
     public string DropFolder { get; }
     public string SkeletonStore { get; }
     /// <summary>Folder of .cik files (CikExtractor output) xvdtool selects the package's key from.</summary>
@@ -245,7 +251,8 @@ public sealed class SkeletonWatcherService : IDisposable
         // (FileSystemWatcher only fires on a NEW .xvi, so without this, games installed before the
         // watcher started would never be captured.)
         var ct = _cts?.Token ?? CancellationToken.None;
-        _ = Task.Run(() => CaptureExistingInstallsAsync(ct), ct);
+        if (CaptureFromCache)
+            _ = Task.Run(() => CaptureExistingInstallsAsync(ct), ct);
 
         // Periodic reconcile: an update rewrites the install in place (bumping the version in
         // Content\appxmanifest.xml) and may not raise a watcher event we catch. Re-check installed
@@ -318,7 +325,8 @@ public sealed class SkeletonWatcherService : IDisposable
                 try { await Task.Delay(TimeSpan.FromMinutes(10), ct); }
                 catch { return; }
                 foreach (var root in _roots) SeedInstalls(root); // also pick up newly installed titles
-                await CaptureExistingInstallsAsync(ct, announceIdle: false);
+                if (CaptureFromCache)
+                    await CaptureExistingInstallsAsync(ct, announceIdle: false);
             }
         }
         catch { }
@@ -423,10 +431,10 @@ public sealed class SkeletonWatcherService : IDisposable
     {
         Report($"watcher buffer overflowed — re-scanning installs ({e.GetException().Message})");
         var ct = _cts?.Token ?? CancellationToken.None;
-        _ = Task.Run(() =>
+        _ = Task.Run(async () =>
         {
             foreach (var root in _roots) SeedInstalls(root); // pick up titles whose events were dropped
-            return CaptureExistingInstallsAsync(ct);
+            if (CaptureFromCache) await CaptureExistingInstallsAsync(ct);
         }, ct);
     }
 

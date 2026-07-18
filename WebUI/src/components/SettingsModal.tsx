@@ -17,10 +17,10 @@ const DEFAULTS: AppSettingsForm = {
   epicInstallRoot: '',
   xboxRootPath: '',
   xboxPackageCacheRoot: '',
-  cikExtractorPath: '',
   xboxSingleCopyAutoStart: true,
   xboxTransferMethod: 'Auto',
   captureCpuLimit: 'Balanced',
+  captureFromCache: true,
   steamGridDbApiKey: '',
 };
 
@@ -270,6 +270,14 @@ export default function SettingsModal({
                   disabled={!payload.isWindows}
                 />
 
+                <Toggle
+                  label="Auto-capture skeletons from cached packages"
+                  hint="Automatically create a skeleton for any installed game whose package is already in the cache but has no skeleton yet (on launch and periodically). Turn off to only capture on demand via the Skeletons panel's 'Capture from Cache' button; capturing a game as it installs is unaffected."
+                  checked={form.captureFromCache}
+                  onChange={v => set('captureFromCache', v)}
+                  disabled={!payload.isWindows}
+                />
+
                 <div className="space-y-2">
                   <label className="text-sm text-slate-200">Xbox transfer method</label>
                   <p className="text-xs text-slate-500">
@@ -372,21 +380,6 @@ export default function SettingsModal({
                       <FolderOpen className="w-3.5 h-3.5" /> Browse...
                     </button>
                   </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-sm text-slate-200">CikExtractor path</label>
-                  <p className="text-xs text-slate-500">
-                    Repo root or CikExtractor.exe used (elevated, on demand) to populate the CIK store for skeleton capture.
-                    Leave blank to rely on a pre-populated CIK store.
-                  </p>
-                  <input
-                    type="text"
-                    value={form.cikExtractorPath}
-                    onChange={e => set('cikExtractorPath', e.target.value)}
-                    placeholder="e.g. C:\Users\you\source\repos\CikExtractor"
-                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
                 </div>
               </Section>
             )}

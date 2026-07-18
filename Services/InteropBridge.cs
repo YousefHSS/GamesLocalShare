@@ -1115,10 +1115,10 @@ public class InteropBridge : IDisposable
                 epicInstallRoot = s.EpicInstallRoot ?? string.Empty,
                 xboxRootPath = s.XboxRootPath ?? string.Empty,
                 xboxPackageCacheRoot = s.XboxPackageCacheRoot ?? string.Empty,
-                cikExtractorPath = s.CikExtractorPath ?? string.Empty,
                 xboxSingleCopyAutoStart = s.XboxSingleCopyAutoStart,
                 xboxTransferMethod = s.XboxTransferMethod.ToString(),
                 captureCpuLimit = s.CaptureCpuLimit.ToString(),
+                captureFromCache = s.CaptureFromCache,
                 steamGridDbApiKey = s.SteamGridDbApiKey ?? string.Empty,
             },
             hiddenGames,
@@ -1253,14 +1253,11 @@ public class InteropBridge : IDisposable
             s.XboxPackageCacheRoot = string.IsNullOrEmpty(cache) ? null : cache;
         }
 
-        if (payload.TryGetProperty("cikExtractorPath", out var vCik))
-        {
-            var cik = vCik.GetString()?.Trim();
-            s.CikExtractorPath = string.IsNullOrEmpty(cik) ? null : cik;
-        }
-
         if (payload.TryGetProperty("xboxSingleCopyAutoStart", out var vAuto))
             s.XboxSingleCopyAutoStart = vAuto.GetBoolean();
+
+        if (payload.TryGetProperty("captureFromCache", out var vCfc))
+            s.CaptureFromCache = vCfc.GetBoolean();
 
         if (payload.TryGetProperty("steamGridDbApiKey", out var vSgdb))
         {

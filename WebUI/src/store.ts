@@ -406,10 +406,10 @@ export interface AppSettingsForm {
   epicInstallRoot: string;
   xboxRootPath: string;
   xboxPackageCacheRoot: string;
-  cikExtractorPath: string;
   xboxSingleCopyAutoStart: boolean;
   xboxTransferMethod: 'Auto' | 'Smart' | 'Basic';
   captureCpuLimit: 'Full' | 'Balanced' | 'Low';
+  captureFromCache: boolean;
   steamGridDbApiKey?: string;
 }
 

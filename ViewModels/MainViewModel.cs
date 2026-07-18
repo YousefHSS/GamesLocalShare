@@ -225,6 +225,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _skeletonService,
                 cacheRoot: _settings.XboxPackageCacheRoot,
                 cikExtractorPath: cikExtractor);
+            _skeletonWatcher.CaptureFromCache = _settings.CaptureFromCache;
             SkeletonDropFolder = _skeletonWatcher.DropFolder;
             _skeletonWatcher.Status += OnSkeletonStatus;
             _skeletonWatcher.CaptureCompleted += OnSkeletonCaptureCompleted;
@@ -806,6 +807,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Apply the capture CPU limit immediately (affects the next capture/reconstruct).
         if (_skeletonService != null) _skeletonService.CpuLimit = _settings.CaptureCpuLimit;
+        if (_skeletonWatcher != null) _skeletonWatcher.CaptureFromCache = _settings.CaptureFromCache;
     }
 
     /// <summary>
