@@ -224,6 +224,11 @@ package). Storage win confirmed: materialize ~1–4.5% of the package, not ~200%
   grabbing the highest version. This is the direct wrong-bytes fix (Rematch: was capturing v1.204.5.0 pkg vs
   v1.204.6.0 install → 10 GB skeleton). Falls back to legacy highest-version only when the install version
   can't be read. Version compare normalised to 4 components. App builds.
+- **ACL/elevated-read DONE.** Capture reads ACL-protected install files (high-integrity Xbox game files)
+  by running xvdtool elevated (runas) when >32 MB of the install is unreadable by the non-elevated process
+  (`SkeletonWatcherService.UnreadableInstallBytes`); falls back to non-elevated on UAC decline. Fixes
+  GameMaker-style titles (whole game in one protected .exe → was a whole-package skeleton). Elevated capture
+  reads its outcome from result.json (no stdout streaming → no live progress bar for those). Commit 8a41296.
 - **B2b (next): reliable tee promotion** — ensure the matched-version package is actually produced/promoted so
   capture doesn't wait forever (overlaps with B3). Needs a live install repro to diagnose the July-12
   "nothing cached" case.
