@@ -144,6 +144,19 @@ The install-files lag is handled *after* the stream, not by racing it:
   current `D:\xvdtool` tree. We are rebuilding capture as the streaming pass in `LibXboxOne`; confirm we don't
   need to recover the old harness (fallback path D above can keep shelling the shipped exe until parity).
 
+## Phase B (streaming) de-risk — RESULT: PASS
+
+The make-or-break question for streaming — *can the file→U map be built from metadata alone, so we can drop
+file-data pages as they stream?* — is answered **yes**. `--metatest` (xvdtool `skeleton-streaming` @68c81b9)
+maps every file's U-extents, zeroes all file DATA, re-maps, and compares. On Stardew (3822 files):
+**3822/3822 identical, 0 differing.** The map lives entirely in the NTFS metadata (MFT), which a streaming
+skeletonizer keeps — so dropping file-data pages during the download is sound.
+
+**Remaining Phase B unknowns (operational, not algorithmic):** (1) out-of-order arrival — how much must be
+buffered before the MFT is parseable (mitigate by having the proxy prefetch/prioritise the metadata region so
+the buffer stays bounded); (2) the `StreamingSkeletonizer` build + proxy-tee integration; (3) reconstruct-on-
+demand LAN serving. Build order per the Phase B plan in `~/.claude/plans/`.
+
 ## Feasibility spike — RESULT (2026-07-18): validated
 
 Added `--fsmap` to xvdtool (`XvdFilesystem.EnumerateFileSizes` + `Program.FsMapReport`) and ran it on three
