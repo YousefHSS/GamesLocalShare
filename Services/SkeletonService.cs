@@ -46,6 +46,7 @@ public sealed class SkeletonService
         string skeletonPath,
         string cikFolder,
         Action<string>? onOutput = null,
+        bool elevated = false,
         CancellationToken ct = default)
     {
         var resultJson = skeletonPath + ".result.json";
@@ -75,7 +76,12 @@ public sealed class SkeletonService
             onOutput?.Invoke(line);
         };
 
-        int exit = await RunAsync(args, sink, ct);
+        // Xbox install files can be readable only by an elevated (high-integrity) process. When the caller
+        // detected unreadable install files, run xvdtool elevated (UAC) so it can dedupe them; results come
+        // from the on-disk result.json (an elevated + shell-executed process can't stream stdout).
+        int exit = (elevated && !ElevationHelper.IsElevated())
+            ? await RunElevatedAsync(args, onOutput, ct)
+            : await RunAsync(args, sink, ct);
         var res = ParseCapture(resultJson, exit);
         return keyMissing ? res with { KeyMissing = true, MissingCik = missingCik ?? "" } : res;
     }
@@ -214,6 +220,37 @@ public sealed class SkeletonService
         using var sha = System.Security.Cryptography.SHA256.Create();
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
         return Convert.ToHexString(sha.ComputeHash(fs)).ToLowerInvariant();
+    }
+
+    /// <summary>Runs xvdtool elevated via the UAC "runas" verb (so it can read high-integrity Xbox install
+    /// files). Shell-execute is required for runas, which precludes stdout redirection, so progress isn't
+    /// streamed; the outcome is read from the on-disk result.json by the caller. Returns the exit code, or
+    /// -1 when the prompt was declined or the launch failed.</summary>
+    private async Task<int> RunElevatedAsync(IReadOnlyList<string> args, Action<string>? onOutput, CancellationToken ct)
+    {
+        onOutput?.Invoke("reading protected install files needs elevation — accept the UAC prompt …");
+        var psi = new ProcessStartInfo
+        {
+            FileName = _toolPath,
+            UseShellExecute = true, // required for the runas verb
+            Verb = "runas",
+            WorkingDirectory = Path.GetDirectoryName(_toolPath) ?? AppContext.BaseDirectory,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        try
+        {
+            using var proc = Process.Start(psi);
+            if (proc == null) { onOutput?.Invoke("elevated capture: failed to start"); return -1; }
+            using var reg = ct.Register(() => { try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { } });
+            await proc.WaitForExitAsync(ct);
+            return proc.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            // Win32 1223 = user declined the UAC prompt.
+            onOutput?.Invoke($"elevated capture did not run: {ex.Message}");
+            return -1;
+        }
     }
 
     private async Task<int> RunAsync(IReadOnlyList<string> args, Action<string>? onOutput, CancellationToken ct)

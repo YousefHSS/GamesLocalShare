@@ -714,11 +714,35 @@ public sealed class SkeletonWatcherService : IDisposable
             // Ensure the CIK store has keys (invokes CikExtractor elevated only if needed).
             var cikFolder = await EnsureCikFolderAsync(ct);
 
+            // Xbox game files can be readable only by an elevated process. If the install has files this
+            // (non-elevated) process can't read, capture elevated so they can be deduped instead of dumped
+            // whole into the skeleton (e.g. GameMaker titles that pack the game into one protected .exe).
+            // Only elevate when a MEANINGFUL amount is unreadable: many games (Unity) have a small
+            // ACL-locked .exe but readable bulk data, and capture fine without elevation. Elevating for a
+            // few MB isn't worth a UAC prompt; a big unreadable file (a GameMaker game's whole .exe) is.
+            long unreadable = UnreadableInstallBytes(installDir);
+            bool needsElevation = unreadable > 32L * 1024 * 1024; // 32 MB
+            if (needsElevation)
+                Report($"{name}: {unreadable / 1048576.0:F0} MB of install files need elevation to read — capturing elevated (accept the UAC prompt)");
+
             Report($"capturing skeleton for {name} …");
             var res = await _skeleton.CaptureAsync(
                 packagePath, installDir, skel, cikFolder,
                 onOutput: line => Report(line),
+                elevated: needsElevation,
                 ct: ct);
+
+            // If the elevated capture didn't run (UAC declined) or failed, fall back to a non-elevated capture
+            // so the title still gets a (larger) working skeleton rather than none.
+            if (needsElevation && !res.Ok && !res.KeyMissing)
+            {
+                Report($"{name}: elevated capture unavailable — falling back to a non-elevated capture (skeleton may be larger)");
+                res = await _skeleton.CaptureAsync(
+                    packagePath, installDir, skel, cikFolder,
+                    onOutput: line => Report(line),
+                    ct: ct);
+                needsElevation = false; // don't elevate the retries below
+            }
 
             // A freshly installed title's content key is provisioned during its install, so a CIK store
             // dumped earlier won't have it. Re-run CikExtractor to pull the current device keys and retry
@@ -736,6 +760,7 @@ public sealed class SkeletonWatcherService : IDisposable
                     res = await _skeleton.CaptureAsync(
                         packagePath, installDir, skel, cikFolder,
                         onOutput: line => Report(line),
+                        elevated: needsElevation,
                         ct: ct);
                 }
             }
@@ -753,6 +778,7 @@ public sealed class SkeletonWatcherService : IDisposable
                     res = await _skeleton.CaptureAsync(
                         packagePath, installDir, skel, cikFolder,
                         onOutput: line => Report(line),
+                        elevated: needsElevation,
                         ct: ct);
                 }
                 else
@@ -1057,6 +1083,30 @@ public sealed class SkeletonWatcherService : IDisposable
     {
         try { return Directory.GetFiles(dir, "*.xvi").Length > 0; }
         catch { return false; }
+    }
+
+    /// <summary>Total bytes of files under <paramref name="installDir"/> that this (non-elevated) process
+    /// cannot open for read — Xbox protects some game files so only an elevated/high-integrity process can
+    /// read them. Used to decide whether capture must run elevated so those files are deduped instead of
+    /// dumped whole into the skeleton. File size (metadata) is readable even when the data is ACL-blocked;
+    /// sharing/other IO errors are not counted (they're not an ACL block).</summary>
+    private static long UnreadableInstallBytes(string installDir)
+    {
+        long total = 0;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories))
+            {
+                try { using var _ = File.Open(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); }
+                catch (UnauthorizedAccessException)
+                {
+                    try { total += new FileInfo(f).Length; } catch { }
+                }
+                catch { /* sharing / transient — not an ACL block */ }
+            }
+        }
+        catch { }
+        return total;
     }
 
     private static bool IsGuid(string s) => Guid.TryParse(s, out _);
