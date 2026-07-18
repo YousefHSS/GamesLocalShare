@@ -591,7 +591,11 @@ public sealed class SkeletonWatcherService : IDisposable
     /// reliable even when the install folder carries no SYSAPPID ACE. As a fallback, when no content GUID is
     /// available, the PackageFamilyName from the folder ACL is matched against the cache filename
     /// (<c>&lt;Name&gt;_…__&lt;PublisherHash&gt;.msixvc</c>).</para>
-    /// <para>When several versions match, the highest version wins (newest write time as a tiebreaker).
+    /// <para>Prefers the package whose version <b>exactly matches the installed version</b>
+    /// (<c>Content\appxmanifest.xml</c>). If the install's version is known but only a <i>different</i>
+    /// version is cached, returns null instead of capturing from the mismatched package — a version-drifted
+    /// capture yields a near-useless whole-package skeleton (e.g. Rematch v1.204.5.0 pkg vs v1.204.6.0 install
+    /// → 10 GB skeleton). When the install version can't be read, falls back to the highest cached version.
     /// Returns null if none match.</para>
     /// </summary>
     private string? LocatePackage(string installDir)
@@ -623,9 +627,12 @@ public sealed class SkeletonWatcherService : IDisposable
                 suffix = "__" + pfn.Substring(us + 1);     // "__<PublisherHash>" (before .msixvc)
             }
 
-            string? best = null;
+            // The installed version drives an EXACT match; a mismatched-version package is never captured.
+            var installedVer = GetInstalledVersion(installDir); // null when the manifest can't be read
+
+            string? best = null, exact = null;
             Version? bestVer = null;
-            DateTime bestTime = DateTime.MinValue;
+            DateTime bestTime = DateTime.MinValue, exactTime = DateTime.MinValue;
 
             foreach (var f in Directory.EnumerateFiles(_cacheRoot, "*.msixvc", SearchOption.AllDirectories))
             {
@@ -647,15 +654,40 @@ public sealed class SkeletonWatcherService : IDisposable
                 DateTime t;
                 try { t = File.GetLastWriteTimeUtc(f); } catch { t = DateTime.MinValue; }
 
+                // Exact installed-version match (newest write among equals wins).
+                if (installedVer != null && ver != null && NormVer(ver) == NormVer(installedVer)
+                    && (exact == null || t > exactTime))
+                {
+                    exact = f; exactTime = t;
+                }
+
                 bool better = best == null
                     || (ver != null && (bestVer == null || ver > bestVer))
                     || (ver == null && bestVer == null && t > bestTime);
                 if (better) { best = f; bestVer = ver; bestTime = t; }
             }
-            return best;
+
+            if (exact != null) return exact;
+
+            // Install version known but only a different-version package is cached: do NOT capture from it
+            // (version drift → useless whole-package skeleton). Wait for the matching package to be cached.
+            if (installedVer != null && best != null && bestVer != null && NormVer(bestVer) != NormVer(installedVer))
+            {
+                Report($"{Path.GetFileName(installDir)}: cached package is v{bestVer} but install is v{installedVer} — " +
+                       "waiting for the matching-version package (not capturing from a mismatched version)");
+                return null;
+            }
+            if (installedVer != null && best == null) return null; // nothing cached yet for this title
+
+            return best; // install version unknown -> legacy highest-version behaviour
         }
         catch { return null; }
     }
+
+    /// <summary>Normalises a version to 4 components (missing parts as 0) so a 3-part manifest version and a
+    /// 4-part package-filename version compare equal.</summary>
+    private static Version NormVer(Version v) =>
+        new Version(v.Major, v.Minor, Math.Max(0, v.Build), Math.Max(0, v.Revision));
 
     private async Task TryCaptureAsync(string name, string installDir, string packagePath)
     {
