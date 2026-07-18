@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using GamesLocalShare.Models;
 
 namespace GamesLocalShare.Services;
 
@@ -24,6 +25,10 @@ namespace GamesLocalShare.Services;
 public sealed class SkeletonService
 {
     private readonly string _toolPath;
+
+    /// <summary>How much CPU capture/reconstruct may use — sets the xvdtool per-chunk throttle and the
+    /// child process priority. Updated from <see cref="Models.AppSettings.CaptureCpuLimit"/>.</summary>
+    public Models.CaptureCpuLimit CpuLimit { get; set; } = Models.CaptureCpuLimit.Balanced;
 
     public SkeletonService() => _toolPath = ResolveTool();
 
@@ -52,6 +57,7 @@ public sealed class SkeletonService
             "--cikfolder", cikFolder,
             "--install", installPath,
             "--skel", skeletonPath,
+            "--throttle", CpuLimit.ThrottleMs().ToString(),
             encryptedPackagePath,
         };
 
@@ -229,6 +235,9 @@ public sealed class SkeletonService
 
         if (!proc.Start())
             throw new InvalidOperationException($"Failed to start xvdtool ({_toolPath})");
+
+        // Deprioritise the CPU-heavy capture/reconstruct so the machine stays responsive.
+        try { proc.PriorityClass = CpuLimit.Priority(); } catch { }
 
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();

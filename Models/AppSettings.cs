@@ -26,6 +26,35 @@ public enum XboxTransferMethod
     Basic = 2,
 }
 
+/// <summary>How much CPU a skeleton capture may consume (trades speed for system responsiveness).</summary>
+public enum CaptureCpuLimit
+{
+    /// <summary>Full speed, normal priority — fastest capture, uses a full core.</summary>
+    Full = 0,
+    /// <summary>Below-normal priority + light throttle — stays responsive (default).</summary>
+    Balanced = 1,
+    /// <summary>Idle priority + heavier throttle — slowest, minimal CPU impact.</summary>
+    Low = 2,
+}
+
+/// <summary>Maps a <see cref="CaptureCpuLimit"/> to the xvdtool per-chunk throttle (ms) and process priority.</summary>
+public static class CaptureCpuLimitExtensions
+{
+    public static int ThrottleMs(this CaptureCpuLimit l) => l switch
+    {
+        CaptureCpuLimit.Balanced => 2,
+        CaptureCpuLimit.Low => 8,
+        _ => 0,
+    };
+
+    public static System.Diagnostics.ProcessPriorityClass Priority(this CaptureCpuLimit l) => l switch
+    {
+        CaptureCpuLimit.Balanced => System.Diagnostics.ProcessPriorityClass.BelowNormal,
+        CaptureCpuLimit.Low => System.Diagnostics.ProcessPriorityClass.Idle,
+        _ => System.Diagnostics.ProcessPriorityClass.Normal,
+    };
+}
+
 /// <summary>
 /// Application settings that persist across sessions
 /// </summary>
@@ -124,6 +153,14 @@ public class AppSettings
     /// (default) uses Smart when available and falls back to Basic with a warning.
     /// </summary>
     public XboxTransferMethod XboxTransferMethod { get; set; } = XboxTransferMethod.Auto;
+
+    /// <summary>
+    /// How much CPU skeleton capture may use. <see cref="CaptureCpuLimit.Full"/> runs at full speed;
+    /// <see cref="CaptureCpuLimit.Balanced"/> (default) runs at below-normal priority and throttles the
+    /// hash/decrypt loops so the machine stays responsive; <see cref="CaptureCpuLimit.Low"/> throttles
+    /// harder at idle priority (slower capture, minimal CPU impact).
+    /// </summary>
+    public CaptureCpuLimit CaptureCpuLimit { get; set; } = CaptureCpuLimit.Balanced;
 
     /// <summary>
     /// List of external drive libraries to scan for games

@@ -20,6 +20,7 @@ const DEFAULTS: AppSettingsForm = {
   cikExtractorPath: '',
   xboxSingleCopyAutoStart: true,
   xboxTransferMethod: 'Auto',
+  captureCpuLimit: 'Balanced',
   steamGridDbApiKey: '',
 };
 
@@ -294,6 +295,39 @@ export default function SettingsModal({
                         checked={form.xboxTransferMethod === opt.v}
                         onChange={() => set('xboxTransferMethod', opt.v)}
                         disabled={!payload.isWindows}
+                      />
+                      <span>
+                        <span className="text-sm text-slate-200">{opt.t}</span>
+                        <span className="block text-xs text-slate-500">{opt.d}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm text-slate-200">Capture CPU usage</label>
+                  <p className="text-xs text-slate-500">
+                    How much CPU skeleton capture may use. Lower settings keep the PC responsive but capture takes longer.
+                  </p>
+                  {([
+                    { v: 'Full', t: 'Full speed', d: 'Fastest capture, uses a full CPU core.' },
+                    { v: 'Balanced', t: 'Balanced (recommended)', d: 'Below-normal priority with a light throttle — stays responsive.' },
+                    { v: 'Low', t: 'Low impact', d: 'Idle priority, heavier throttle — slowest, minimal CPU impact.' },
+                  ] as const).map(opt => (
+                    <label
+                      key={opt.v}
+                      className={`flex items-start gap-2 rounded border px-3 py-2 cursor-pointer ${
+                        form.captureCpuLimit === opt.v
+                          ? 'border-blue-500 bg-blue-900/20'
+                          : 'border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="captureCpuLimit"
+                        className="mt-0.5 accent-blue-500"
+                        checked={form.captureCpuLimit === opt.v}
+                        onChange={() => set('captureCpuLimit', opt.v)}
                       />
                       <span>
                         <span className="text-sm text-slate-200">{opt.t}</span>

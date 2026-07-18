@@ -1113,6 +1113,7 @@ public class InteropBridge : IDisposable
                 cikExtractorPath = s.CikExtractorPath ?? string.Empty,
                 xboxSingleCopyAutoStart = s.XboxSingleCopyAutoStart,
                 xboxTransferMethod = s.XboxTransferMethod.ToString(),
+                captureCpuLimit = s.CaptureCpuLimit.ToString(),
                 steamGridDbApiKey = s.SteamGridDbApiKey ?? string.Empty,
             },
             hiddenGames,
@@ -1267,6 +1268,12 @@ public class InteropBridge : IDisposable
             var m = vMethod.GetString();
             if (Enum.TryParse<XboxTransferMethod>(m, out var parsed))
                 s.XboxTransferMethod = parsed;
+        }
+
+        if (payload.TryGetProperty("captureCpuLimit", out var vCpu))
+        {
+            if (Enum.TryParse<CaptureCpuLimit>(vCpu.GetString(), out var parsedCpu))
+                s.CaptureCpuLimit = parsedCpu;
         }
 
         if (payload.TryGetProperty("startWithWindows", out var v7))

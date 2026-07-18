@@ -44,6 +44,10 @@ public sealed class SkeletonCaptureProgress
     /// <summary>Human-readable current phase, e.g. "Matching installed files".</summary>
     public string Phase { get; set; } = string.Empty;
 
+    /// <summary>Exact overall progress 0-100 when the engine reports it (xvdtool "PROGRESS n"); -1 when
+    /// unknown, in which case the client falls back to the coarse <see cref="Step"/> bar. Monotonic.</summary>
+    public int Percent { get; set; } = -1;
+
     /// <summary>Unix epoch ms when the capture started, so the client can show elapsed time.</summary>
     public long StartedAtMs { get; set; }
 }

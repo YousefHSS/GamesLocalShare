@@ -24,6 +24,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly XboxNetworkSender _xboxNetworkSender;
     // Skeleton capture watcher (Windows only; null on other platforms).
     private readonly SkeletonWatcherService? _skeletonWatcher;
+    private readonly SkeletonService? _skeletonService;
     // In-app LAN cache proxy (Windows only; null on other platforms).
     private readonly XboxCacheProxyService? _cacheProxy;
     private readonly AppSettings _settings;
@@ -219,8 +220,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var cikExtractor = !string.IsNullOrWhiteSpace(_settings.CikExtractorPath)
                 ? _settings.CikExtractorPath
                 : (Directory.Exists(legacyCikExtractor) ? legacyCikExtractor : string.Empty);
+            _skeletonService = new SkeletonService { CpuLimit = _settings.CaptureCpuLimit };
             _skeletonWatcher = new SkeletonWatcherService(
-                new SkeletonService(),
+                _skeletonService,
                 cacheRoot: _settings.XboxPackageCacheRoot,
                 cikExtractorPath: cikExtractor);
             SkeletonDropFolder = _skeletonWatcher.DropFolder;
@@ -801,6 +803,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     LogMessageType.Info);
             }
         }
+
+        // Apply the capture CPU limit immediately (affects the next capture/reconstruct).
+        if (_skeletonService != null) _skeletonService.CpuLimit = _settings.CaptureCpuLimit;
     }
 
     /// <summary>
@@ -3645,14 +3650,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // the bar only ever advances; the file-matching phase (3) is the long one and is where it visibly dwells.
     private static readonly (string needle, int step, string phase)[] CapturePhaseMarkers =
     {
+        // Structure-capture engine phases (current).
+        ("CAPTURE: VERIFIED", 5, "Verifying result"),
+        ("[4/4]",             4, "Writing skeleton"),
+        ("[3/4]",             3, "Matching installed files"),
+        ("[2/4]",             2, "Reading package"),
+        ("[1/4]",             1, "Reading package"),
+        // Legacy batch-capture phases (fallback path / older bundled tool).
         ("SELF-VERIFY",               5, "Verifying result"),
-        ("rebuilt sha",               5, "Verifying result"),
         ("skeleton.skl size",         4, "Writing skeleton"),
-        ("skeleton bytes",            4, "Writing skeleton"),
-        ("files matched",             4, "Writing skeleton"),
         ("genuine structural region", 3, "Matching installed files"),
         ("hashing genuine package",   2, "Hashing package"),
-        ("Capturing skeleton:",       2, "Hashing package"),
         ("Verifying data hashes",     1, "Reading package"),
         ("Loading file",              1, "Reading package"),
     };
@@ -3676,13 +3684,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var cur = SkeletonCapturing;
         if (cur == null) return; // markers only count while a capture is active
+
+        // Exact progress from the engine ("PROGRESS n") — drives a real determinate bar. Monotonic.
+        if (line.StartsWith("PROGRESS ", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(line.AsSpan(9).Trim(), out var pctVal))
+        {
+            pctVal = Math.Clamp(pctVal, 0, 100);
+            if (pctVal > cur.Percent)
+                SkeletonCapturing = new SkeletonCaptureProgress
+                {
+                    Name = cur.Name, Step = cur.Step, TotalSteps = cur.TotalSteps,
+                    Phase = cur.Phase, Percent = pctVal, StartedAtMs = cur.StartedAtMs,
+                };
+            return;
+        }
+
         foreach (var (needle, step, phase) in CapturePhaseMarkers)
         {
             if (line.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (step > cur.Step) // monotonic — never regress (e.g. a CIK-refresh retry restarts xvdtool's output)
                 SkeletonCapturing = new SkeletonCaptureProgress
                 {
-                    Name = cur.Name, Step = step, TotalSteps = cur.TotalSteps, Phase = phase, StartedAtMs = cur.StartedAtMs,
+                    Name = cur.Name, Step = step, TotalSteps = cur.TotalSteps, Phase = phase,
+                    Percent = cur.Percent, StartedAtMs = cur.StartedAtMs,
                 };
             return;
         }

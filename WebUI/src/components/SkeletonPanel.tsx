@@ -29,7 +29,11 @@ function StatusPill({ on, onLabel, offLabel }: { on: boolean; onLabel: string; o
 
 function CapturingCard({ cap, now }: { cap: SkeletonCaptureProgress; now: number }) {
   const total = cap.totalSteps || 5;
-  const pct = Math.min(100, Math.max(0, (cap.step / total) * 100));
+  // Prefer the engine's exact percent (a real progress bar); fall back to the coarse step bar when unknown.
+  const hasPercent = typeof cap.percent === 'number' && cap.percent >= 0;
+  const pct = hasPercent
+    ? Math.min(100, Math.max(0, cap.percent))
+    : Math.min(100, Math.max(0, (cap.step / total) * 100));
   const elapsed = Math.max(0, Math.floor((now - cap.startedAtMs) / 1000));
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
@@ -51,7 +55,7 @@ function CapturingCard({ cap, now }: { cap: SkeletonCaptureProgress; now: number
         </div>
       </div>
       <p className="text-[11px] text-blue-300/70 mt-1">
-        Step {cap.step}/{total} · {cap.phase}
+        {hasPercent ? `${pct}% · ${cap.phase}` : `Step ${cap.step}/${total} · ${cap.phase}`}
       </p>
     </div>
   );

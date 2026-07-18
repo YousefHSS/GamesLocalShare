@@ -152,6 +152,7 @@ export interface SkeletonCaptureProgress {
   step: number;        // 1..totalSteps, monotonic
   totalSteps: number;  // 5
   phase: string;       // e.g. "Matching installed files"
+  percent: number;     // exact 0..100 from the engine; -1 = unknown (fall back to step bar)
   startedAtMs: number; // epoch ms, for elapsed time
 }
 
@@ -408,6 +409,7 @@ export interface AppSettingsForm {
   cikExtractorPath: string;
   xboxSingleCopyAutoStart: boolean;
   xboxTransferMethod: 'Auto' | 'Smart' | 'Basic';
+  captureCpuLimit: 'Full' | 'Balanced' | 'Low';
   steamGridDbApiKey?: string;
 }
 
