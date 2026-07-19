@@ -140,4 +140,16 @@
     <None Remove="tools\**" />
   </ItemGroup>
 
+  <!-- In-process reference to the bundled LibXboxOne (streaming skeletonizer path). Compile-time ONLY
+       (Private=false): the DLL is NOT copied next to the exe. At runtime it and its DiscUtils/BouncyCastle
+       deps are resolved lazily from tools\xvdtool by Services.XvdInProcess.EnsureResolver, so there is a
+       single copy of these assemblies (shared with the XVDTool.exe subprocess) and they only load when
+       streaming capture is actually used. Keep this in sync with the bundled tools\xvdtool\LibXboxOne.dll. -->
+  <ItemGroup>
+    <Reference Include="LibXboxOne">
+      <HintPath>tools\xvdtool\LibXboxOne.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
 </Project>

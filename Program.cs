@@ -10,6 +10,11 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Install the in-process assembly resolver FIRST — before any method that references a LibXboxOne
+        // type gets JIT-compiled (the JIT resolves the assembly as it compiles such a method, which happens
+        // before that method's body runs). It's a no-op until a LibXboxOne type is first used.
+        Services.XvdInProcess.EnsureResolver();
+
         // Headless helper mode: run an elevated PowerShell script on behalf of a
         // non-elevated instance. Elevating our own exe (instead of powershell.exe)
         // makes the UAC prompt show the app's name and icon. Exits without
@@ -24,6 +29,21 @@ class Program
         if (args.Length >= 1 && (args[0] == "--register-startup" || args[0] == "--unregister-startup"))
         {
             var ok = Services.StartupHelper.SetStartupEnabled(args[0] == "--register-startup");
+            Environment.Exit(ok ? 0 : 1);
+        }
+
+        // Headless self-test: confirm the bundled LibXboxOne (+ its DiscUtils/BouncyCastle deps) loads
+        // in-process from tools\xvdtool for the streaming skeletonizer path. Writes the report to the path in
+        // args[1] (or a temp file) since a GUI-subsystem exe has no attached console; exits with the result.
+        if (args.Length >= 1 && args[0] == "--selftest-xvd-inprocess")
+        {
+            var outPath = args.Length >= 2 ? args[1]
+                : Path.Combine(Path.GetTempPath(), "gls-xvd-inprocess-selftest.txt");
+            string report; bool ok;
+            try { report = Services.XvdInProcess.SelfTest(out ok); }
+            catch (Exception ex) { ok = false; report = $"FAIL (uncaught): {ex}"; }
+            try { File.WriteAllText(outPath, report); } catch { }
+            Console.WriteLine(report);
             Environment.Exit(ok ? 0 : 1);
         }
 
