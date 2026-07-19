@@ -251,6 +251,35 @@ package). Storage win confirmed: materialize ~1–4.5% of the package, not ~200%
   enough to not false-positive legit large skeletons, e.g. Buckshot 59%).
 - **B3 (later): streaming** — drop file-pages during download to avoid the double-storage peak.
 
+### B3 Milestone 0 — proxy-bridge de-risk (RESULT 2026-07-19: PASS)
+
+The make-or-break unknown for the proxy integration — *can the Store's OUT-OF-ORDER, encrypted, package-space
+ranged GETs be turned into the strictly-ascending decrypted feed `StreamingSkeletonizer` needs, within a
+bounded buffer, and still reconstruct byte-identically?* — is answered **yes**. Built (xvdtool
+`skeleton-streaming`):
+- `LibXboxOne/StreamingPackageDecryptor.cs` — bounded reorder buffer keyed by absolute offset; page-local
+  decrypt via an injected delegate (`XvdFile.ReadDecryptedRange` — needs only the buffered structural front +
+  the page); drains ascending into `StreamingSkeletonizer.Feed`; tracks peak-resident + overflow.
+- `StreamingSkeletonizer.Finalize` — added an optional `refetchU` delegate: unmatched dropped files are pulled
+  back into the skeleton as kept ranges (the post-install ranged-refetch). Byte-identical to the old path when
+  nothing needs refetching, so `--streamsim` is unaffected.
+- `--streambridge` harness — feeds the genuine ENCRYPTED `.msixvc` out-of-order (64 MB ahead-window modelling
+  parallel ranged GETs + backpressure), self-extracts the embedded FS as a synthetic install, reconstruct-
+  verifies. On encrypted **CloneDrone** (1697 MB U, Fixed, real CIK):
+  - **byte-identical** reconstruct (`U' sha == U sha`), skeleton ~15–30 MB;
+  - **peak resident ≈ 89 MB** (64 MB reorder buf + ~25 MB skeleton) vs the 1697 MB package — full package
+    never held;
+  - **overflow → fallback** fires correctly when the reorder buffer exceeds its cap (a too-aggressive random
+    model without backpressure hit 257 MB > 256 MB cap → the proxy would abort streaming and fall back to the
+    tee);
+  - **refetch path** exercised by deleting one dropped file from the install → "refetched 1 … Assembly-CSharp.dll",
+    reconstruct still byte-identical.
+
+Next: B3 M1 (finalize `StreamingPackageDecryptor` API + in-process `LibXboxOne.dll` reference from the app),
+then B3 M2 (wire into `XboxCacheProxyService` behind an off-by-default `XboxStreamingCapture` setting: front
+prefetch + CIK acquisition/fallback-to-tee + finalize handoff). Serving of streamed titles (reconstruct-on-
+demand) is a deferred follow-up. Plan: `~/.claude/plans/wild-wishing-milner.md`.
+
 Open follow-up: encrypted path matches 234/235 (1→skeleton, harmless) — likely decrypt-on-the-fly vs `-eu`
 page discrepancy; confirm via `--verify-full`.
 
