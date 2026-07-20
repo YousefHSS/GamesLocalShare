@@ -327,7 +327,20 @@ Wired `StreamingCaptureController` into `XboxCacheProxyService` behind `XboxStre
 `✓ Donut County v1.0.4.0: streamed skeleton 8.66 MB captured (no package stored)`. **No `.msixvc` ever written
 to the cache** (storage win), `peak 0 MB` reorder (in-order feed), CDN-refetch of 3 unmatched drops worked live.
 
-*Fix that made it pass (`73b65c7`):* the first attempt aborted — streaming arms MID-download, so feeding the
+**1× BANDWIDTH (2026-07-20, app `fd032b1`+`f80364f`):** the initial pass worked but re-downloaded the whole
+package for capture (2× bandwidth) — unacceptable for a LAN-cache app whose point is to reduce downloading.
+Reworked to reuse the Store's OWN download: buffer the Store's forwarded bytes, arm the controller FROM the
+buffered front (`StreamOnStoreBytes`/`ArmFromBuffer`, no separate front download), then feed the Store's ongoing
+bytes straight into the capture; only genuine gaps the Store never sends (trailing padding + 4 KB tail) are
+refetched. Live re-test on Donut: `STREAM armed … from the Store's own bytes — 1x bandwidth` → `ready` →
+`finalized ok (kept 6.1 MB, refetched 3, peak 33 MB)` → same 8.66 MB skeleton, **no package on disk, no gap-fill
+line** (Store sent every range) → **~1× download** (only 3 small refetched files + 4 KB tail extra). `peak 33 MB`
+= the Store's real parallel-request spread, well under the 256 MB reorder cap. Two bugs fixed en route:
+(1) front assembled with a zero-hole because coverage was tracked separately from the deduped byte store
+(`f80364f`: compute FrontContig from PreArm's actual contiguous bytes, keep the longest chunk per offset);
+overflow/abort still falls back to the tee. Superseded the 2× SequentialFeed.
+
+*Fix that made the FIRST (2×) version pass (`73b65c7`):* the first attempt aborted — streaming arms MID-download, so feeding the
 Store's out-of-order live bytes piled high-offset pages into the 128 MB reorder buffer while the cursor was at 0
 → overflow → abort → tee fallback. Fix: once armed, a dedicated `SequentialFeed` fetches the object in ascending
 8 MB chunks (front reused) and feeds the controller IN ORDER (drains immediately, no reorder pressure),
