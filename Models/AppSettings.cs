@@ -171,6 +171,16 @@ public class AppSettings
     public bool CaptureFromCache { get; set; } = true;
 
     /// <summary>
+    /// EXPERIMENTAL. When true, the LAN cache proxy captures a title's skeleton by <b>streaming</b> the install
+    /// download — decrypting and classifying pages as they pass through the proxy so the full encrypted package
+    /// is never written to disk (avoids the download-time 2× storage peak). Requires the matching CIK to already
+    /// be in the store when the download starts; when it isn't (or anything goes wrong) the proxy falls back to
+    /// the normal sparse-.part tee + capture-after-install, so this is strictly a best-effort optimization with
+    /// no effect on the download. Default false (off) — the proven tee path is unchanged until enabled.
+    /// </summary>
+    public bool XboxStreamingCapture { get; set; }
+
+    /// <summary>
     /// List of external drive libraries to scan for games
     /// </summary>
     public List<ExternalLibrary> ExternalLibraries { get; set; } = [];
@@ -317,7 +327,8 @@ public class AppSettings
             $"XboxPackageCacheRoot={XboxPackageCacheRoot ?? string.Empty}",
             $"CikExtractorPath={CikExtractorPath ?? string.Empty}",
             $"XboxSingleCopyAutoStart={XboxSingleCopyAutoStart}",
-            $"XboxTransferMethod={XboxTransferMethod}"
+            $"XboxTransferMethod={XboxTransferMethod}",
+            $"XboxStreamingCapture={XboxStreamingCapture}"
         };
         for (int i = 0; i < ExternalLibraries.Count; i++)
         {
@@ -381,6 +392,9 @@ public class AppSettings
                 case "XboxTransferMethod":
                     settings.XboxTransferMethod = Enum.TryParse<XboxTransferMethod>(value, out var xtm)
                         ? xtm : XboxTransferMethod.Auto;
+                    break;
+                case "XboxStreamingCapture":
+                    settings.XboxStreamingCapture = bool.TryParse(value, out var xsc) && xsc;
                     break;
                 case "HiddenGameIds":
                     if (!string.IsNullOrEmpty(value))
