@@ -327,6 +327,22 @@ Wired `StreamingCaptureController` into `XboxCacheProxyService` behind `XboxStre
 `✓ Donut County v1.0.4.0: streamed skeleton 8.66 MB captured (no package stored)`. **No `.msixvc` ever written
 to the cache** (storage win), `peak 0 MB` reorder (in-order feed), CDN-refetch of 3 unmatched drops worked live.
 
+**DECOUPLED + NO-TEE-AFTER-CAPTURE (2026-07-20, app `af2bb11`+`d6b529c`):** two follow-ups after the 1× landing.
+(1) *Don't throttle the download:* the capture decrypted each chunk inline on the download threads, all
+serialized on the controller lock → a fast download was capped at single-thread decrypt speed. Fixed: download
+threads copy+enqueue into a bounded `ChunkQueue` (256 MB) and move on; one background consumer thread
+decrypts/feeds the controller. Download runs full speed; `Add` only soft-backpressures if the backlog fills.
+Confirmed live: reorder `peak` rose 33→49→88 MB across the change = the download now runs well AHEAD of the
+capture (not throttled). (2) *Bug — package written to disk after capture:* once streaming parked/finalized,
+`TryGetStream` returned null → the proxy teed the post-install verify reads → its gap-fill downloaded the whole
+302 MB package (silently; FILL logs aren't persisted). Fixed (`d6b529c`): `TryGetStream` returns the state even
+when parked, and a captured object returns an inert sentinel → future MISSes serve transiently from the CDN,
+never teed; only an abandoned arm tees. `_streamCaptured` persists across Stop/Start in-session. Re-verified:
+armed→ready 31 s, **no `.msixvc` on disk even after the verify pass**, byte-identical 8.66 MB skeleton.
+Remaining known cost: post-capture verify/peer reads re-fetch from the CDN transiently (the deferred
+reconstruct-on-demand serving problem). Single-thread decrypt (~few MB/s here) means the background capture
+lingers ~30–70 s after a fast download — a future optimization is parallel page decrypt.
+
 **1× BANDWIDTH (2026-07-20, app `fd032b1`+`f80364f`):** the initial pass worked but re-downloaded the whole
 package for capture (2× bandwidth) — unacceptable for a LAN-cache app whose point is to reduce downloading.
 Reworked to reuse the Store's OWN download: buffer the Store's forwarded bytes, arm the controller FROM the
