@@ -72,13 +72,22 @@
     <None Include=".github\workflows\release.yml" />
   </ItemGroup>
 
-  <!-- Build WebUI (React) before building the C# project, then copy dist to Assets/webui -->
-  <Target Name="BuildWebUI" BeforeTargets="BeforeBuild" Condition="Exists('WebUI\package.json')">
+  <!-- Build the React UI and embed the freshly-built bundle before the C# build (so the AvaloniaResource
+       embed picks up the fresh files). Runs on EVERY build (no Inputs/Outputs) so a WebUI source change can
+       never ship a stale UI. vite:singlefile inlines all JS/CSS into index.html, so that one file IS the
+       bundle. The build FAILS loudly if npm didn't produce it, rather than silently shipping stale. -->
+  <Target Name="BuildWebUI" BeforeTargets="BeforeBuild;BeforeRebuild" Condition="Exists('WebUI\package.json')">
+    <Message Importance="high" Text="BuildWebUI: building the React UI (npm run build) …" />
     <Exec Command="npm run build" WorkingDirectory="WebUI" />
+    <Error Condition="!Exists('WebUI\dist\index.html')"
+           Text="BuildWebUI: WebUI\dist\index.html was not produced — the npm build failed or produced no output." />
     <ItemGroup>
       <_WebUIDist Include="WebUI\dist\**\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(_WebUIDist)" DestinationFiles="@(_WebUIDist->'Assets\webui\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <!-- Always overwrite (no SkipUnchangedFiles) so the embedded resource exactly matches the fresh build. -->
+    <Copy SourceFiles="@(_WebUIDist)"
+          DestinationFiles="@(_WebUIDist->'Assets\webui\%(RecursiveDir)%(Filename)%(Extension)')"
+          OverwriteReadOnlyFiles="true" />
   </Target>
 
   <ItemGroup>
