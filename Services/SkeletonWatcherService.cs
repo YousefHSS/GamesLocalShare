@@ -858,9 +858,9 @@ public sealed class SkeletonWatcherService : IDisposable
             if (!res.Ok && res.KeyMissing && _cikExtractorPath != null)
             {
                 var which = string.IsNullOrEmpty(res.MissingCik) ? "" : res.MissingCik + " ";
-                Report($"{name}: content key {which}not in the CIK store — refreshing via CikExtractor (accept the UAC prompt) …");
-                var refreshed = await _cikRunner.EnsureCiksAsync(
-                    _cikExtractorPath, _cikStore, line => Report(line), ct, forceRefresh: true);
+                Report($"{name}: content key {which}not in the CIK store — refreshing via CikExtractor …");
+                // Shared, rate-limited refresh so batch + streaming don't each prompt for UAC.
+                var refreshed = await Task.Run(RefreshCiks, ct);
                 if (!string.IsNullOrEmpty(refreshed))
                 {
                     cikFolder = refreshed!;
@@ -929,19 +929,38 @@ public sealed class SkeletonWatcherService : IDisposable
         }
     }
 
+    private DateTime _lastCikForceRefreshUtc = DateTime.MinValue;
+    private readonly object _cikRefreshLock = new();
+    private static readonly TimeSpan CikRefreshCooldown = TimeSpan.FromMinutes(10);
+
     /// <summary>Force-refreshes the CIK store via CikExtractor (elevated) and returns the folder now holding the
     /// keys, or null. Synchronous — used by the streaming proxy when a title's content key is missing so it can
-    /// be fetched mid-download and the capture retried. Runs on a background thread (blocks on the UAC prompt).</summary>
+    /// be fetched mid-download and the capture retried.
+    /// <para>Rate-limited: CikExtractor dumps <b>all</b> the device's keys in one run, so back-to-back installs
+    /// (or several titles arming at once) share a single elevated run instead of prompting for UAC each time.
+    /// Within the cooldown it reuses the store just populated, without prompting.</para></summary>
     public string? RefreshCiks()
     {
         if (string.IsNullOrEmpty(_cikExtractorPath)) return null;
-        try
+        lock (_cikRefreshLock)
         {
-            return _cikRunner
-                .EnsureCiksAsync(_cikExtractorPath!, _cikStore, l => Report(l), CancellationToken.None, forceRefresh: true)
-                .GetAwaiter().GetResult();
+            try
+            {
+                if (DateTime.UtcNow - _lastCikForceRefreshUtc < CikRefreshCooldown)
+                {
+                    // Reuse the store we just dumped (no prompt) — all device keys are already in it.
+                    return _cikRunner
+                        .EnsureCiksAsync(_cikExtractorPath!, _cikStore, null, CancellationToken.None, forceRefresh: false)
+                        .GetAwaiter().GetResult();
+                }
+                var folder = _cikRunner
+                    .EnsureCiksAsync(_cikExtractorPath!, _cikStore, l => Report(l), CancellationToken.None, forceRefresh: true)
+                    .GetAwaiter().GetResult();
+                _lastCikForceRefreshUtc = DateTime.UtcNow;
+                return folder;
+            }
+            catch (Exception ex) { Report($"CIK refresh failed: {ex.Message}"); return null; }
         }
-        catch (Exception ex) { Report($"CIK refresh failed: {ex.Message}"); return null; }
     }
 
     /// <summary>Resolves the folder of .cik files to pass to xvdtool, populating it on demand via
