@@ -410,6 +410,7 @@ export interface AppSettingsForm {
   xboxTransferMethod: 'Auto' | 'Smart' | 'Basic';
   captureCpuLimit: 'Full' | 'Balanced' | 'Low';
   captureFromCache: boolean;
+  xboxStreamingCapture: boolean;
   steamGridDbApiKey?: string;
 }
 

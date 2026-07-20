@@ -21,6 +21,7 @@ const DEFAULTS: AppSettingsForm = {
   xboxTransferMethod: 'Auto',
   captureCpuLimit: 'Balanced',
   captureFromCache: true,
+  xboxStreamingCapture: false,
   steamGridDbApiKey: '',
 };
 
@@ -275,6 +276,14 @@ export default function SettingsModal({
                   hint="Automatically create a skeleton for any installed game whose package is already in the cache but has no skeleton yet (on launch and periodically). Turn off to only capture on demand via the Skeletons panel's 'Capture from Cache' button; capturing a game as it installs is unaffected."
                   checked={form.captureFromCache}
                   onChange={v => set('captureFromCache', v)}
+                  disabled={!payload.isWindows}
+                />
+
+                <Toggle
+                  label="Stream skeletons during download (experimental)"
+                  hint="Capture a game's skeleton straight from its install download so the full encrypted package is never written to disk — no 2× storage peak. Reuses the download (no extra bandwidth) and needs the game's content key (fetched automatically). Any problem falls back to the normal capture, so it's safe to try. Applies to the next download."
+                  checked={form.xboxStreamingCapture}
+                  onChange={v => set('xboxStreamingCapture', v)}
                   disabled={!payload.isWindows}
                 />
 
