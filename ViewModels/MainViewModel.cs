@@ -254,6 +254,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ? AppSettings.DefaultXboxCacheDir : _settings.XboxPackageCacheRoot!;
             _cacheProxy.Log += line => _lastCacheProxyLog = line;
             _cacheProxy.Log += OnSkeletonStatus;
+            // Persist streaming-capture proxy lines to capture.log so they survive a restart (diagnostics).
+            _cacheProxy.Log += line => { if (line.StartsWith("STREAM", StringComparison.Ordinal)) _skeletonWatcher?.AppendExternalLog(line); };
             _cacheProxy.StatsChanged += OnCacheProxyStatsChanged;
 
             // Streaming skeleton capture (experimental, off unless XboxStreamingCapture): the proxy captures a

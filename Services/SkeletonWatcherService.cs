@@ -154,6 +154,19 @@ public sealed class SkeletonWatcherService : IDisposable
         h?.Invoke(line);
     }
 
+    /// <summary>Appends an external line (e.g. the proxy's streaming-capture log) to the persistent capture log
+    /// so it survives an app restart and is available for diagnostics. Does not raise <see cref="Status"/>.</summary>
+    public void AppendExternalLog(string line)
+    {
+        try
+        {
+            lock (_logLock)
+                File.AppendAllText(_captureLog,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {line}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
     /// <summary>
     /// Starts watching the given XboxGames roots plus the drop folder.
     /// Pass <see cref="XboxLibraryScanner.GetLibraryFolders"/> for the roots.
