@@ -255,6 +255,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _cacheProxy.Log += line => _lastCacheProxyLog = line;
             _cacheProxy.Log += OnSkeletonStatus;
             _cacheProxy.StatsChanged += OnCacheProxyStatsChanged;
+
+            // Streaming skeleton capture (experimental, off unless XboxStreamingCapture): the proxy captures a
+            // title's skeleton in-stream (no full package on disk); the watcher finalizes it on install-complete.
+            var streamBlobDir = Path.Combine(Path.GetTempPath(), "GamesLocalShare", "stream-blobs");
+            _cacheProxy.ConfigureStreamingCapture(_settings.XboxStreamingCapture, _skeletonWatcher.CikStore, streamBlobDir);
+            _skeletonWatcher.TryStreamedFinalize = (contentGuid, installDir, skelPath) =>
+                _cacheProxy.TryFinalizeStreamed(contentGuid, installDir, skelPath, out var status, out var served)
+                    ? (true, status, served)
+                    : (false, status, served);
         }
 
         // Initialize drive detection
@@ -808,6 +817,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Apply the capture CPU limit immediately (affects the next capture/reconstruct).
         if (_skeletonService != null) _skeletonService.CpuLimit = _settings.CaptureCpuLimit;
         if (_skeletonWatcher != null) _skeletonWatcher.CaptureFromCache = _settings.CaptureFromCache;
+        // Re-apply streaming capture (takes effect for the next object; a change mid-download won't retro-apply).
+        if (_cacheProxy != null && _skeletonWatcher != null)
+            _cacheProxy.ConfigureStreamingCapture(_settings.XboxStreamingCapture, _skeletonWatcher.CikStore,
+                Path.Combine(Path.GetTempPath(), "GamesLocalShare", "stream-blobs"));
     }
 
     /// <summary>

@@ -478,6 +478,10 @@ public sealed class SkeletonWatcherService : IDisposable
             if (!NeedsCapture(name, installDir, out var captureReason))
                 return;
 
+            // If the proxy streamed this title's skeleton during the download (no package on disk), finalize it
+            // now — no cached package to locate.
+            if (TryFinalizeStreamedCapture(name, installDir)) return;
+
             // Prefer a manually dropped package; otherwise auto-locate it in the cache.
             var pkg = FindDropFor(name) ?? LocatePackage(installDir);
             if (pkg != null)
@@ -544,6 +548,9 @@ public sealed class SkeletonWatcherService : IDisposable
                     installDir = live;
                     _installs[name] = live;
                     if (!NeedsCapture(name, installDir, out _)) return;
+                    // A streamed skeleton (parked by the proxy during the download) finalizes without any
+                    // cached package — check before polling for one.
+                    if (TryFinalizeStreamedCapture(name, installDir)) return;
                     var pkg = FindDropFor(name) ?? LocatePackage(installDir);
                     if (pkg != null)
                     {
@@ -716,6 +723,66 @@ public sealed class SkeletonWatcherService : IDisposable
     /// 4-part package-filename version compare equal.</summary>
     private static Version NormVer(Version v) =>
         new Version(v.Major, v.Minor, Math.Max(0, v.Build), Math.Max(0, v.Revision));
+
+    /// <summary>Optional hook (set by the app when streaming capture is enabled): finalize a skeleton the proxy
+    /// captured in-stream for this title. Args: content GUID (from the install's <c>.xvi</c>), install dir,
+    /// output <c>.skl</c> path. Returns whether it finalized, a status line, and the served cache path (recorded
+    /// in the restore manifest). Null when streaming isn't enabled.</summary>
+    public Func<string?, string, string, (bool ok, string status, string? servedPath)>? TryStreamedFinalize;
+
+    /// <summary>Tries to finalize a proxy-streamed skeleton for a title (no cached package needed). On success
+    /// writes the restore manifest + fires <see cref="CaptureCompleted"/>, mirroring the batch-capture path.</summary>
+    private bool TryFinalizeStreamedCapture(string name, string installDir)
+    {
+        var hook = TryStreamedFinalize;
+        if (hook == null) return false;
+        if (!_inFlight.TryAdd(name, true)) return false; // a capture is already running for this title
+        try
+        {
+            var live = ResolveLiveInstallDir(name, installDir) ?? installDir;
+            var skel = Path.Combine(SkeletonStore, name + ".skl");
+            string? contentGuid = null;
+            try
+            {
+                var xvi = Directory.EnumerateFiles(live, "*.xvi").FirstOrDefault();
+                if (xvi != null) contentGuid = Path.GetFileNameWithoutExtension(xvi);
+            }
+            catch { }
+
+            (bool ok, string status, string? servedPath) r;
+            try { r = hook(contentGuid, live, skel); }
+            catch (Exception ex) { Report($"{name}: streamed finalize error — {ex.Message}"); return false; }
+            if (!r.ok) return false;
+
+            long uSize = ReadSkelUSize(skel);
+            var ver = GetInstalledVersion(live);
+            WriteManifest(name, skel, live, r.servedPath ?? "", uSize, ver?.ToString());
+            long skelSize = 0; try { skelSize = new FileInfo(skel).Length; } catch { }
+            CaptureCompleted?.Invoke(new SkeletonCaptureResult
+            {
+                Ok = true, Verified = true, SkelPath = skel, SkelFileSize = skelSize, USize = uSize,
+            });
+            var vtag = ver != null ? $" v{ver}" : "";
+            Report($"✓ {name}{vtag}: streamed skeleton {skelSize / 1048576.0:F2} MB captured (no package stored) — {r.status}");
+            return true;
+        }
+        finally { _inFlight.TryRemove(name, out _); }
+    }
+
+    /// <summary>Reads the U size (ulen) from an XSKL header: magic(4) ver(2) blocksize(4) → ulen(8, LE) at offset 10.</summary>
+    private static long ReadSkelUSize(string skelPath)
+    {
+        try
+        {
+            using var fs = File.OpenRead(skelPath);
+            var h = new byte[18];
+            if (fs.Read(h, 0, 18) != 18) return 0;
+            if (h[0] != 88 || h[1] != 83 || h[2] != 75 || h[3] != 76) return 0; // "XSKL"
+            long v = 0; for (int i = 0; i < 8; i++) v |= (long)h[10 + i] << (8 * i);
+            return v;
+        }
+        catch { return 0; }
+    }
 
     private async Task TryCaptureAsync(string name, string installDir, string packagePath)
     {

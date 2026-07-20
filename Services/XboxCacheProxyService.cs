@@ -62,6 +62,44 @@ public sealed class XboxCacheProxyService : IDisposable
     private readonly Dictionary<string, FillState> _fills = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _fillCts;
     private Thread? _fillSweep;
+
+    // ---- streaming skeleton capture (experimental; off unless XboxStreamingCapture is set) --------------------
+    // When armed for an object, its install download is captured to a small skeleton IN-STREAM — decrypt +
+    // classify pages as they pass through the proxy, never writing the full encrypted package — instead of the
+    // sparse-.part tee. Best-effort: any failure (no CIK yet, unsupported/ non-Fixed package, reorder-buffer
+    // overflow, version-mismatch bloat) abandons streaming for that object and it falls back to the normal tee
+    // (StartFill), so there is no regression. On complete coverage the armed controller is PARKED keyed by its
+    // cache path (which contains the content GUID); the watcher finalizes it once the install is available.
+    private bool _streamingEnabled;
+    private string _streamCikFolder = "", _streamBlobDir = "";
+    private sealed class StreamState
+    {
+        public string File = "", Host = "", RawPath = "", Ip = "";
+        public long Total = -1;
+        public LibXboxOne.StreamingCaptureController? Ctl;
+        public readonly List<(long s, long e)> Fed = new();   // covered ranges (completeness + gap-fill)
+        public bool Armed, Aborted, Parked, Arming;
+        public DateTime LastWriteUtc = DateTime.UtcNow;
+        public readonly object Lock = new();
+    }
+    private readonly Dictionary<string, StreamState> _streams = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _streamAbandoned = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Arms streaming skeleton capture. When <paramref name="enabled"/>, the proxy tries to capture a
+    /// title's skeleton in-stream (no full package on disk) instead of the sparse-.part tee, loading keys from
+    /// <paramref name="cikFolder"/> and writing the growing skeleton blob under <paramref name="blobDir"/>.
+    /// Falls back to the tee whenever streaming can't be armed or aborts. Safe to call before or after Start.</summary>
+    public void ConfigureStreamingCapture(bool enabled, string? cikFolder, string? blobDir)
+    {
+        _streamingEnabled = enabled;
+        _streamCikFolder = cikFolder ?? "";
+        _streamBlobDir = string.IsNullOrWhiteSpace(blobDir)
+            ? Path.Combine(Path.GetTempPath(), "gls-stream-blobs") : blobDir!;
+        try { if (enabled) Directory.CreateDirectory(_streamBlobDir); } catch { }
+        Log?.Invoke(enabled
+            ? $"streaming capture ENABLED (cik: {_streamCikFolder}, blobs: {_streamBlobDir})"
+            : "streaming capture disabled");
+    }
     // Active peer-origin overrides: when a request's URL path contains one of these keys (e.g. a title's
     // PackageFullName / content GUID), forward it to a peer's streaming-reconstruct endpoint instead of the CDN
     // and serve it transiently (NO disk fill) - the streaming single-copy receive path.
@@ -182,6 +220,14 @@ public sealed class XboxCacheProxyService : IDisposable
                 try { if (File.Exists(st.Part)) File.Delete(st.Part); } catch { }
             }
             Interlocked.Decrement(ref Filling);
+        }
+        // Discard any in-flight streaming captures (an unfinalized skeleton is not kept).
+        List<StreamState> pendingStreams;
+        lock (_gate) { pendingStreams = _streams.Values.ToList(); _streams.Clear(); _streamAbandoned.Clear(); }
+        foreach (var st in pendingStreams)
+        {
+            lock (st.Lock) { try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
+            if (!st.Parked && !st.Aborted) Interlocked.Decrement(ref Filling);
         }
         try { _listener?.Stop(); _listener?.Close(); } catch { }
         _listener = null;
@@ -384,7 +430,7 @@ public sealed class XboxCacheProxyService : IDisposable
                 if (!viaPeer) msg.Headers.Host = hostHdr; // CDN needs the real host; the peer endpoint ignores it
                 if (!string.IsNullOrEmpty(range)) msg.Headers.TryAddWithoutValidation("Range", range);
                 long sent = 0; int sc;
-                FillState? tee = null; long teeBase = 0;
+                FillState? tee = null; long teeBase = 0; StreamState? scap = null;
                 using (var resp = _live.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
                 {
                     sc = (int)resp.StatusCode;
@@ -407,7 +453,13 @@ public sealed class XboxCacheProxyService : IDisposable
                     {
                         long objTotal = crange != null ? (crange.Length ?? -1) : (cl ?? -1);
                         teeBase = crange?.From ?? 0;
-                        if (objTotal > 0) tee = GetOrCreateFill(file, hostHdr, rawPath, ip, objTotal);
+                        if (objTotal > 0)
+                        {
+                            // Prefer streaming capture when armed; only fall back to the sparse-.part tee when
+                            // streaming isn't handling this object (disabled, cached, or abandoned).
+                            scap = TryGetStream(file, hostHdr, rawPath, ip, objTotal);
+                            if (scap == null) tee = GetOrCreateFill(file, hostHdr, rawPath, ip, objTotal);
+                        }
                         else StartFill(file, hostHdr, rawPath, ip);
                     }
 
@@ -416,17 +468,23 @@ public sealed class XboxCacheProxyService : IDisposable
                     // and aborts the response, corrupting the Store's download. Bound the copy to cl (when known).
                     long cap = cl ?? long.MaxValue;
                     using var stream = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
-                    byte[] buf = new byte[262144]; int rn; long teeOff = teeBase;
+                    byte[] buf = new byte[262144]; int rn; long absOff = teeBase;
                     while (sent < cap)
                     {
                         int want = (int)Math.Min(buf.Length, cap - sent);
                         rn = stream.Read(buf, 0, want);
                         if (rn <= 0) break;
                         res.OutputStream.Write(buf, 0, rn);
-                        if (tee != null) { TeeWrite(tee, teeOff, buf, rn); teeOff += rn; }
+                        if (tee != null) TeeWrite(tee, absOff, buf, rn);
+                        // Feed streaming capture only once armed; pre-arm bytes become gaps the streaming
+                        // gap-fill refetches. A false return means the capture aborted → stop feeding (the tee
+                        // fallback is kicked inside StreamFeed).
+                        if (scap != null && scap.Armed && !StreamFeed(scap, absOff, buf, 0, rn)) scap = null;
+                        absOff += rn;
                         sent += rn;
                     }
                     if (tee != null) EndTeeRange(tee, teeBase, sent);
+                    if (scap != null && scap.Armed) StreamEndRange(scap, teeBase, sent);
                 }
                 Interlocked.Increment(ref Misses);
                 Interlocked.Add(ref Bytes, sent);
@@ -665,6 +723,41 @@ public sealed class XboxCacheProxyService : IDisposable
                     catch (Exception ex) { Log?.Invoke($"GAP-FILL ERR {Path.GetFileName(st.File)} [{g.s},{g.e}): {ex.Message}"); }
                 }
             }
+
+            // Streaming captures: fetch ranges the Store never requested (incl. the pre-arm front) and feed
+            // them to the controller so coverage completes and the skeleton can be finalized.
+            List<StreamState> streamSnap;
+            lock (_gate) { streamSnap = _streams.Values.ToList(); }
+            foreach (var st in streamSnap)
+            {
+                if (ct.IsCancellationRequested) break;
+                bool idle; long total; List<(long s, long e)> gaps = new();
+                lock (st.Lock)
+                {
+                    if (!st.Armed || st.Aborted || st.Parked) continue;
+                    total = st.Total;
+                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > 30;
+                    if (idle) gaps = ComplementLocked(st.Fed, total);
+                }
+                if (!idle || gaps.Count == 0) continue;
+                Log?.Invoke($"STREAM gap-fill {Path.GetFileName(st.File)}: {gaps.Count} missing range(s)");
+                const long step = 8L << 20; // bounded fetch/alloc; contiguous ascending feed drains immediately
+                foreach (var g in gaps)
+                {
+                    for (long s = g.s; s < g.e && !ct.IsCancellationRequested; s += step)
+                    {
+                        long e = Math.Min(s + step, g.e);
+                        try
+                        {
+                            byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, s, e);
+                            if (data == null) { Log?.Invoke($"STREAM gap-fill failed {Path.GetFileName(st.File)} [{s},{e})"); break; }
+                            if (!StreamFeed(st, s, data, 0, data.Length)) break; // aborted → fell back to tee
+                            StreamEndRange(st, s, data.Length);
+                        }
+                        catch (Exception ex) { Log?.Invoke($"STREAM gap-fill ERR {Path.GetFileName(st.File)}: {ex.Message}"); break; }
+                    }
+                }
+            }
         }
     }
 
@@ -687,6 +780,187 @@ public sealed class XboxCacheProxyService : IDisposable
             TeeWrite(st, abs, buf, n); abs += n; got += n;
         }
         EndTeeRange(st, start, got);
+    }
+
+    // ---- streaming skeleton capture --------------------------------------
+
+    /// <summary>Returns the streaming state that should capture this object, creating it (and kicking a
+    /// background arm that prefetches the header + builds the map) on the first MISS. Returns null when
+    /// streaming is disabled, the object is already cached, or streaming was abandoned for it — the caller then
+    /// uses the sparse-.part tee.</summary>
+    private StreamState? TryGetStream(string file, string host, string rawPath, string ip, long total)
+    {
+        if (!_streamingEnabled) return null;
+        lock (_gate)
+        {
+            if (File.Exists(file) || _inProgress.Contains(file) || _fills.ContainsKey(file)) return null;
+            if (_streamAbandoned.Contains(file)) return null;
+            if (_streams.TryGetValue(file, out var existing)) return existing.Parked ? null : existing;
+            var st = new StreamState { File = file, Host = host, RawPath = rawPath, Ip = ip, Total = total, Arming = true };
+            _streams[file] = st;
+            Interlocked.Increment(ref Filling);
+            StatsChanged?.Invoke();
+            var th = new Thread(() => ArmStream(st)) { IsBackground = true, Name = "xbox-stream-arm" };
+            th.Start();
+            return st;
+        }
+    }
+
+    /// <summary>Background arm: prefetch the header front + last sector from the CDN and build the streaming
+    /// capture controller. On failure the object is abandoned (falls back to the tee via a fresh whole-object
+    /// download so it still caches).</summary>
+    private void ArmStream(StreamState st)
+    {
+        const long frontLen = 64L << 20;
+        try
+        {
+            long fl = Math.Min(frontLen, st.Total);
+            int tailLen = (int)Math.Min(4096, st.Total);
+            long tailOff = st.Total - tailLen;
+            byte[] front = FetchRangeBytes(st.Host, st.Ip, st.RawPath, 0, fl)
+                           ?? throw new IOException("front prefetch failed");
+            byte[] tail = tailLen > 0 && tailOff > fl
+                ? (FetchRangeBytes(st.Host, st.Ip, st.RawPath, tailOff, tailOff + tailLen) ?? Array.Empty<byte>())
+                : Array.Empty<byte>();
+
+            string blob = Path.Combine(_streamBlobDir, MakeBlobName(st.File));
+            var ctl = LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
+                _streamCikFolder, blob, m => Log?.Invoke(m));
+            if (ctl == null) { AbandonStream(st, "could not arm (no CIK / unsupported package)"); return; }
+            lock (st.Lock) { st.Ctl = ctl; st.Armed = true; st.Arming = false; st.LastWriteUtc = DateTime.UtcNow; }
+            Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB)");
+        }
+        catch (Exception ex) { AbandonStream(st, ex.Message); }
+    }
+
+    /// <summary>Feeds one chunk to the streaming controller. Returns false once the capture has aborted (the
+    /// caller stops feeding; a whole-object tee download is kicked so the object still caches).</summary>
+    private bool StreamFeed(StreamState st, long absOff, byte[] buf, int off, int len)
+    {
+        LibXboxOne.StreamingCaptureController? ctl;
+        lock (st.Lock) { if (st.Aborted || st.Parked || st.Ctl == null) return !st.Aborted; ctl = st.Ctl; st.LastWriteUtc = DateTime.UtcNow; }
+        if (!ctl.Feed(absOff, buf, off, len)) { StreamAbort(st, ctl.AbortReason); return false; }
+        return true;
+    }
+
+    /// <summary>Marks <c>[start,start+length)</c> covered and parks the controller when coverage reaches
+    /// <c>[0, Total)</c>.</summary>
+    private void StreamEndRange(StreamState st, long start, long length)
+    {
+        if (length <= 0) return;
+        bool complete;
+        lock (st.Lock)
+        {
+            if (st.Aborted || st.Parked) return;
+            AddRangeLocked(st.Fed, start, start + length);
+            st.LastWriteUtc = DateTime.UtcNow;
+            complete = st.Total > 0 && st.Fed.Count == 1 && st.Fed[0].s <= 0 && st.Fed[0].e >= st.Total;
+            if (complete) st.Parked = true;
+        }
+        if (complete)
+        {
+            Interlocked.Decrement(ref Filling);
+            Log?.Invoke($"STREAM ready {Path.GetFileName(st.File)} — awaiting install to finalize skeleton");
+            StatsChanged?.Invoke();
+        }
+    }
+
+    /// <summary>Abandons streaming for an object and kicks a normal whole-object download so it still caches
+    /// (no regression). Rare: only on reorder-buffer overflow, version-mismatch bloat, or an error.</summary>
+    private void StreamAbort(StreamState st, string reason)
+    {
+        lock (st.Lock) { if (st.Aborted) return; st.Aborted = true; try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
+        lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
+        Interlocked.Decrement(ref Filling);
+        Log?.Invoke($"STREAM abort {Path.GetFileName(st.File)} — {reason}; falling back to full download");
+        StatsChanged?.Invoke();
+        StartFill(st.File, st.Host, st.RawPath, st.Ip);
+    }
+
+    private void AbandonStream(StreamState st, string reason)
+    {
+        lock (st.Lock) { st.Aborted = true; st.Arming = false; try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
+        lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
+        Interlocked.Decrement(ref Filling);
+        Log?.Invoke($"STREAM not armed {Path.GetFileName(st.File)} — {reason}; using tee");
+        StatsChanged?.Invoke();
+        StartFill(st.File, st.Host, st.RawPath, st.Ip);
+    }
+
+    /// <summary>Finalizes a parked streamed skeleton against a now-available install. Matches the parked
+    /// controller by <paramref name="contentGuid"/> (the proxy nests the package under it in the cache path).
+    /// Returns true and writes the <c>.skl</c> to <paramref name="skelPath"/> on success.</summary>
+    public bool TryFinalizeStreamed(string? contentGuid, string installDir, string skelPath, out string status, out string? servedPath)
+    {
+        status = ""; servedPath = null;
+        StreamState? st = null;
+        lock (_gate)
+        {
+            foreach (var s in _streams.Values)
+                if (s.Parked && !s.Aborted &&
+                    (string.IsNullOrEmpty(contentGuid) || s.File.IndexOf(contentGuid, StringComparison.OrdinalIgnoreCase) >= 0))
+                { st = s; break; }
+        }
+        if (st?.Ctl == null) { status = "no matching streamed capture"; return false; }
+        servedPath = st.File;
+        bool ok;
+        lock (st.Lock)
+        {
+            try { Directory.CreateDirectory(Path.GetDirectoryName(skelPath)!); } catch { }
+            ok = st.Ctl.Complete(installDir, skelPath,
+                (o, c) => FetchRangeBytes(st.Host, st.Ip, st.RawPath, o, o + c) ?? new byte[c], out status);
+        }
+        if (ok)
+        {
+            lock (_gate) { _streams.Remove(st.File); }
+            try { st.Ctl.Dispose(); } catch { }
+            Log?.Invoke($"STREAM finalized {Path.GetFileName(st.File)} — {status}");
+            StatsChanged?.Invoke();
+        }
+        return ok;
+    }
+
+    /// <summary>True if a parked streamed capture matches the content GUID (so the watcher skips batch capture).</summary>
+    public bool HasParkedStreamed(string? contentGuid)
+    {
+        lock (_gate)
+            foreach (var s in _streams.Values)
+                if (s.Parked && !s.Aborted &&
+                    (string.IsNullOrEmpty(contentGuid) || s.File.IndexOf(contentGuid, StringComparison.OrdinalIgnoreCase) >= 0))
+                    return true;
+        return false;
+    }
+
+    /// <summary>Ranged GET returning the raw bytes of <c>[start, endExcl)</c> from the origin, or null on
+    /// failure. Used to prefetch the streaming header and to refetch unmatched-drop bytes at finalize.</summary>
+    private byte[]? FetchRangeBytes(string host, string ip, string rawPath, long start, long endExcl)
+    {
+        long len = endExcl - start;
+        if (len <= 0) return Array.Empty<byte>();
+        try
+        {
+            var msg = new HttpRequestMessage(HttpMethod.Get, "http://" + ip + rawPath);
+            msg.Headers.Host = host;
+            msg.Headers.Range = new RangeHeaderValue(start, endExcl - 1);
+            using var resp = _bg.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
+            int sc = (int)resp.StatusCode;
+            if (sc != 200 && sc != 206) return null;
+            using var s = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult();
+            var outBuf = new byte[len]; long got = 0; int n;
+            var tmp = new byte[1 << 20];
+            while (got < len && (n = s.Read(tmp, 0, (int)Math.Min(tmp.Length, len - got))) > 0)
+            { Array.Copy(tmp, 0, outBuf, got, n); got += n; }
+            return got == len ? outBuf : null;
+        }
+        catch { return null; }
+    }
+
+    private static string MakeBlobName(string file)
+    {
+        // Stable per-object blob name (hash of the cache path) so restarts don't collide.
+        var bytes = System.Text.Encoding.UTF8.GetBytes(file);
+        uint h = 2166136261; foreach (var b in bytes) { h = (h ^ b) * 16777619; }
+        return $"{Path.GetFileNameWithoutExtension(file)}.{h:x8}.blob.tmp";
     }
 
     // ---- elevation (URL ACL + hosts) -------------------------------------
