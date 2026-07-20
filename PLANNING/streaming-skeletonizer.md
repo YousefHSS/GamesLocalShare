@@ -280,6 +280,43 @@ then B3 M2 (wire into `XboxCacheProxyService` behind an off-by-default `XboxStre
 prefetch + CIK acquisition/fallback-to-tee + finalize handoff). Serving of streamed titles (reconstruct-on-
 demand) is a deferred follow-up. Plan: `~/.claude/plans/wild-wishing-milner.md`.
 
+### B3 M1 — in-process LibXboxOne (RESULT 2026-07-20: PASS; app `eb849d1`)
+
+The batch capture path shells `XVDTool.exe`; streaming needs the skeletonizer in-process (direct backpressure
+from the proxy tee). `Services/XvdInProcess.cs` installs an `AssemblyLoadContext.Default.Resolving` handler
+that loads `LibXboxOne.dll` + its DiscUtils/BouncyCastle deps from the existing `tools\xvdtool\` folder (single
+copy, shared with the subprocess; loads lazily only when a LibXboxOne type is first touched). csproj gets a
+compile-time `<Reference>` (`Private=false`). Register the resolver at the very top of `Program.Main` (before
+any LibXboxOne-referencing method is JIT-compiled). `--selftest-xvd-inprocess` PASS: LibXboxOne + all deps
+load in-process; app builds clean; normal startup unaffected (resolver is a no-op until used).
+
+### B3 M2a/M2b — streaming-capture engine (RESULT 2026-07-20: PASS; app `411f5f8`, xvdtool `236b56b`)
+
+- **M2a:** off-by-default `AppSettings.XboxStreamingCapture` (best-effort; falls back to the tee when off/no CIK).
+- **M2b:** the engine the proxy will run in-process — `LibXboxOne.StreamingCaptureController` + `PartialPackageStream`
+  + `XvdFile(Stream)` ctor + `StreamingSkeletonizer.SetGenuineSha`. An `XvdFile` over a `PartialPackageStream`
+  (prefetched front + last sector + on-demand pages) parses the header, builds the file→U map from the front,
+  decrypts each arriving page page-locally, reorders (`StreamingPackageDecryptor`), skeletonizes, and hashes the
+  genuine `gsha` in drain order — the full encrypted package is never held. Overflow + early-bloat aborts →
+  caller falls back to the tee. `--streamctl` offline test on encrypted CloneDrone (1697 MB): armed 229 files,
+  **byte-identical reconstruct** (`U' sha == U sha`), **gsha MATCH**, refetch path fired, **peak 63 MB**. This is
+  the exact pipeline the proxy will run, minus the live socket.
+
+  *Note (M2b gotcha):* `XvdFile`'s IO wrapper builds a `BinaryWriter`, which rejects a non-writable stream, so
+  `PartialPackageStream.CanWrite` must report true (Write still throws — the read path never writes, and
+  `DisableSaveAfterModification` is set).
+
+### B3 M2c — proxy wiring (TODO; needs live validation)
+
+Remaining: wire `StreamingCaptureController` into `XboxCacheProxyService` behind the flag. Live-path decisions
+that want real-machine feedback: (1) front-prefetch strategy on first MISS (synchronous ~64 MB vs background-arm
++ tee-until-armed); (2) coverage-completion detection + gap-fill feeding the controller; (3) the finalize handoff
+— proxy parks the armed+fed controller keyed by content GUID; the watcher, on install-complete, calls
+`Complete(installRoot, skelPath, refetchU)` where `refetchU` fetches the rare unmatched-drop bytes from the CDN
+(via the proxy's `FetchRange`) and decrypts them (stage into the controller's page cache → `ReadDecryptedRange`).
+CIK-not-ready and any abort → fall back to today's tee (no regression). The flag-off path is byte-for-byte today's
+behavior.
+
 Open follow-up: encrypted path matches 234/235 (1→skeleton, harmless) — likely decrypt-on-the-fly vs `-eu`
 page discrepancy; confirm via `--verify-full`.
 
