@@ -87,8 +87,47 @@ public sealed class XboxCacheProxyService : IDisposable
         public bool Armed, Aborted, Parked, Arming;
         public DateTime LastWriteUtc = DateTime.UtcNow;
         public readonly object Lock = new();
+        // Background-capture queue: the download threads copy+enqueue (fast, never blocked by decrypt); one
+        // consumer thread decrypts/feeds the controller. Blocks the download only if it fills (decrypt can't keep
+        // up), so a fast download isn't throttled by per-chunk decrypt latency.
+        public ChunkQueue? Queue;
     }
     private const long PreArmCapBytes = 256L << 20;           // give up streaming if the front never assembles
+    private const long CaptureQueueCapBytes = 256L << 20;     // background-capture backlog before soft backpressure
+
+    /// <summary>A byte-bounded producer/consumer queue of encrypted chunks. <see cref="Add"/> blocks only when
+    /// full (and something is already queued), giving soft backpressure; <see cref="TryTake"/> blocks until an
+    /// item is available or the queue is closed and drained.</summary>
+    private sealed class ChunkQueue
+    {
+        private readonly Queue<(long off, byte[] data)> _q = new();
+        private readonly long _cap;
+        private long _bytes;
+        private bool _closed;
+        private readonly object _g = new();
+        public ChunkQueue(long capBytes) { _cap = capBytes; }
+        public long Bytes { get { lock (_g) return _bytes; } }
+        public void Add(long off, byte[] data)
+        {
+            lock (_g)
+            {
+                while (_bytes + data.Length > _cap && !_closed && _q.Count > 0) Monitor.Wait(_g);
+                if (_closed) return;
+                _q.Enqueue((off, data)); _bytes += data.Length; Monitor.PulseAll(_g);
+            }
+        }
+        public bool TryTake(out (long off, byte[] data) item)
+        {
+            lock (_g)
+            {
+                while (_q.Count == 0 && !_closed) Monitor.Wait(_g);
+                if (_q.Count == 0) { item = default; return false; }
+                item = _q.Dequeue(); _bytes -= item.data.Length; Monitor.PulseAll(_g);
+                return true;
+            }
+        }
+        public void Close() { lock (_g) { _closed = true; Monitor.PulseAll(_g); } }
+    }
     private readonly Dictionary<string, StreamState> _streams = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _streamAbandoned = new(StringComparer.OrdinalIgnoreCase);
 
@@ -233,6 +272,7 @@ public sealed class XboxCacheProxyService : IDisposable
         lock (_gate) { pendingStreams = _streams.Values.ToList(); _streams.Clear(); _streamAbandoned.Clear(); }
         foreach (var st in pendingStreams)
         {
+            st.Queue?.Close();
             lock (st.Lock) { try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
             if (!st.Parked && !st.Aborted) Interlocked.Decrement(ref Filling);
         }
@@ -851,7 +891,12 @@ public sealed class XboxCacheProxyService : IDisposable
         }
         if (feedNow)
         {
-            if (StreamFeed(st, absOff, buf, 0, len)) StreamEndRange(st, absOff, len);
+            // Hand off to the background consumer — copy (buf is reused) + enqueue. Never decrypts on the
+            // download thread, so the download isn't throttled by decrypt latency. Add() only blocks if the
+            // capture backlog fills (decrypt genuinely can't keep up).
+            var copy = new byte[len];
+            Array.Copy(buf, 0, copy, 0, len);
+            st.Queue?.Add(absOff, copy);
             return;
         }
         if (abandon) { AbandonStream(st, $"front [0,{st.FrontLen / 1048576} MB) not assembled within {PreArmCapBytes / 1048576} MB (non-sequential download)"); return; }
@@ -892,24 +937,41 @@ public sealed class XboxCacheProxyService : IDisposable
                 _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20);
             if (ctl == null) { AbandonStream(st, $"could not arm — {lastMsg}"); return; }
 
+            // Start the background consumer, then hand off the buffered bytes + switch to live enqueueing.
+            var queue = new ChunkQueue(CaptureQueueCapBytes);
+            var consumer = new Thread(() => StreamConsumer(st)) { IsBackground = true, Name = "xbox-stream-consume" };
             List<(long off, byte[] data)> drain;
             lock (st.Lock)
             {
                 st.Ctl = ctl;
+                st.Queue = queue;
                 drain = st.PreArm.Select(kv => (kv.Key, kv.Value)).ToList();
                 st.PreArm.Clear(); st.PreArmBytes = 0;
                 st.Armed = true; st.Arming = false; st.LastWriteUtc = DateTime.UtcNow;
             }
+            consumer.Start();
             Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB) from the Store's own bytes — 1x bandwidth");
-            // Feed everything buffered so far, in order. Live bytes now arriving (Armed==true) feed concurrently;
-            // the controller reorders by offset, so ordering is safe.
-            foreach (var (off, data) in drain)
-            {
-                if (!StreamFeed(st, off, data, 0, data.Length)) return;
-                StreamEndRange(st, off, data.Length);
-            }
+            // Enqueue everything buffered so far; live bytes now arriving (Armed==true) enqueue too. The consumer
+            // feeds the controller, which reorders by offset — enqueue order doesn't matter.
+            foreach (var (off, data) in drain) queue.Add(off, data);
         }
         catch (Exception ex) { AbandonStream(st, ex.Message); }
+    }
+
+    /// <summary>Background consumer: dequeues encrypted chunks and feeds them to the capture controller
+    /// (decrypt/classify happen here, off the download threads). Exits when the queue is closed and drained
+    /// (park/abort/stop).</summary>
+    private void StreamConsumer(StreamState st)
+    {
+        var q = st.Queue;
+        if (q == null) return;
+        while (q.TryTake(out var item))
+        {
+            if (st.Aborted) break;
+            if (StreamFeed(st, item.off, item.data, 0, item.data.Length))
+                StreamEndRange(st, item.off, item.data.Length);
+            else break; // aborted inside StreamFeed (overflow/error) → fell back to the tee
+        }
     }
 
     /// <summary>Feeds one chunk to the streaming controller. Returns false once the capture has aborted (the
@@ -938,6 +1000,7 @@ public sealed class XboxCacheProxyService : IDisposable
         }
         if (complete)
         {
+            st.Queue?.Close(); // coverage done → let the background consumer exit
             Interlocked.Decrement(ref Filling);
             Log?.Invoke($"STREAM ready {Path.GetFileName(st.File)} — awaiting install to finalize skeleton");
             StatsChanged?.Invoke();
@@ -949,6 +1012,7 @@ public sealed class XboxCacheProxyService : IDisposable
     private void StreamAbort(StreamState st, string reason)
     {
         lock (st.Lock) { if (st.Aborted) return; st.Aborted = true; try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
+        st.Queue?.Close();
         lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
         Interlocked.Decrement(ref Filling);
         Log?.Invoke($"STREAM abort {Path.GetFileName(st.File)} — {reason}; falling back to full download");
