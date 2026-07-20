@@ -75,13 +75,21 @@ public sealed class XboxCacheProxyService : IDisposable
     private sealed class StreamState
     {
         public string File = "", Host = "", RawPath = "", Ip = "";
-        public long Total = -1;
+        public long Total = -1, FrontLen;
         public LibXboxOne.StreamingCaptureController? Ctl;
-        public readonly List<(long s, long e)> Fed = new();   // covered ranges (completeness + gap-fill)
+        public readonly List<(long s, long e)> Fed = new();   // ranges fed to the controller (coverage + gap-fill)
+        // 1x-bandwidth capture: reuse the Store's OWN download instead of fetching a second copy. Bytes the
+        // Store forwards before the controller is built are held here (bounded); we arm from the buffered front
+        // (no separate front download) and then feed the buffer + all subsequent Store bytes into the capture.
+        // Only genuine gaps (ranges the Store never requests) are refetched — a few MB, not the whole package.
+        public readonly SortedDictionary<long, byte[]> PreArm = new();
+        public long PreArmBytes, FrontContig;                 // FrontContig = highest contiguous byte from 0
+        public readonly List<(long s, long e)> Recv = new();  // merged ranges received from the Store
         public bool Armed, Aborted, Parked, Arming;
         public DateTime LastWriteUtc = DateTime.UtcNow;
         public readonly object Lock = new();
     }
+    private const long PreArmCapBytes = 256L << 20;           // give up streaming if the front never assembles
     private readonly Dictionary<string, StreamState> _streams = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _streamAbandoned = new(StringComparer.OrdinalIgnoreCase);
 
@@ -476,9 +484,8 @@ public sealed class XboxCacheProxyService : IDisposable
                         if (rn <= 0) break;
                         res.OutputStream.Write(buf, 0, rn);
                         if (tee != null) TeeWrite(tee, absOff, buf, rn);
-                        // Streaming capture is driven by its own in-order SequentialFeed (see ArmStream), not by
-                        // the Store's out-of-order requests — so nothing is fed here. When scap != null the tee
-                        // is null (streaming owns the object) and the bytes just forward to the Store.
+                        // 1x-bandwidth streaming capture: reuse the Store's own forwarded bytes (buffer→arm→feed).
+                        if (scap != null) StreamOnStoreBytes(scap, absOff, buf, rn);
                         absOff += rn;
                         sent += rn;
                     }
@@ -721,6 +728,43 @@ public sealed class XboxCacheProxyService : IDisposable
                     catch (Exception ex) { Log?.Invoke($"GAP-FILL ERR {Path.GetFileName(st.File)} [{g.s},{g.e}): {ex.Message}"); }
                 }
             }
+
+            // Streaming captures: once the Store goes idle, fetch only the ranges it never sent (trailing
+            // padding / never-requested regions) and feed them so coverage completes. This is the ONLY extra
+            // bandwidth on the 1x path — typically a few MB, not the whole package.
+            List<StreamState> streamSnap;
+            lock (_gate) { streamSnap = _streams.Values.ToList(); }
+            foreach (var st in streamSnap)
+            {
+                if (ct.IsCancellationRequested) break;
+                bool idle; long total; List<(long s, long e)> gaps = new();
+                lock (st.Lock)
+                {
+                    if (!st.Armed || st.Aborted || st.Parked) continue;
+                    total = st.Total;
+                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > 30;
+                    if (idle) gaps = ComplementLocked(st.Fed, total);
+                }
+                if (!idle || gaps.Count == 0) continue;
+                long gapBytes = 0; foreach (var g in gaps) gapBytes += g.e - g.s;
+                Log?.Invoke($"STREAM gap-fill {Path.GetFileName(st.File)}: {gaps.Count} range(s), {gapBytes / 1048576.0:F1} MB the Store never sent");
+                const long step = 8L << 20;
+                foreach (var g in gaps)
+                {
+                    for (long s = g.s; s < g.e && !ct.IsCancellationRequested; s += step)
+                    {
+                        long e = Math.Min(s + step, g.e);
+                        try
+                        {
+                            byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, s, e);
+                            if (data == null) { Log?.Invoke($"STREAM gap-fill failed {Path.GetFileName(st.File)} [{s},{e})"); break; }
+                            if (!StreamFeed(st, s, data, 0, data.Length)) break; // aborted → fell back to tee
+                            StreamEndRange(st, s, data.Length);
+                        }
+                        catch (Exception ex) { Log?.Invoke($"STREAM gap-fill ERR {Path.GetFileName(st.File)}: {ex.Message}"); break; }
+                    }
+                }
+            }
         }
     }
 
@@ -747,10 +791,10 @@ public sealed class XboxCacheProxyService : IDisposable
 
     // ---- streaming skeleton capture --------------------------------------
 
-    /// <summary>Returns the streaming state that should capture this object, creating it (and kicking a
-    /// background arm that prefetches the header + builds the map) on the first MISS. Returns null when
-    /// streaming is disabled, the object is already cached, or streaming was abandoned for it — the caller then
-    /// uses the sparse-.part tee.</summary>
+    /// <summary>Returns the streaming state that should capture this object, creating it on the first MISS.
+    /// The capture is armed lazily from the Store's OWN forwarded front bytes (no separate front download) and
+    /// fed from the Store's ongoing bytes — 1x bandwidth. Returns null when streaming is disabled, the object is
+    /// already cached, or streaming was abandoned for it — the caller then uses the sparse-.part tee.</summary>
     private StreamState? TryGetStream(string file, string host, string rawPath, string ip, long total)
     {
         if (!_streamingEnabled) return null;
@@ -759,77 +803,111 @@ public sealed class XboxCacheProxyService : IDisposable
             if (File.Exists(file) || _inProgress.Contains(file) || _fills.ContainsKey(file)) return null;
             if (_streamAbandoned.Contains(file)) return null;
             if (_streams.TryGetValue(file, out var existing)) return existing.Parked ? null : existing;
-            var st = new StreamState { File = file, Host = host, RawPath = rawPath, Ip = ip, Total = total, Arming = true };
+            var st = new StreamState
+            {
+                File = file, Host = host, RawPath = rawPath, Ip = ip, Total = total,
+                // 64 MB front is the size the offline test proved builds the map. It's reused from the Store's
+                // OWN bytes (buffered, not separately downloaded), so a larger front costs memory, not bandwidth.
+                FrontLen = Math.Min(64L << 20, total),
+            };
             _streams[file] = st;
             Interlocked.Increment(ref Filling);
             StatsChanged?.Invoke();
-            var th = new Thread(() => ArmStream(st)) { IsBackground = true, Name = "xbox-stream-arm" };
-            th.Start();
             return st;
         }
     }
 
-    /// <summary>Background arm: prefetch the header front + last sector from the CDN and build the streaming
-    /// capture controller. On failure the object is abandoned (falls back to the tee via a fresh whole-object
-    /// download so it still caches).</summary>
-    private void ArmStream(StreamState st)
+    /// <summary>Captures the Store's own forwarded bytes for the streaming skeleton — the 1x-bandwidth path.
+    /// Before the controller is armed, buffers each chunk; once the front <c>[0,FrontLen)</c> has arrived, arms
+    /// FROM those buffered bytes (no separate front download). After arming, feeds each chunk straight into the
+    /// capture. Only genuine gaps (ranges the Store never sends) are refetched later by the gap-fill.</summary>
+    private void StreamOnStoreBytes(StreamState st, long absOff, byte[] buf, int len)
     {
-        const long frontLen = 64L << 20;
+        if (len <= 0) return;
+        bool feedNow = false, startArm = false, abandon = false;
+        lock (st.Lock)
+        {
+            if (st.Aborted || st.Parked) return;
+            if (st.Armed) feedNow = true;
+            else
+            {
+                if (!st.PreArm.ContainsKey(absOff))
+                {
+                    var copy = new byte[len];
+                    Array.Copy(buf, 0, copy, 0, len);
+                    st.PreArm[absOff] = copy;
+                    st.PreArmBytes += len;
+                }
+                AddRangeLocked(st.Recv, absOff, absOff + len);
+                st.FrontContig = (st.Recv.Count > 0 && st.Recv[0].s <= 0) ? st.Recv[0].e : 0;
+                st.LastWriteUtc = DateTime.UtcNow;
+                if (!st.Arming)
+                {
+                    if (st.FrontContig >= st.FrontLen) { st.Arming = true; startArm = true; }
+                    else if (st.PreArmBytes > PreArmCapBytes) abandon = true;
+                }
+            }
+        }
+        if (feedNow)
+        {
+            if (StreamFeed(st, absOff, buf, 0, len)) StreamEndRange(st, absOff, len);
+            return;
+        }
+        if (abandon) { AbandonStream(st, $"front [0,{st.FrontLen / 1048576} MB) not assembled within {PreArmCapBytes / 1048576} MB (non-sequential download)"); return; }
+        if (startArm) new Thread(() => ArmFromBuffer(st)) { IsBackground = true, Name = "xbox-stream-arm" }.Start();
+    }
+
+    /// <summary>Arms the controller from the buffered front bytes (no separate front download), then feeds the
+    /// whole pre-arm buffer into the capture in order and switches to live feeding. The last sector (a few KB,
+    /// which the Store may not have sent yet) is fetched separately — negligible bandwidth. On failure the
+    /// object falls back to the tee.</summary>
+    private void ArmFromBuffer(StreamState st)
+    {
         try
         {
-            long fl = Math.Min(frontLen, st.Total);
+            long fl = st.FrontLen;
+            byte[] front = new byte[fl];
+            lock (st.Lock)
+            {
+                foreach (var kv in st.PreArm) // ascending (SortedDictionary)
+                {
+                    if (kv.Key >= fl) break;
+                    int copyLen = (int)Math.Min(kv.Value.Length, fl - kv.Key);
+                    if (copyLen > 0) Array.Copy(kv.Value, 0, front, (int)kv.Key, copyLen);
+                }
+            }
             int tailLen = (int)Math.Min(4096, st.Total);
             long tailOff = st.Total - tailLen;
-            byte[] front = FetchRangeBytes(st.Host, st.Ip, st.RawPath, 0, fl)
-                           ?? throw new IOException("front prefetch failed");
-            byte[] tail = tailLen > 0 && tailOff > fl
+            byte[] tail = tailLen > 0 && tailOff >= fl
                 ? (FetchRangeBytes(st.Host, st.Ip, st.RawPath, tailOff, tailOff + tailLen) ?? Array.Empty<byte>())
                 : Array.Empty<byte>();
 
             string blob = Path.Combine(_streamBlobDir, MakeBlobName(st.File));
+            // Larger reorder buffer than the offline default: it holds the Store's parallel-request spread until
+            // contiguous. On overflow the capture aborts → tee fallback (safe), so this only affects whether a
+            // pathologically out-of-order download stays on the 1x path.
             var ctl = LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
-                _streamCikFolder, blob, m => Log?.Invoke(m));
+                _streamCikFolder, blob, m => Log?.Invoke(m), bufferCap: 256L << 20);
             if (ctl == null) { AbandonStream(st, "could not arm (no CIK / unsupported package)"); return; }
-            lock (st.Lock) { st.Ctl = ctl; st.Armed = true; st.Arming = false; st.LastWriteUtc = DateTime.UtcNow; }
-            Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB)");
 
-            // Drive the capture with a dedicated IN-ORDER feed of the object, independent of the Store's
-            // request order. The Store arms us mid-download and requests ranges in its own order/parallelism;
-            // feeding those directly would pile high-offset bytes into the reorder buffer while the cursor is
-            // stuck at 0 → overflow. A sequential fetch keeps the feed ascending (drains immediately, no reorder
-            // pressure). Costs ~1× extra bandwidth for the capture; the storage win (no full package on disk) is
-            // the point. Reuses the already-fetched front.
-            var feeder = new Thread(() => SequentialFeed(st, front, fl)) { IsBackground = true, Name = "xbox-stream-feed" };
-            feeder.Start();
-        }
-        catch (Exception ex) { AbandonStream(st, ex.Message); }
-    }
-
-    /// <summary>Feeds the whole object to the streaming controller in ascending order (front reused, the rest
-    /// fetched in bounded chunks), then coverage completes and the controller parks. Runs on its own thread so
-    /// it doesn't gate the Store's requests.</summary>
-    private void SequentialFeed(StreamState st, byte[] front, long frontLen)
-    {
-        try
-        {
-            int fl = (int)Math.Min(frontLen, front.LongLength);
-            if (fl > 0)
+            List<(long off, byte[] data)> drain;
+            lock (st.Lock)
             {
-                if (!StreamFeed(st, 0, front, 0, fl)) return;   // aborted → fell back to tee inside
-                StreamEndRange(st, 0, fl);
+                st.Ctl = ctl;
+                drain = st.PreArm.Select(kv => (kv.Key, kv.Value)).ToList();
+                st.PreArm.Clear(); st.PreArmBytes = 0;
+                st.Armed = true; st.Arming = false; st.LastWriteUtc = DateTime.UtcNow;
             }
-            const long step = 8L << 20;
-            for (long off = fl; off < st.Total; off += step)
+            Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB) from the Store's own bytes — 1x bandwidth");
+            // Feed everything buffered so far, in order. Live bytes now arriving (Armed==true) feed concurrently;
+            // the controller reorders by offset, so ordering is safe.
+            foreach (var (off, data) in drain)
             {
-                lock (st.Lock) { if (st.Aborted || st.Parked) return; }
-                long end = Math.Min(off + step, st.Total);
-                byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, off, end);
-                if (data == null) { StreamAbort(st, $"capture fetch failed [{off},{end})"); return; }
                 if (!StreamFeed(st, off, data, 0, data.Length)) return;
                 StreamEndRange(st, off, data.Length);
             }
         }
-        catch (Exception ex) { StreamAbort(st, "capture feed: " + ex.Message); }
+        catch (Exception ex) { AbandonStream(st, ex.Message); }
     }
 
     /// <summary>Feeds one chunk to the streaming controller. Returns false once the capture has aborted (the
