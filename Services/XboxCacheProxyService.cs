@@ -130,6 +130,13 @@ public sealed class XboxCacheProxyService : IDisposable
     }
     private readonly Dictionary<string, StreamState> _streams = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _streamAbandoned = new(StringComparer.OrdinalIgnoreCase);
+    // Objects whose skeleton was already streamed-captured. Their package is intentionally NOT on disk, so a
+    // later MISS (Gaming Services verify / trailing install reads / a peer) must be served transiently from the
+    // CDN — never teed to disk (which would re-materialize the full package we just avoided).
+    private readonly HashSet<string> _streamCaptured = new(StringComparer.OrdinalIgnoreCase);
+    // Inert sentinel returned for already-captured objects: non-null so the caller skips the tee; Parked so
+    // StreamOnStoreBytes is a no-op (the bytes just forward to the requester).
+    private static readonly StreamState CapturedSentinel = new() { Parked = true };
 
     /// <summary>Arms streaming skeleton capture. When <paramref name="enabled"/>, the proxy tries to capture a
     /// title's skeleton in-stream (no full package on disk) instead of the sparse-.part tee, loading keys from
@@ -840,8 +847,10 @@ public sealed class XboxCacheProxyService : IDisposable
         lock (_gate)
         {
             if (File.Exists(file) || _inProgress.Contains(file) || _fills.ContainsKey(file)) return null;
-            if (_streamAbandoned.Contains(file)) return null;
-            if (_streams.TryGetValue(file, out var existing)) return existing.Parked ? null : existing;
+            if (_streamAbandoned.Contains(file)) return null;               // arming failed earlier → use the tee
+            if (_streamCaptured.Contains(file)) return CapturedSentinel;    // already captured → serve transient, no tee
+            // Return the state even when Parked/Arming so the caller never tees an object streaming owns.
+            if (_streams.TryGetValue(file, out var existing)) return existing;
             var st = new StreamState
             {
                 File = file, Host = host, RawPath = rawPath, Ip = ip, Total = total,
@@ -1055,7 +1064,8 @@ public sealed class XboxCacheProxyService : IDisposable
         }
         if (ok)
         {
-            lock (_gate) { _streams.Remove(st.File); }
+            // Captured → the package is intentionally not on disk; serve future MISSes transiently, never tee.
+            lock (_gate) { _streams.Remove(st.File); _streamCaptured.Add(st.File); }
             try { st.Ctl.Dispose(); } catch { }
             Log?.Invoke($"STREAM finalized {Path.GetFileName(st.File)} — {status}");
             StatsChanged?.Invoke();
