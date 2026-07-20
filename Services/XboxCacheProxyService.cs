@@ -476,15 +476,13 @@ public sealed class XboxCacheProxyService : IDisposable
                         if (rn <= 0) break;
                         res.OutputStream.Write(buf, 0, rn);
                         if (tee != null) TeeWrite(tee, absOff, buf, rn);
-                        // Feed streaming capture only once armed; pre-arm bytes become gaps the streaming
-                        // gap-fill refetches. A false return means the capture aborted → stop feeding (the tee
-                        // fallback is kicked inside StreamFeed).
-                        if (scap != null && scap.Armed && !StreamFeed(scap, absOff, buf, 0, rn)) scap = null;
+                        // Streaming capture is driven by its own in-order SequentialFeed (see ArmStream), not by
+                        // the Store's out-of-order requests — so nothing is fed here. When scap != null the tee
+                        // is null (streaming owns the object) and the bytes just forward to the Store.
                         absOff += rn;
                         sent += rn;
                     }
                     if (tee != null) EndTeeRange(tee, teeBase, sent);
-                    if (scap != null && scap.Armed) StreamEndRange(scap, teeBase, sent);
                 }
                 Interlocked.Increment(ref Misses);
                 Interlocked.Add(ref Bytes, sent);
@@ -723,41 +721,6 @@ public sealed class XboxCacheProxyService : IDisposable
                     catch (Exception ex) { Log?.Invoke($"GAP-FILL ERR {Path.GetFileName(st.File)} [{g.s},{g.e}): {ex.Message}"); }
                 }
             }
-
-            // Streaming captures: fetch ranges the Store never requested (incl. the pre-arm front) and feed
-            // them to the controller so coverage completes and the skeleton can be finalized.
-            List<StreamState> streamSnap;
-            lock (_gate) { streamSnap = _streams.Values.ToList(); }
-            foreach (var st in streamSnap)
-            {
-                if (ct.IsCancellationRequested) break;
-                bool idle; long total; List<(long s, long e)> gaps = new();
-                lock (st.Lock)
-                {
-                    if (!st.Armed || st.Aborted || st.Parked) continue;
-                    total = st.Total;
-                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > 30;
-                    if (idle) gaps = ComplementLocked(st.Fed, total);
-                }
-                if (!idle || gaps.Count == 0) continue;
-                Log?.Invoke($"STREAM gap-fill {Path.GetFileName(st.File)}: {gaps.Count} missing range(s)");
-                const long step = 8L << 20; // bounded fetch/alloc; contiguous ascending feed drains immediately
-                foreach (var g in gaps)
-                {
-                    for (long s = g.s; s < g.e && !ct.IsCancellationRequested; s += step)
-                    {
-                        long e = Math.Min(s + step, g.e);
-                        try
-                        {
-                            byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, s, e);
-                            if (data == null) { Log?.Invoke($"STREAM gap-fill failed {Path.GetFileName(st.File)} [{s},{e})"); break; }
-                            if (!StreamFeed(st, s, data, 0, data.Length)) break; // aborted → fell back to tee
-                            StreamEndRange(st, s, data.Length);
-                        }
-                        catch (Exception ex) { Log?.Invoke($"STREAM gap-fill ERR {Path.GetFileName(st.File)}: {ex.Message}"); break; }
-                    }
-                }
-            }
         }
     }
 
@@ -829,8 +792,44 @@ public sealed class XboxCacheProxyService : IDisposable
             if (ctl == null) { AbandonStream(st, "could not arm (no CIK / unsupported package)"); return; }
             lock (st.Lock) { st.Ctl = ctl; st.Armed = true; st.Arming = false; st.LastWriteUtc = DateTime.UtcNow; }
             Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB)");
+
+            // Drive the capture with a dedicated IN-ORDER feed of the object, independent of the Store's
+            // request order. The Store arms us mid-download and requests ranges in its own order/parallelism;
+            // feeding those directly would pile high-offset bytes into the reorder buffer while the cursor is
+            // stuck at 0 → overflow. A sequential fetch keeps the feed ascending (drains immediately, no reorder
+            // pressure). Costs ~1× extra bandwidth for the capture; the storage win (no full package on disk) is
+            // the point. Reuses the already-fetched front.
+            var feeder = new Thread(() => SequentialFeed(st, front, fl)) { IsBackground = true, Name = "xbox-stream-feed" };
+            feeder.Start();
         }
         catch (Exception ex) { AbandonStream(st, ex.Message); }
+    }
+
+    /// <summary>Feeds the whole object to the streaming controller in ascending order (front reused, the rest
+    /// fetched in bounded chunks), then coverage completes and the controller parks. Runs on its own thread so
+    /// it doesn't gate the Store's requests.</summary>
+    private void SequentialFeed(StreamState st, byte[] front, long frontLen)
+    {
+        try
+        {
+            int fl = (int)Math.Min(frontLen, front.LongLength);
+            if (fl > 0)
+            {
+                if (!StreamFeed(st, 0, front, 0, fl)) return;   // aborted → fell back to tee inside
+                StreamEndRange(st, 0, fl);
+            }
+            const long step = 8L << 20;
+            for (long off = fl; off < st.Total; off += step)
+            {
+                lock (st.Lock) { if (st.Aborted || st.Parked) return; }
+                long end = Math.Min(off + step, st.Total);
+                byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, off, end);
+                if (data == null) { StreamAbort(st, $"capture fetch failed [{off},{end})"); return; }
+                if (!StreamFeed(st, off, data, 0, data.Length)) return;
+                StreamEndRange(st, off, data.Length);
+            }
+        }
+        catch (Exception ex) { StreamAbort(st, "capture feed: " + ex.Message); }
     }
 
     /// <summary>Feeds one chunk to the streaming controller. Returns false once the capture has aborted (the
