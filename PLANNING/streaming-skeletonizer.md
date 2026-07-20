@@ -306,8 +306,29 @@ load in-process; app builds clean; normal startup unaffected (resolver is a no-o
   `PartialPackageStream.CanWrite` must report true (Write still throws — the read path never writes, and
   `DisableSaveAfterModification` is set).
 
-### B3 M2c — proxy wiring (TODO; needs live validation)
+### B3 M2c — proxy wiring (IMPLEMENTED 2026-07-20; needs live E2E validation; app `9e9bed5`, xvdtool `aeb9f19`)
 
+Wired `StreamingCaptureController` into `XboxCacheProxyService` behind `XboxStreamingCapture` (default off):
+- **Arm:** first MISS for an object → background-arm thread prefetches the header front (64 MB) + last sector via
+  `FetchRangeBytes`, `TryBegin`s the controller (builds the map, loads CIKs). Arm fail (no CIK / non-Fixed /
+  parse) → **abandon + `StartFill`** (normal full download, no regression).
+- **Feed:** the forward loop feeds each arriving page to the controller (once armed) instead of the tee; the
+  streaming gap-fill sweep fetches ranges the Store never requested (incl. the pre-arm front) in 8 MB chunks and
+  feeds them. Overflow / version-bloat → `StreamAbort` → `StartFill` fallback.
+- **Park + finalize:** on complete coverage the controller is parked keyed by cache path (contains the content
+  GUID). `SkeletonWatcherService.TryStreamedFinalize` (set by `MainViewModel`) runs on install-detect *before*
+  the batch `LocatePackage` path: matches the parked controller by the install's `.xvi` content GUID, calls
+  `Complete(installDir, skelPath, fetchEncrypted)` (CDN ranged GET for unmatched-drop refetch), writes the
+  restore manifest + fires `CaptureCompleted`. `Complete` refactored to take `fetchEncrypted` (raw CDN bytes;
+  the controller stages + decrypts internally).
+
+The flag-off path is byte-for-byte today's tee behavior. **Live E2E not yet run** — needs a real install through
+the proxy. Test prep done: Donut County cached package + skeleton deleted, `XboxStreamingCapture=true` set.
+Expected on reinstall: `STREAM armed …Donut…`, no `.part`, `STREAM ready …`, then on install-complete a
+`✓ Donut County: streamed skeleton … MB captured (no package stored)` and a small `.skl` in the store, with the
+package cache drive never gaining ~300 MB.
+
+#### (superseded design note) M2c was:
 Remaining: wire `StreamingCaptureController` into `XboxCacheProxyService` behind the flag. Live-path decisions
 that want real-machine feedback: (1) front-prefetch strategy on first MISS (synchronous ~64 MB vs background-arm
 + tee-until-armed); (2) coverage-completion detection + gap-fill feeding the controller; (3) the finalize handoff
