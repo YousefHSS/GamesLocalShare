@@ -1246,8 +1246,14 @@ public sealed class SkeletonWatcherService : IDisposable
     {
         var folder = Path.GetFileName(dir);
         if (string.IsNullOrEmpty(folder)) return null;
-        if (!IsGuid(folder)) return folder;
-        return ReadTitleFromManifest(dir); // null while still staging
+        if (IsGuid(folder)) return ReadTitleFromManifest(dir); // staging under a content GUID
+        // Some titles install to a folder named by their raw package identity (e.g. "MotionTwin.DeadCellsWin10")
+        // rather than a friendly folder ("Donut County"). In that case prefer the real game title from the
+        // manifest / MicrosoftGame.config ("Dead Cells"); friendly folders keep their name unchanged.
+        var identity = ReadIdentityName(dir);
+        if (identity != null && folder.Equals(identity, StringComparison.OrdinalIgnoreCase))
+            return ReadTitleFromManifest(dir) ?? folder;
+        return folder;
     }
 
     /// <summary>
@@ -1285,8 +1291,73 @@ public sealed class SkeletonWatcherService : IDisposable
     /// <c>&lt;Properties&gt;&lt;DisplayName&gt;</c> (e.g. "Buckshot Roulette"), falling back to the friendly
     /// tail of the package <c>Identity</c> Name (e.g. "CRITICALREFLEX.BuckshotRoulette" → "BuckshotRoulette").
     /// Returns null when no manifest/name is available (an ms-resource placeholder is treated as unavailable).</summary>
+    private static readonly Regex OverrideDisplayNameRx = new(
+        @"OverrideDisplayName=""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex VisualElementsDisplayNameRx = new(
+        @"VisualElements[^>]*?\bDisplayName=""([^""]+)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Reads the package <c>Identity Name</c> (e.g. "MotionTwin.DeadCellsWin10") from the manifest.</summary>
+    private static string? ReadIdentityName(string installDir)
+    {
+        try
+        {
+            var p = Path.Combine(installDir, "Content", "appxmanifest.xml");
+            if (!File.Exists(p)) return null;
+            var m = ManifestIdentityNameRx.Match(File.ReadAllText(p));
+            return m.Success ? m.Groups[1].Value.Trim() : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The real, human game title ("Dead Cells") from <c>Content\MicrosoftGame.config</c>
+    /// (<c>OverrideDisplayName</c>) or the app's <c>VisualElements DisplayName</c> attribute — the sources that
+    /// carry the friendly title when the package <c>&lt;Properties&gt;&lt;DisplayName&gt;</c> is just the raw
+    /// package identity. Returns null when none is available.</summary>
+    private static string? ReadFriendlyTitle(string installDir)
+    {
+        try
+        {
+            var cfg = Path.Combine(installDir, "Content", "MicrosoftGame.config");
+            if (File.Exists(cfg))
+            {
+                string? best = null;
+                foreach (Match m in OverrideDisplayNameRx.Matches(File.ReadAllText(cfg)))
+                {
+                    var v = m.Groups[1].Value.Trim();
+                    if (v.Length == 0 || v.StartsWith("ms-resource", StringComparison.OrdinalIgnoreCase)) continue;
+                    // Prefer a spaced (more human) variant, otherwise the longest.
+                    if (best == null || (v.Contains(' ') && !best.Contains(' ')) ||
+                        (v.Contains(' ') == best.Contains(' ') && v.Length > best.Length))
+                        best = v;
+                }
+                if (best != null) return SanitizeName(best);
+            }
+        }
+        catch { }
+        try
+        {
+            var p = Path.Combine(installDir, "Content", "appxmanifest.xml");
+            if (File.Exists(p))
+            {
+                var m = VisualElementsDisplayNameRx.Match(File.ReadAllText(p));
+                if (m.Success)
+                {
+                    var v = m.Groups[1].Value.Trim();
+                    if (v.Length > 0 && !v.StartsWith("ms-resource", StringComparison.OrdinalIgnoreCase))
+                        return SanitizeName(v);
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
     private static string? ReadTitleFromManifest(string installDir)
     {
+        // Prefer the real game title (MicrosoftGame.config / VisualElements) over the package-level DisplayName,
+        // which for some titles is just the raw identity.
+        var friendlyTitle = ReadFriendlyTitle(installDir);
+        if (friendlyTitle != null) return friendlyTitle;
         try
         {
             var p = Path.Combine(installDir, "Content", "appxmanifest.xml");
