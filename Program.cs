@@ -32,6 +32,13 @@ class Program
             Environment.Exit(ok ? 0 : 1);
         }
 
+        // Uninstall cleanup: remove the on-demand CikExtractor scheduled task (uninstaller runs elevated).
+        if (args.Length >= 1 && args[0] == "--unregister-cikextractor-task")
+        {
+            Services.CikExtractorRunner.UnregisterTask();
+            Environment.Exit(0);
+        }
+
         // Headless self-test: confirm the bundled LibXboxOne (+ its DiscUtils/BouncyCastle deps) loads
         // in-process from tools\xvdtool for the streaming skeletonizer path. Writes the report to the path in
         // args[1] (or a temp file) since a GUI-subsystem exe has no attached console; exits with the result.

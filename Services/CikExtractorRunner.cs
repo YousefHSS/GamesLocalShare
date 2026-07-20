@@ -112,6 +112,25 @@ public sealed class CikExtractorRunner
         return produced;
     }
 
+    /// <summary>Removes the on-demand CikExtractor scheduled task (called from the uninstaller, which runs
+    /// elevated, so the delete is silent). Best-effort — ignores failure.</summary>
+    public static void UnregisterTask()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Delete /TN \"{TaskName}\" /F",
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+            };
+            using var p = Process.Start(psi);
+            p?.WaitForExit(15000);
+        }
+        catch { }
+    }
+
     // ---- silent scheduled-task path -------------------------------------------------------------------
 
     /// <summary>Runs CikExtractor via its scheduled task (elevated, no UAC): registers the task once if needed

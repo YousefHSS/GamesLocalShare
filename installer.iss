@@ -63,6 +63,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 ; Remove the startup task (and any Run-key fallback) on uninstall; runs before files
 ; are deleted and the uninstaller is elevated, so this is silent.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-startup"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterStartupTask"
+; Remove the on-demand CikExtractor scheduled task too (silent — uninstaller is elevated).
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-cikextractor-task"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterCikExtractorTask"
 
 [Code]
 // The app AND the bundled xvdtool are framework-dependent net8.0 (see GamesLocalShare.csproj:
