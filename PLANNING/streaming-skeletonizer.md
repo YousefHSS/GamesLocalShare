@@ -322,8 +322,19 @@ Wired `StreamingCaptureController` into `XboxCacheProxyService` behind `XboxStre
   restore manifest + fires `CaptureCompleted`. `Complete` refactored to take `fetchEncrypted` (raw CDN bytes;
   the controller stages + decrypts internally).
 
-The flag-off path is byte-for-byte today's tee behavior. **Live E2E not yet run** — needs a real install through
-the proxy. Test prep done: Donut County cached package + skeleton deleted, `XboxStreamingCapture=true` set.
+**LIVE E2E PASS (2026-07-20, app `73b65c7`+`086dec9`):** reinstalled Donut County through the proxy →
+`STREAM armed …(302 MB)` → `STREAM ready` → `STREAM finalized … ok (kept 6.1 MB, refetched 3, peak 0 MB)` →
+`✓ Donut County v1.0.4.0: streamed skeleton 8.66 MB captured (no package stored)`. **No `.msixvc` ever written
+to the cache** (storage win), `peak 0 MB` reorder (in-order feed), CDN-refetch of 3 unmatched drops worked live.
+
+*Fix that made it pass (`73b65c7`):* the first attempt aborted — streaming arms MID-download, so feeding the
+Store's out-of-order live bytes piled high-offset pages into the 128 MB reorder buffer while the cursor was at 0
+→ overflow → abort → tee fallback. Fix: once armed, a dedicated `SequentialFeed` fetches the object in ascending
+8 MB chunks (front reused) and feeds the controller IN ORDER (drains immediately, no reorder pressure),
+independent of the Store's request order. Costs ~1× extra capture bandwidth; the storage win is preserved. The
+forward loop no longer feeds streaming; the streaming gap-fill branch was removed.
+
+The flag-off path is byte-for-byte today's tee behavior. Test prep was: Donut County cached package + skeleton deleted, `XboxStreamingCapture=true` set.
 Expected on reinstall: `STREAM armed …Donut…`, no `.part`, `STREAM ready …`, then on install-complete a
 `✓ Donut County: streamed skeleton … MB captured (no package stored)` and a small `.skl` in the store, with the
 package cache drive never gaining ~300 MB.
