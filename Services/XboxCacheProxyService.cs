@@ -83,8 +83,7 @@ public sealed class XboxCacheProxyService : IDisposable
         // (no separate front download) and then feed the buffer + all subsequent Store bytes into the capture.
         // Only genuine gaps (ranges the Store never requests) are refetched — a few MB, not the whole package.
         public readonly SortedDictionary<long, byte[]> PreArm = new();
-        public long PreArmBytes, FrontContig;                 // FrontContig = highest contiguous byte from 0
-        public readonly List<(long s, long e)> Recv = new();  // merged ranges received from the Store
+        public long PreArmBytes, FrontContig;                 // FrontContig = contiguous byte coverage from 0 in PreArm
         public bool Armed, Aborted, Parked, Arming;
         public DateTime LastWriteUtc = DateTime.UtcNow;
         public readonly object Lock = new();
@@ -831,15 +830,17 @@ public sealed class XboxCacheProxyService : IDisposable
             if (st.Armed) feedNow = true;
             else
             {
-                if (!st.PreArm.ContainsKey(absOff))
+                // Keep the LONGEST chunk seen at each offset (parallel/overlapping Store requests can deliver a
+                // short then a long chunk at the same offset). FrontContig is computed from the ACTUAL stored
+                // bytes so the assembled front never has a zero-filled hole.
+                if (!st.PreArm.TryGetValue(absOff, out var existing) || existing.Length < len)
                 {
                     var copy = new byte[len];
                     Array.Copy(buf, 0, copy, 0, len);
                     st.PreArm[absOff] = copy;
-                    st.PreArmBytes += len;
+                    st.PreArmBytes += existing == null ? len : (len - existing.Length);
                 }
-                AddRangeLocked(st.Recv, absOff, absOff + len);
-                st.FrontContig = (st.Recv.Count > 0 && st.Recv[0].s <= 0) ? st.Recv[0].e : 0;
+                st.FrontContig = ContiguousFrontLocked(st.PreArm);
                 st.LastWriteUtc = DateTime.UtcNow;
                 if (!st.Arming)
                 {
@@ -886,9 +887,10 @@ public sealed class XboxCacheProxyService : IDisposable
             // Larger reorder buffer than the offline default: it holds the Store's parallel-request spread until
             // contiguous. On overflow the capture aborts → tee fallback (safe), so this only affects whether a
             // pathologically out-of-order download stays on the 1x path.
+            string lastMsg = "";
             var ctl = LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
-                _streamCikFolder, blob, m => Log?.Invoke(m), bufferCap: 256L << 20);
-            if (ctl == null) { AbandonStream(st, "could not arm (no CIK / unsupported package)"); return; }
+                _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20);
+            if (ctl == null) { AbandonStream(st, $"could not arm — {lastMsg}"); return; }
 
             List<(long off, byte[] data)> drain;
             lock (st.Lock)
@@ -1030,6 +1032,20 @@ public sealed class XboxCacheProxyService : IDisposable
             return got == len ? outBuf : null;
         }
         catch { return null; }
+    }
+
+    /// <summary>Contiguous byte coverage from offset 0 across the buffered chunks (walks ascending, stops at the
+    /// first gap). Used to decide when the front is complete enough to arm — from the ACTUAL stored bytes.</summary>
+    private static long ContiguousFrontLocked(SortedDictionary<long, byte[]> pre)
+    {
+        long end = 0;
+        foreach (var kv in pre)
+        {
+            if (kv.Key > end) break;             // gap before this chunk
+            long e = kv.Key + kv.Value.Length;
+            if (e > end) end = e;
+        }
+        return end;
     }
 
     private static string MakeBlobName(string file)
