@@ -266,6 +266,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _cacheProxy.TryFinalizeStreamed(contentGuid, installDir, skelPath, out var status, out var served)
                     ? (true, status, served)
                     : (false, status, served);
+            // Let streaming fetch a missing content key mid-download (CikExtractor) so titles whose key wasn't
+            // pre-extracted still capture at 1x instead of aborting.
+            _cacheProxy.RequestCikRefresh = () => _skeletonWatcher.RefreshCiks();
         }
 
         // Initialize drive detection

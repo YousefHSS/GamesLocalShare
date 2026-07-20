@@ -84,6 +84,7 @@ public sealed class XboxCacheProxyService : IDisposable
         // Only genuine gaps (ranges the Store never requests) are refetched — a few MB, not the whole package.
         public readonly SortedDictionary<long, byte[]> PreArm = new();
         public long PreArmBytes, FrontContig;                 // FrontContig = contiguous byte coverage from 0 in PreArm
+        public long LoggedFrontMb;                            // throttles the buffering-progress log
         public bool Armed, Aborted, Parked, Arming;
         public DateTime LastWriteUtc = DateTime.UtcNow;
         public readonly object Lock = new();
@@ -93,7 +94,13 @@ public sealed class XboxCacheProxyService : IDisposable
         public ChunkQueue? Queue;
     }
     private const long PreArmCapBytes = 256L << 20;           // give up streaming if the front never assembles
+    private const long ForceFrontBytes = 128L << 20;          // buffered this much w/o a contiguous front → complete it from the CDN + arm
     private const long CaptureQueueCapBytes = 256L << 20;     // background-capture backlog before soft backpressure
+
+    /// <summary>Optional hook (set by the app): refresh the CIK store via CikExtractor (elevated) and return the
+    /// folder now holding the keys, or null. Invoked when streaming detects a title's content key is missing, so
+    /// it can be fetched and the capture retried while the download is still in flight (keeping the 1x path).</summary>
+    public Func<string?>? RequestCikRefresh;
 
     /// <summary>A byte-bounded producer/consumer queue of encrypted chunks. <see cref="Add"/> blocks only when
     /// full (and something is already queued), giving soft backpressure; <see cref="TryTake"/> blocks until an
@@ -861,6 +868,7 @@ public sealed class XboxCacheProxyService : IDisposable
             _streams[file] = st;
             Interlocked.Increment(ref Filling);
             StatsChanged?.Invoke();
+            Log?.Invoke($"STREAM start {Path.GetFileName(file)} — capturing from the install download (arms once its first {st.FrontLen / 1048576} MB arrives)");
             return st;
         }
     }
@@ -872,7 +880,7 @@ public sealed class XboxCacheProxyService : IDisposable
     private void StreamOnStoreBytes(StreamState st, long absOff, byte[] buf, int len)
     {
         if (len <= 0) return;
-        bool feedNow = false, startArm = false, abandon = false;
+        bool feedNow = false, startArm = false, abandon = false; long progressMb = 0;
         lock (st.Lock)
         {
             if (st.Aborted || st.Parked) return;
@@ -893,8 +901,16 @@ public sealed class XboxCacheProxyService : IDisposable
                 st.LastWriteUtc = DateTime.UtcNow;
                 if (!st.Arming)
                 {
-                    if (st.FrontContig >= st.FrontLen) { st.Arming = true; startArm = true; }
+                    // Arm when the header is contiguously buffered, OR once we've buffered enough total (a
+                    // parallel download whose front hasn't assembled) — ArmFromBuffer then fetches the few
+                    // remaining header holes from the CDN. Only give up if even that much never accumulates.
+                    if (st.FrontContig >= st.FrontLen || st.PreArmBytes >= ForceFrontBytes) { st.Arming = true; startArm = true; }
                     else if (st.PreArmBytes > PreArmCapBytes) abandon = true;
+                    else
+                    {
+                        long mb = st.FrontContig / (16L << 20); // log every ~16 MB of front progress
+                        if (mb > st.LoggedFrontMb) { st.LoggedFrontMb = mb; progressMb = st.FrontContig; }
+                    }
                 }
             }
         }
@@ -908,6 +924,8 @@ public sealed class XboxCacheProxyService : IDisposable
             st.Queue?.Add(absOff, copy);
             return;
         }
+        if (progressMb > 0)
+            Log?.Invoke($"STREAM buffering {Path.GetFileName(st.File)} — {progressMb / 1048576} / {st.FrontLen / 1048576} MB of the install download (arms at {st.FrontLen / 1048576} MB)");
         if (abandon) { AbandonStream(st, $"front [0,{st.FrontLen / 1048576} MB) not assembled within {PreArmCapBytes / 1048576} MB (non-sequential download)"); return; }
         if (startArm) new Thread(() => ArmFromBuffer(st)) { IsBackground = true, Name = "xbox-stream-arm" }.Start();
     }
@@ -921,6 +939,22 @@ public sealed class XboxCacheProxyService : IDisposable
         try
         {
             long fl = st.FrontLen;
+
+            // Fix: complete any holes in [0,FrontLen) from the CDN so the header is whole regardless of the
+            // Store's (possibly very parallel) download order. Extra bandwidth = just the holes (usually small).
+            var holes = FrontHoles(st, fl);
+            if (holes.Count > 0)
+            {
+                long hb = 0; foreach (var h in holes) hb += h.e - h.s;
+                Log?.Invoke($"STREAM completing header {Path.GetFileName(st.File)} — fetching {holes.Count} hole(s), {hb / 1048576.0:F1} MB the parallel download hadn't delivered");
+                foreach (var h in holes)
+                {
+                    byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, h.s, h.e);
+                    if (data == null) { AbandonStream(st, $"header hole fetch failed [{h.s},{h.e})"); return; }
+                    lock (st.Lock) { st.PreArm[h.s] = data; st.PreArmBytes += data.Length; }
+                }
+            }
+
             byte[] front = new byte[fl];
             lock (st.Lock)
             {
@@ -938,13 +972,8 @@ public sealed class XboxCacheProxyService : IDisposable
                 : Array.Empty<byte>();
 
             string blob = Path.Combine(_streamBlobDir, MakeBlobName(st.File));
-            // Larger reorder buffer than the offline default: it holds the Store's parallel-request spread until
-            // contiguous. On overflow the capture aborts → tee fallback (safe), so this only affects whether a
-            // pathologically out-of-order download stays on the 1x path.
-            string lastMsg = "";
-            var ctl = LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
-                _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20);
-            if (ctl == null) { AbandonStream(st, $"could not arm — {lastMsg}"); return; }
+            var ctl = TryBeginWithKeyRefresh(st, front, fl, tail, tailOff, blob);
+            if (ctl == null) { AbandonStream(st, "could not arm (see prior line)"); return; }
 
             // Start the background consumer, then hand off the buffered bytes + switch to live enqueueing.
             var queue = new ChunkQueue(CaptureQueueCapBytes);
@@ -965,6 +994,48 @@ public sealed class XboxCacheProxyService : IDisposable
             foreach (var (off, data) in drain) queue.Add(off, data);
         }
         catch (Exception ex) { AbandonStream(st, ex.Message); }
+    }
+
+    /// <summary>The missing sub-ranges of <c>[0, fl)</c> not covered by the buffered chunks — the header pieces
+    /// a parallel download hasn't delivered yet, which <see cref="ArmFromBuffer"/> fetches from the CDN.</summary>
+    private static List<(long s, long e)> FrontHoles(StreamState st, long fl)
+    {
+        var covered = new List<(long s, long e)>();
+        lock (st.Lock)
+            foreach (var kv in st.PreArm)
+                if (kv.Key < fl) { long e = Math.Min(kv.Key + kv.Value.Length, fl); if (e > kv.Key) covered.Add((kv.Key, e)); }
+        covered.Sort((a, b) => a.s.CompareTo(b.s));
+        var merged = new List<(long s, long e)>();
+        foreach (var iv in covered)
+            if (merged.Count > 0 && iv.s <= merged[^1].e) { if (iv.e > merged[^1].e) merged[^1] = (merged[^1].s, iv.e); }
+            else merged.Add(iv);
+        var holes = new List<(long s, long e)>(); long cur = 0;
+        foreach (var iv in merged) { if (iv.s > cur) holes.Add((cur, iv.s)); cur = Math.Max(cur, iv.e); if (cur >= fl) break; }
+        if (cur < fl) holes.Add((cur, fl));
+        return holes;
+    }
+
+    /// <summary>Builds the capture controller; if it can't because a content key is missing, refreshes the CIK
+    /// store (CikExtractor, elevated) once and retries — the download keeps buffering meanwhile, so a title
+    /// whose key wasn't ready is still captured at 1x. Returns null (reason already logged) if it still can't.</summary>
+    private LibXboxOne.StreamingCaptureController? TryBeginWithKeyRefresh(StreamState st, byte[] front, long fl, byte[] tail, long tailOff, string blob)
+    {
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            string lastMsg = "";
+            var ctl = LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
+                _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20);
+            if (ctl != null) return ctl;
+            if (attempt == 0 && lastMsg.IndexOf("MISSING KEY", StringComparison.OrdinalIgnoreCase) >= 0 && RequestCikRefresh != null)
+            {
+                Log?.Invoke($"STREAM {Path.GetFileName(st.File)} — content key not in the store; refreshing CIKs (accept the UAC prompt) …");
+                string? folder = null;
+                try { folder = RequestCikRefresh(); } catch (Exception ex) { Log?.Invoke($"STREAM CIK refresh error: {ex.Message}"); }
+                if (!string.IsNullOrEmpty(folder)) { _streamCikFolder = folder!; continue; } // retry with refreshed keys
+            }
+            return null;
+        }
+        return null;
     }
 
     /// <summary>Background consumer: dequeues encrypted chunks and feeds them to the capture controller

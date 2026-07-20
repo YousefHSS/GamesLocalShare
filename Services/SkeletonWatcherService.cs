@@ -929,6 +929,21 @@ public sealed class SkeletonWatcherService : IDisposable
         }
     }
 
+    /// <summary>Force-refreshes the CIK store via CikExtractor (elevated) and returns the folder now holding the
+    /// keys, or null. Synchronous — used by the streaming proxy when a title's content key is missing so it can
+    /// be fetched mid-download and the capture retried. Runs on a background thread (blocks on the UAC prompt).</summary>
+    public string? RefreshCiks()
+    {
+        if (string.IsNullOrEmpty(_cikExtractorPath)) return null;
+        try
+        {
+            return _cikRunner
+                .EnsureCiksAsync(_cikExtractorPath!, _cikStore, l => Report(l), CancellationToken.None, forceRefresh: true)
+                .GetAwaiter().GetResult();
+        }
+        catch (Exception ex) { Report($"CIK refresh failed: {ex.Message}"); return null; }
+    }
+
     /// <summary>Resolves the folder of .cik files to pass to xvdtool, populating it on demand via
     /// CikExtractor only if needed. Falls back to the configured store.</summary>
     private async Task<string> EnsureCikFolderAsync(CancellationToken ct)
