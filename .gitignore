@@ -374,3 +374,4 @@ Assets/webui/index.html
 
 # Local tool state (Claude Code, etc.)
 .claude/
+/installer_output
