@@ -92,15 +92,18 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
-          ## What's New in 3.0.8
+          ## What's New in 3.0.9
 
-          Streaming skeleton capture is now the primary path, plus a fix for installs that hung at 100%.
+          Hotfix for the streaming skeleton capture deadlocking Xbox installs at 100%.
 
-          - **Fixed: Xbox installs stuck at 100% with no activity** — streaming capture could block or deadlock the download's forward path. Capture can no longer stall or freeze an install; if it can't run, the download completes normally.
-          - **Streaming capture is now the default** — a game's skeleton is built straight from its install download (no full encrypted package written to disk). If capture can't run for a title, it's simply skipped that time — the install is never affected.
-          - **New optional setting: "Also cache the full package to disk"** — off by default. Turn it on to keep a full byte-for-byte copy of each package for other PCs on your LAN (uses a lot of disk). Also acts as the capture fallback.
-          - **Updates no longer re-download the game** — when an update hits an installed game, the app no longer pulls the rest of the package from the CDN to build a new skeleton; it just forwards the update.
-          - **Silent key extraction** — the CikExtractor console window no longer appears during key refresh (runs non-interactively).
+          - **Fixed: Xbox installs frozen at 100% with the app idle** — when a game finished downloading, the streaming-capture finalizer held an internal lock while it fetched the last bytes from the CDN, which blocked every in-flight download request on that same lock and deadlocked the proxy (near-zero CPU, install stuck indefinitely). Finalize now runs lock-free, so the download always completes and the skeleton is written without stalling. This is the real fix for the 100% hang that 3.0.8 only partially addressed.
+
+          Everything else from 3.0.8 carries over unchanged:
+
+          - **Streaming capture is the default** — a game's skeleton is built straight from its install download (no full encrypted package written to disk). If capture can't run for a title, it's simply skipped that time — the install is never affected.
+          - **Optional setting: "Also cache the full package to disk"** — off by default; keeps a full byte-for-byte package copy for other PCs on your LAN (uses a lot of disk) and acts as the capture fallback.
+          - **Updates no longer re-download the game** — an update to an installed game is just forwarded; the app doesn't pull the rest of the package to rebuild a skeleton.
+          - **Silent key extraction** — the CikExtractor console window no longer appears during key refresh.
 
           Underlying 3.0.x Xbox features (LAN transfer, single-copy storage, download cache, prompt-free elevated startup) are unchanged.
 

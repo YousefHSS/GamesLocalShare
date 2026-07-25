@@ -1203,13 +1203,21 @@ public sealed class XboxCacheProxyService : IDisposable
         }
         if (st?.Ctl == null) { status = "no matching streamed capture"; return false; }
         servedPath = st.File;
-        bool ok;
-        lock (st.Lock)
-        {
-            try { Directory.CreateDirectory(Path.GetDirectoryName(skelPath)!); } catch { }
-            ok = st.Ctl.Complete(installDir, skelPath,
-                (o, c) => FetchRangeBytes(st.Host, st.Ip, st.RawPath, o, o + c) ?? new byte[c], out status);
-        }
+
+        // Do NOT hold st.Lock across Complete(). Complete() runs WriteXskl and makes BLOCKING CDN range fetches
+        // (FetchRangeBytes) for every byte the Store never sent. The producer (StreamOnStoreBytes) and consumer
+        // both take st.Lock on their hot path, so holding it here froze every in-flight Store request on st.Lock
+        // and jammed the thread pool — the async fetch continuation could then never get a worker thread, so
+        // Complete() never returned and the whole proxy deadlocked at 100% (0 CPU, all threads in Wait). The
+        // stream is Parked before finalize, so the controller is idle and its origin fields are immutable:
+        // snapshot them and finalize lock-free.
+        LibXboxOne.StreamingCaptureController? ctl; string host, ip, rawPath;
+        lock (st.Lock) { ctl = st.Ctl; host = st.Host; ip = st.Ip; rawPath = st.RawPath; }
+        if (ctl == null) { status = "no matching streamed capture"; return false; }
+
+        try { Directory.CreateDirectory(Path.GetDirectoryName(skelPath)!); } catch { }
+        bool ok = ctl.Complete(installDir, skelPath,
+            (o, c) => FetchRangeBytes(host, ip, rawPath, o, o + c) ?? new byte[c], out status);
         if (ok)
         {
             // Captured → the package is intentionally not on disk; serve future MISSes transiently, never tee.

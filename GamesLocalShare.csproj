@@ -12,10 +12,10 @@
 
     <!-- Product version stamped into the built exe (keep in sync with installer.iss MyAppVersion).
          Without this the assembly defaults to 1.0.0.0, which then shows on the released files. -->
-    <Version>3.0.8</Version>
-    <AssemblyVersion>3.0.8.0</AssemblyVersion>
-    <FileVersion>3.0.8.0</FileVersion>
-    <InformationalVersion>3.0.8</InformationalVersion>
+    <Version>3.0.9</Version>
+    <AssemblyVersion>3.0.9.0</AssemblyVersion>
+    <FileVersion>3.0.9.0</FileVersion>
+    <InformationalVersion>3.0.9</InformationalVersion>
     <Product>Games Local Share</Product>
 	  
     
