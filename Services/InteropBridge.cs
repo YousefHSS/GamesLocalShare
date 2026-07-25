@@ -1162,6 +1162,7 @@ public class InteropBridge : IDisposable
                 captureCpuLimit = s.CaptureCpuLimit.ToString(),
                 captureFromCache = s.CaptureFromCache,
                 xboxStreamingCapture = s.XboxStreamingCapture,
+                xboxCacheFullPackage = s.XboxCacheFullPackage,
                 steamGridDbApiKey = s.SteamGridDbApiKey ?? string.Empty,
             },
             hiddenGames,
@@ -1305,6 +1306,9 @@ public class InteropBridge : IDisposable
 
         if (payload.TryGetProperty("xboxStreamingCapture", out var vXsc))
             s.XboxStreamingCapture = vXsc.GetBoolean();
+
+        if (payload.TryGetProperty("xboxCacheFullPackage", out var vXfp))
+            s.XboxCacheFullPackage = vXfp.GetBoolean();
 
         if (payload.TryGetProperty("steamGridDbApiKey", out var vSgdb))
         {

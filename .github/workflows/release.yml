@@ -92,15 +92,15 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
-          ## What's New in 3.0.5
+          ## What's New in 3.0.8
 
-          Hotfix restoring Xbox single-copy skeleton capture and improving the download cache.
+          Streaming skeleton capture is now the primary path, plus a fix for installs that hung at 100%.
 
-          - **Fixed: skeleton capture was silently broken** — a prior release bundled a stock build of xvdtool without the capture feature, so every capture failed with "input file doesn't exist". Restored the capture-capable build; single-copy storage works again.
-          - **Single-download cache** — the LAN cache proxy no longer pulls each Xbox package twice. It captures the package from the install stream as it downloads, so it's fetched once and always matches the installed version (smaller, correct skeletons; no wasted bandwidth).
-          - **Reliable auto-capture on fresh installs** — titles whose folder is renamed during Xbox's install staging are now tracked and captured without failing.
-          - **Live progress bar** — the app shows a "Preparing…" progress bar with phase and elapsed time while a game is being prepared for single-copy/transfer.
-          - **Installer** — now detects the required .NET 8 runtime and points you to it if missing.
+          - **Fixed: Xbox installs stuck at 100% with no activity** — streaming capture could block or deadlock the download's forward path. Capture can no longer stall or freeze an install; if it can't run, the download completes normally.
+          - **Streaming capture is now the default** — a game's skeleton is built straight from its install download (no full encrypted package written to disk). If capture can't run for a title, it's simply skipped that time — the install is never affected.
+          - **New optional setting: "Also cache the full package to disk"** — off by default. Turn it on to keep a full byte-for-byte copy of each package for other PCs on your LAN (uses a lot of disk). Also acts as the capture fallback.
+          - **Updates no longer re-download the game** — when an update hits an installed game, the app no longer pulls the rest of the package from the CDN to build a new skeleton; it just forwards the update.
+          - **Silent key extraction** — the CikExtractor console window no longer appears during key refresh (runs non-interactively).
 
           Underlying 3.0.x Xbox features (LAN transfer, single-copy storage, download cache, prompt-free elevated startup) are unchanged.
 

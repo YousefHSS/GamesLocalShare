@@ -21,7 +21,8 @@ const DEFAULTS: AppSettingsForm = {
   xboxTransferMethod: 'Auto',
   captureCpuLimit: 'Balanced',
   captureFromCache: true,
-  xboxStreamingCapture: false,
+  xboxStreamingCapture: true,
+  xboxCacheFullPackage: false,
   steamGridDbApiKey: '',
 };
 
@@ -280,10 +281,18 @@ export default function SettingsModal({
                 />
 
                 <Toggle
-                  label="Stream skeletons during download (experimental)"
-                  hint="Capture a game's skeleton straight from its install download so the full encrypted package is never written to disk — no 2× storage peak. Reuses the download (no extra bandwidth) and needs the game's content key (fetched automatically). Any problem falls back to the normal capture, so it's safe to try. Applies to the next download."
+                  label="Stream skeletons during download (recommended)"
+                  hint="The main capture path: build a game's skeleton straight from its install download so the full encrypted package is never written to disk — no 2× storage peak. Reuses the download (no extra bandwidth) and needs the game's content key (fetched automatically). If capture can't run, the download still completes normally — that game just gets no skeleton. Never slows or blocks the install. Applies to the next download."
                   checked={form.xboxStreamingCapture}
                   onChange={v => set('xboxStreamingCapture', v)}
+                  disabled={!payload.isWindows}
+                />
+
+                <Toggle
+                  label="Also cache the full package to disk"
+                  hint="In addition to the skeleton, keep a full byte-for-byte copy of each downloaded game in the cache so other PCs on your network can install it directly from this one. Uses a lot of disk (the whole game). Off by default — skeletons alone are enough for transfers. Also serves as the fallback when streaming capture can't run for a game."
+                  checked={form.xboxCacheFullPackage}
+                  onChange={v => set('xboxCacheFullPackage', v)}
                   disabled={!payload.isWindows}
                 />
 

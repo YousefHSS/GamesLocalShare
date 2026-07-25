@@ -2,7 +2,7 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <!-- This manifest is used on Windows only.
        Don't remove this as it might cause issues with window transparency and on Windows 7. -->
-  <assemblyIdentity version="1.0.0.0" name="GamesLocalShare"/>
+  <assemblyIdentity version="3.0.8.0" name="GamesLocalShare"/>
   
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>

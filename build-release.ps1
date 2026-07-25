@@ -2,7 +2,7 @@
 # Run this to create release builds and installer
 
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "3.0.8",
     [switch]$BuildInstaller = $false,
     [switch]$SelfContained = $true
 )

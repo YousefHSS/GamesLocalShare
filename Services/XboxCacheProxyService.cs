@@ -71,6 +71,12 @@ public sealed class XboxCacheProxyService : IDisposable
     // (StartFill), so there is no regression. On complete coverage the armed controller is PARKED keyed by its
     // cache path (which contains the content GUID); the watcher finalizes it once the install is available.
     private bool _streamingEnabled;
+    // When true, ALSO cache the full encrypted package to disk (the sparse-.part tee) — an opt-in LAN-caching
+    // feature, and the fallback when streaming can't capture a title. When false, streaming is the only capture
+    // path and a title that can't be streamed is simply forwarded (no skeleton, no disk copy) so the install
+    // still completes. The Store always receives the genuine forwarded bytes regardless, so this flag only
+    // affects what (if anything) this PC keeps on disk — never whether the install succeeds.
+    private bool _teeEnabled;
     private string _streamCikFolder = "", _streamBlobDir = "";
     private sealed class StreamState
     {
@@ -95,16 +101,26 @@ public sealed class XboxCacheProxyService : IDisposable
     }
     private const long PreArmCapBytes = 256L << 20;           // give up streaming if the front never assembles
     private const long ForceFrontBytes = 128L << 20;          // buffered this much w/o a contiguous front → complete it from the CDN + arm
-    private const long CaptureQueueCapBytes = 256L << 20;     // background-capture backlog before soft backpressure
+    private const long CaptureQueueCapBytes = 256L << 20;     // background-capture backlog cap (producer never blocks; over cap → give up)
+    // Update guard: how much of a package we'll pull from the CDN to COMPLETE a streaming capture, as a
+    // fraction of the package total (gap-fill) / of the front (header holes). An update re-downloads only its
+    // changed blocks and reuses the rest locally, so finishing its capture would re-fetch most of the game —
+    // which we refuse: past these fractions we abandon capture and just forward the update (no extra download).
+    // A fresh install delivers ~the whole package itself, so its completion cost stays well under these.
+    // (Temporary — until cross-version reuse lands; see PLANNING/xbox-validation/update-reuse.)
+    private const double MaxCompleteFraction = 0.15;         // gap-fill cap vs package total
+    private const double MaxHeaderHoleFraction = 0.75;       // header-hole cap vs front
 
     /// <summary>Optional hook (set by the app): refresh the CIK store via CikExtractor (elevated) and return the
     /// folder now holding the keys, or null. Invoked when streaming detects a title's content key is missing, so
     /// it can be fetched and the capture retried while the download is still in flight (keeping the 1x path).</summary>
     public Func<string?>? RequestCikRefresh;
 
-    /// <summary>A byte-bounded producer/consumer queue of encrypted chunks. <see cref="Add"/> blocks only when
-    /// full (and something is already queued), giving soft backpressure; <see cref="TryTake"/> blocks until an
-    /// item is available or the queue is closed and drained.</summary>
+    /// <summary>A producer/consumer queue of encrypted chunks. <see cref="Add"/> NEVER blocks the producer — the
+    /// download thread must never be throttled or frozen by decrypt latency. The cap is advisory: the caller
+    /// (<see cref="StreamOnStoreBytes"/>) checks <see cref="Bytes"/> against <see cref="Cap"/> and gives up
+    /// capture (forward-only) when the backlog would exceed it, so memory stays bounded without ever stalling the
+    /// install. <see cref="TryTake"/> blocks until an item is available or the queue is closed and drained.</summary>
     private sealed class ChunkQueue
     {
         private readonly Queue<(long off, byte[] data)> _q = new();
@@ -114,11 +130,11 @@ public sealed class XboxCacheProxyService : IDisposable
         private readonly object _g = new();
         public ChunkQueue(long capBytes) { _cap = capBytes; }
         public long Bytes { get { lock (_g) return _bytes; } }
+        public long Cap => _cap;
         public void Add(long off, byte[] data)
         {
             lock (_g)
             {
-                while (_bytes + data.Length > _cap && !_closed && _q.Count > 0) Monitor.Wait(_g);
                 if (_closed) return;
                 _q.Enqueue((off, data)); _bytes += data.Length; Monitor.PulseAll(_g);
             }
@@ -149,16 +165,17 @@ public sealed class XboxCacheProxyService : IDisposable
     /// title's skeleton in-stream (no full package on disk) instead of the sparse-.part tee, loading keys from
     /// <paramref name="cikFolder"/> and writing the growing skeleton blob under <paramref name="blobDir"/>.
     /// Falls back to the tee whenever streaming can't be armed or aborts. Safe to call before or after Start.</summary>
-    public void ConfigureStreamingCapture(bool enabled, string? cikFolder, string? blobDir)
+    public void ConfigureStreamingCapture(bool enabled, string? cikFolder, string? blobDir, bool cacheFullPackage = false)
     {
         _streamingEnabled = enabled;
+        _teeEnabled = cacheFullPackage;
         _streamCikFolder = cikFolder ?? "";
         _streamBlobDir = string.IsNullOrWhiteSpace(blobDir)
             ? Path.Combine(Path.GetTempPath(), "gls-stream-blobs") : blobDir!;
         try { if (enabled) Directory.CreateDirectory(_streamBlobDir); } catch { }
         Log?.Invoke(enabled
-            ? $"streaming capture ENABLED (cik: {_streamCikFolder}, blobs: {_streamBlobDir})"
-            : "streaming capture disabled");
+            ? $"streaming capture ENABLED (cik: {_streamCikFolder}, blobs: {_streamBlobDir}); full-package cache {(_teeEnabled ? "ON" : "off")}"
+            : $"streaming capture disabled; full-package cache {(_teeEnabled ? "ON" : "off")}");
     }
     // Active peer-origin overrides: when a request's URL path contains one of these keys (e.g. a title's
     // PackageFullName / content GUID), forward it to a peer's streaming-reconstruct endpoint instead of the CDN
@@ -516,12 +533,14 @@ public sealed class XboxCacheProxyService : IDisposable
                         teeBase = crange?.From ?? 0;
                         if (objTotal > 0)
                         {
-                            // Prefer streaming capture when armed; only fall back to the sparse-.part tee when
-                            // streaming isn't handling this object (disabled, cached, or abandoned).
+                            // Streaming is the primary capture path. The sparse-.part tee only runs when the
+                            // full-package cache is opted in AND streaming isn't handling this object (disabled,
+                            // cached, or abandoned). With the tee off, an object streaming can't capture is just
+                            // forwarded — the Store still gets its bytes, so the install completes regardless.
                             scap = TryGetStream(file, hostHdr, rawPath, ip, objTotal);
-                            if (scap == null) tee = GetOrCreateFill(file, hostHdr, rawPath, ip, objTotal);
+                            if (scap == null && _teeEnabled) tee = GetOrCreateFill(file, hostHdr, rawPath, ip, objTotal);
                         }
-                        else StartFill(file, hostHdr, rawPath, ip);
+                        else if (_teeEnabled) StartFill(file, hostHdr, rawPath, ip); // unknown size: streaming can't arm
                     }
 
                     // Never write more than the declared Content-Length: if the upstream body runs longer than
@@ -790,16 +809,36 @@ public sealed class XboxCacheProxyService : IDisposable
             foreach (var st in streamSnap)
             {
                 if (ct.IsCancellationRequested) break;
-                bool idle; long total; List<(long s, long e)> gaps = new();
+                bool idle, armed, arming; long total; List<(long s, long e)> gaps = new();
                 lock (st.Lock)
                 {
-                    if (!st.Armed || st.Aborted || st.Parked) continue;
+                    if (st.Aborted || st.Parked) continue;
+                    armed = st.Armed; arming = st.Arming;
                     total = st.Total;
                     idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > 30;
-                    if (idle) gaps = ComplementLocked(st.Fed, total);
+                    if (idle && armed) gaps = ComplementLocked(st.Fed, total);
                 }
-                if (!idle || gaps.Count == 0) continue;
+                if (!idle) continue;
+                if (!armed)
+                {
+                    if (arming) continue; // arming in progress — let ArmFromBuffer finish
+                    // The Store finished but the capture never armed: the header never assembled because the
+                    // download reused local blocks instead of sending them (an update). Completing it would mean
+                    // re-downloading the package, so don't — give up capture, forward-only.
+                    AbandonStream(st, "update: download finished without assembling the header (reused local blocks)");
+                    continue;
+                }
+                if (gaps.Count == 0) continue;
                 long gapBytes = 0; foreach (var g in gaps) gapBytes += g.e - g.s;
+                // Don't re-download most of the package just to finish a skeleton — that's the "an update
+                // re-downloads the whole game" behavior. Past the cap the Store reused local blocks (an update),
+                // so abandon capture and forward only; the update installs from the Store's own bytes.
+                if (gapBytes > (long)(total * MaxCompleteFraction))
+                {
+                    Log?.Invoke($"STREAM update {Path.GetFileName(st.File)} — Store sent {(total - gapBytes) / 1048576.0:F1} of {total / 1048576.0:F1} MB; not re-downloading {gapBytes / 1048576.0:F1} MB to complete the skeleton");
+                    StreamAbort(st, "update: skipping gap-fill to avoid re-downloading the package");
+                    continue;
+                }
                 Log?.Invoke($"STREAM gap-fill {Path.GetFileName(st.File)}: {gaps.Count} range(s), {gapBytes / 1048576.0:F1} MB the Store never sent");
                 const long step = 8L << 20;
                 foreach (var g in gaps)
@@ -917,11 +956,18 @@ public sealed class XboxCacheProxyService : IDisposable
         if (feedNow)
         {
             // Hand off to the background consumer — copy (buf is reused) + enqueue. Never decrypts on the
-            // download thread, so the download isn't throttled by decrypt latency. Add() only blocks if the
-            // capture backlog fills (decrypt genuinely can't keep up).
+            // download thread. Add() never blocks; if the decrypt backlog would exceed the cap the consumer is
+            // hopelessly behind, so give up capture (forward-only) rather than stall the Store's install —
+            // correctness of the download always wins over capturing this title.
+            var q = st.Queue;
+            if (q != null && q.Bytes + len > q.Cap)
+            {
+                StreamAbort(st, $"decrypt backlog full (~{q.Bytes / 1048576} MB behind); giving up capture to keep the install at full speed");
+                return;
+            }
             var copy = new byte[len];
             Array.Copy(buf, 0, copy, 0, len);
-            st.Queue?.Add(absOff, copy);
+            q?.Add(absOff, copy);
             return;
         }
         if (progressMb > 0)
@@ -946,6 +992,13 @@ public sealed class XboxCacheProxyService : IDisposable
             if (holes.Count > 0)
             {
                 long hb = 0; foreach (var h in holes) hb += h.e - h.s;
+                // If the Store delivered almost none of the header, it's reusing local blocks (an update with an
+                // unchanged header). Completing it would re-download the package, so don't — forward only.
+                if (hb > (long)(fl * MaxHeaderHoleFraction))
+                {
+                    AbandonStream(st, $"update: header mostly unchanged ({hb / 1048576.0:F1} of {fl / 1048576.0:F1} MB not sent); not re-downloading to capture");
+                    return;
+                }
                 Log?.Invoke($"STREAM completing header {Path.GetFileName(st.File)} — fetching {holes.Count} hole(s), {hb / 1048576.0:F1} MB the parallel download hadn't delivered");
                 foreach (var h in holes)
                 {
@@ -1045,12 +1098,24 @@ public sealed class XboxCacheProxyService : IDisposable
     {
         var q = st.Queue;
         if (q == null) return;
-        while (q.TryTake(out var item))
+        try
         {
-            if (st.Aborted) break;
-            if (StreamFeed(st, item.off, item.data, 0, item.data.Length))
-                StreamEndRange(st, item.off, item.data.Length);
-            else break; // aborted inside StreamFeed (overflow/error) → fell back to the tee
+            while (q.TryTake(out var item))
+            {
+                if (st.Aborted) break;
+                if (StreamFeed(st, item.off, item.data, 0, item.data.Length))
+                    StreamEndRange(st, item.off, item.data.Length);
+                else break; // aborted inside StreamFeed (error) → gave up capture
+            }
+        }
+        catch (Exception ex)
+        {
+            // The consumer is the ONLY thing that drains and closes the queue. If decrypt/classify throws (a
+            // LibXboxOne edge case, a lazy dependency-resolution failure, a late CIK) and this thread died
+            // without closing the queue, every download thread would block on the queue and the install would
+            // freeze near 100% with no CPU. Give up capture instead: StreamAbort closes the queue and unblocks
+            // the download; the Store keeps its already-forwarded bytes.
+            StreamAbort(st, $"capture consumer error: {ex.Message}");
         }
     }
 
@@ -1087,17 +1152,17 @@ public sealed class XboxCacheProxyService : IDisposable
         }
     }
 
-    /// <summary>Abandons streaming for an object and kicks a normal whole-object download so it still caches
-    /// (no regression). Rare: only on reorder-buffer overflow, version-mismatch bloat, or an error.</summary>
+    /// <summary>Gives up streaming for an object. With the full-package cache opted in, kicks a normal
+    /// whole-object download so it still caches; otherwise the object is just forwarded (no skeleton, no disk
+    /// copy) — the Store already has/gets its bytes either way, so the install is unaffected. Rare: only on a
+    /// reorder-buffer overflow, version-mismatch bloat, a decrypt error, or the decrypt backlog filling.</summary>
     private void StreamAbort(StreamState st, string reason)
     {
         lock (st.Lock) { if (st.Aborted) return; st.Aborted = true; try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
         st.Queue?.Close();
         lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
         Interlocked.Decrement(ref Filling);
-        Log?.Invoke($"STREAM abort {Path.GetFileName(st.File)} — {reason}; falling back to full download");
-        StatsChanged?.Invoke();
-        StartFill(st.File, st.Host, st.RawPath, st.Ip);
+        GiveUpCapture(st, reason);
     }
 
     private void AbandonStream(StreamState st, string reason)
@@ -1105,9 +1170,21 @@ public sealed class XboxCacheProxyService : IDisposable
         lock (st.Lock) { st.Aborted = true; st.Arming = false; try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
         lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
         Interlocked.Decrement(ref Filling);
-        Log?.Invoke($"STREAM not armed {Path.GetFileName(st.File)} — {reason}; using tee");
+        GiveUpCapture(st, reason);
+    }
+
+    /// <summary>Shared tail of the give-up paths: when the full-package cache is opted in, fall back to the tee
+    /// (whole-object download) so the package is still cached; otherwise forward-only (nothing kept on disk).</summary>
+    private void GiveUpCapture(StreamState st, string reason)
+    {
+        if (_teeEnabled)
+        {
+            Log?.Invoke($"STREAM give up {Path.GetFileName(st.File)} — {reason}; caching full package instead");
+            StartFill(st.File, st.Host, st.RawPath, st.Ip);
+        }
+        else
+            Log?.Invoke($"STREAM give up {Path.GetFileName(st.File)} — {reason}; forwarding only (no skeleton, no disk copy)");
         StatsChanged?.Invoke();
-        StartFill(st.File, st.Host, st.RawPath, st.Ip);
     }
 
     /// <summary>Finalizes a parked streamed skeleton against a now-available install. Matches the parked

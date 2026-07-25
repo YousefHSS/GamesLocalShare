@@ -411,6 +411,7 @@ export interface AppSettingsForm {
   captureCpuLimit: 'Full' | 'Balanced' | 'Low';
   captureFromCache: boolean;
   xboxStreamingCapture: boolean;
+  xboxCacheFullPackage: boolean;
   steamGridDbApiKey?: string;
 }
 

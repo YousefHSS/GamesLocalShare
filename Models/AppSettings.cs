@@ -171,14 +171,24 @@ public class AppSettings
     public bool CaptureFromCache { get; set; } = true;
 
     /// <summary>
-    /// EXPERIMENTAL. When true, the LAN cache proxy captures a title's skeleton by <b>streaming</b> the install
+    /// When true (the default), the LAN cache proxy captures a title's skeleton by <b>streaming</b> the install
     /// download — decrypting and classifying pages as they pass through the proxy so the full encrypted package
-    /// is never written to disk (avoids the download-time 2× storage peak). Requires the matching CIK to already
-    /// be in the store when the download starts; when it isn't (or anything goes wrong) the proxy falls back to
-    /// the normal sparse-.part tee + capture-after-install, so this is strictly a best-effort optimization with
-    /// no effect on the download. Default false (off) — the proven tee path is unchanged until enabled.
+    /// is never written to disk (avoids the download-time 2× storage peak). This is the primary capture path.
+    /// Requires the matching CIK to already be in the store when the download starts (fetched automatically when
+    /// it isn't). If capture can't run — no key, an unsupported package, or any error — the proxy simply keeps
+    /// forwarding the genuine bytes so the install still completes; that title just gets no skeleton (and no disk
+    /// copy, unless <see cref="XboxCacheFullPackage"/> is on). Capture never blocks or slows the download.
     /// </summary>
-    public bool XboxStreamingCapture { get; set; }
+    public bool XboxStreamingCapture { get; set; } = true;
+
+    /// <summary>
+    /// Optional. When true, the proxy ALSO writes a full byte-for-byte copy of each downloaded package to the
+    /// cache (the sparse-.part tee) — so other PCs on the LAN can install it directly from this one. Uses a lot
+    /// of disk (the whole game). It doubles as the fallback for <see cref="XboxStreamingCapture"/>: when streaming
+    /// can't capture a title, the full package is cached instead. Default false — skeletons alone suffice for
+    /// transfers, and streaming avoids the full on-disk copy.
+    /// </summary>
+    public bool XboxCacheFullPackage { get; set; }
 
     /// <summary>
     /// List of external drive libraries to scan for games
@@ -328,7 +338,8 @@ public class AppSettings
             $"CikExtractorPath={CikExtractorPath ?? string.Empty}",
             $"XboxSingleCopyAutoStart={XboxSingleCopyAutoStart}",
             $"XboxTransferMethod={XboxTransferMethod}",
-            $"XboxStreamingCapture={XboxStreamingCapture}"
+            $"XboxStreamingCapture={XboxStreamingCapture}",
+            $"XboxCacheFullPackage={XboxCacheFullPackage}"
         };
         for (int i = 0; i < ExternalLibraries.Count; i++)
         {
@@ -394,7 +405,10 @@ public class AppSettings
                         ? xtm : XboxTransferMethod.Auto;
                     break;
                 case "XboxStreamingCapture":
-                    settings.XboxStreamingCapture = bool.TryParse(value, out var xsc) && xsc;
+                    settings.XboxStreamingCapture = !bool.TryParse(value, out var xsc) || xsc;
+                    break;
+                case "XboxCacheFullPackage":
+                    settings.XboxCacheFullPackage = bool.TryParse(value, out var xfp) && xfp;
                     break;
                 case "HiddenGameIds":
                     if (!string.IsNullOrEmpty(value))

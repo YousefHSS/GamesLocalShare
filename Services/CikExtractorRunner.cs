@@ -18,8 +18,14 @@ public sealed class CikExtractorRunner
 {
     // On-demand scheduled task that runs CikExtractor with highest privileges. Registered once (one UAC, or
     // silent if the app is already elevated); every refresh after that starts it via Start-ScheduledTask, which
-    // runs the task elevated WITHOUT a prompt — so key extraction becomes silent.
+    // runs the task elevated WITHOUT a prompt — so key extraction becomes silent. The task runs non-interactively
+    // (S4U), so CikExtractor's console never appears on the user's desktop (no scary cmd window flashing up).
     private const string TaskName = "GamesLocalShare-CikExtractor";
+
+    // Bump when the task DEFINITION changes (e.g. its logon type). The registration marker records this scheme,
+    // so existing installs whose task predates the change re-register it once (rather than silently keep running
+    // the old, visible-window task).
+    private const string TaskScheme = "s4u-hidden-v1";
 
     /// <summary>
     /// Ensures the CIK store contains at least one .cik. If it already does, returns the folder holding
@@ -85,6 +91,7 @@ public sealed class CikExtractorRunner
                 FileName = exe,
                 UseShellExecute = true, // required for the runas verb
                 Verb = "runas",          // request elevation (UAC)
+                WindowStyle = ProcessWindowStyle.Hidden, // SW_HIDE: keep CikExtractor's console off-screen
                 WorkingDirectory = Path.GetDirectoryName(exe) ?? cikStore,
             };
             psi.ArgumentList.Add("dump");
@@ -147,7 +154,7 @@ public sealed class CikExtractorRunner
                     : "setting up silent key extraction — accept this one-time UAC prompt (no prompts afterward) …");
                 if (!ElevationHelper.RunPowerShellElevated(BuildRegisterCikTaskScript(exe, cikStore)))
                     return false;
-                try { File.WriteAllText(MarkerPath(cikStore), exe); } catch { }
+                try { File.WriteAllText(MarkerPath(cikStore), $"{exe}|{TaskScheme}"); } catch { }
             }
             log?.Invoke("refreshing keys via the CikExtractor task (no prompt) …");
             RunTaskAndWait();
@@ -158,14 +165,15 @@ public sealed class CikExtractorRunner
 
     private static string MarkerPath(string cikStore) => Path.Combine(cikStore, ".ciktask");
 
-    /// <summary>True if the task exists AND was registered for the current exe (so a moved/updated tool triggers
-    /// a re-register instead of silently running a stale command).</summary>
+    /// <summary>True if the task exists AND was registered for the current exe with the current definition scheme
+    /// (so a moved/updated tool, or a changed task definition, triggers a re-register instead of silently running
+    /// a stale — or old visible-window — command).</summary>
     private static bool TaskMatchesCurrent(string cikStore, string exe)
     {
         try
         {
             var m = MarkerPath(cikStore);
-            return File.Exists(m) && string.Equals(File.ReadAllText(m).Trim(), exe, StringComparison.OrdinalIgnoreCase);
+            return File.Exists(m) && string.Equals(File.ReadAllText(m).Trim(), $"{exe}|{TaskScheme}", StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
@@ -204,8 +212,11 @@ public sealed class CikExtractorRunner
             "$ErrorActionPreference='Stop'\n" +
             "try {\n" +
             $"  $action = New-ScheduledTaskAction -Execute '{Q(exe)}' -Argument '{arg}' -WorkingDirectory '{Q(workDir)}'\n" +
-            $"  $principal = New-ScheduledTaskPrincipal -UserId '{Q(user)}' -LogonType Interactive -RunLevel Highest\n" +
-            "  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::FromMinutes(10)) -MultipleInstances IgnoreNew\n" +
+            // S4U (service-for-user): runs elevated as the user WITHOUT an interactive desktop session, so
+            // CikExtractor's console window never appears. It only reads local registry + writes local .cik files
+            // (no network), which S4U supports. -Hidden also keeps it out of the Task Scheduler UI listing.
+            $"  $principal = New-ScheduledTaskPrincipal -UserId '{Q(user)}' -LogonType S4U -RunLevel Highest\n" +
+            "  $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden -ExecutionTimeLimit ([TimeSpan]::FromMinutes(10)) -MultipleInstances IgnoreNew\n" +
             $"  Register-ScheduledTask -TaskName '{TaskName}' -Action $action -Principal $principal -Settings $settings -Force | Out-Null\n" +
             "  exit 0\n} catch { exit 1 }";
     }
