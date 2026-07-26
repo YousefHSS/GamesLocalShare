@@ -77,7 +77,10 @@ public sealed class XboxCacheProxyService : IDisposable
     // still completes. The Store always receives the genuine forwarded bytes regardless, so this flag only
     // affects what (if anything) this PC keeps on disk — never whether the install succeeds.
     private bool _teeEnabled;
-    private string _streamCikFolder = "", _streamBlobDir = "";
+    // Written by the background CIK prewarm (PrewarmCiks) and read by ArmFromBuffer on another thread.
+    private volatile string _streamCikFolder = "";
+    private string _streamBlobDir = "";
+    private int _cikPrewarming;                               // 0/1 guard: at most one prewarm in flight
     private sealed class StreamState
     {
         public string File = "", Host = "", RawPath = "", Ip = "";
@@ -93,6 +96,9 @@ public sealed class XboxCacheProxyService : IDisposable
         public long LoggedFrontMb;                            // throttles the buffering-progress log
         public bool Armed, Aborted, Parked, Arming;
         public DateTime LastWriteUtc = DateTime.UtcNow;
+        // When the capture backlog first went over the soft cap (null = under it). Distinguishes a transient
+        // burst — every capture starts with one, see CaptureBacklogGrace — from a consumer that can't keep up.
+        public DateTime? OverCapSinceUtc;
         public readonly object Lock = new();
         // Background-capture queue: the download threads copy+enqueue (fast, never blocked by decrypt); one
         // consumer thread decrypts/feeds the controller. Blocks the download only if it fills (decrypt can't keep
@@ -101,7 +107,13 @@ public sealed class XboxCacheProxyService : IDisposable
     }
     private const long PreArmCapBytes = 256L << 20;           // give up streaming if the front never assembles
     private const long ForceFrontBytes = 128L << 20;          // buffered this much w/o a contiguous front → complete it from the CDN + arm
-    private const long CaptureQueueCapBytes = 256L << 20;     // background-capture backlog cap (producer never blocks; over cap → give up)
+    // Background-capture backlog caps (the producer never blocks). The SOFT cap is the steady-state target: a
+    // backlog above it only means the consumer is losing if it STAYS there for CaptureBacklogGrace — arming
+    // drains the entire pre-arm buffer into the queue in one shot, so every capture legitimately starts out
+    // near (or over) the soft cap and needs a moment to work it down. The HARD cap bounds memory regardless.
+    private const long CaptureQueueCapBytes = 256L << 20;
+    private const long CaptureQueueHardCapBytes = 640L << 20;
+    private static readonly TimeSpan CaptureBacklogGrace = TimeSpan.FromSeconds(20);
     // Update guard: how much of a package we'll pull from the CDN to COMPLETE a streaming capture, as a
     // fraction of the package total (gap-fill) / of the front (header holes). An update re-downloads only its
     // changed blocks and reuses the rest locally, so finishing its capture would re-fetch most of the game —
@@ -908,6 +920,7 @@ public sealed class XboxCacheProxyService : IDisposable
             Interlocked.Increment(ref Filling);
             StatsChanged?.Invoke();
             Log?.Invoke($"STREAM start {Path.GetFileName(file)} — capturing from the install download (arms once its first {st.FrontLen / 1048576} MB arrives)");
+            PrewarmCiks();
             return st;
         }
     }
@@ -920,10 +933,28 @@ public sealed class XboxCacheProxyService : IDisposable
     {
         if (len <= 0) return;
         bool feedNow = false, startArm = false, abandon = false; long progressMb = 0;
+        long backlogGiveUp = 0; bool backlogHard = false;
         lock (st.Lock)
         {
             if (st.Aborted || st.Parked) return;
-            if (st.Armed) feedNow = true;
+            if (st.Armed)
+            {
+                feedNow = true;
+                // Backlog gate. Sampling the queue once and giving up the moment it's over cap misfires on the
+                // arm-time burst: ArmFromBuffer hands the whole pre-arm buffer over at once, so the consumer's
+                // first instant is already at cap and the very next chunk killed the capture. Require the
+                // backlog to stay over the soft cap for CaptureBacklogGrace before calling the consumer beaten.
+                var q0 = st.Queue;
+                long backlog = q0 == null ? 0 : q0.Bytes + len;
+                if (q0 == null || backlog <= CaptureQueueCapBytes) st.OverCapSinceUtc = null;
+                else
+                {
+                    var now = DateTime.UtcNow;
+                    st.OverCapSinceUtc ??= now;
+                    if (backlog > CaptureQueueHardCapBytes) { backlogGiveUp = backlog; backlogHard = true; feedNow = false; }
+                    else if (now - st.OverCapSinceUtc.Value > CaptureBacklogGrace) { backlogGiveUp = backlog; feedNow = false; }
+                }
+            }
             else
             {
                 // Keep the LONGEST chunk seen at each offset (parallel/overlapping Store requests can deliver a
@@ -953,21 +984,22 @@ public sealed class XboxCacheProxyService : IDisposable
                 }
             }
         }
+        if (backlogGiveUp > 0)
+        {
+            StreamAbort(st, backlogHard
+                ? $"decrypt backlog {backlogGiveUp / 1048576} MB (over the {CaptureQueueHardCapBytes / 1048576} MB hard cap); giving up capture to keep the install at full speed"
+                : $"decrypt backlog stuck at ~{backlogGiveUp / 1048576} MB for {CaptureBacklogGrace.TotalSeconds:F0}s; giving up capture to keep the install at full speed");
+            return;
+        }
         if (feedNow)
         {
             // Hand off to the background consumer — copy (buf is reused) + enqueue. Never decrypts on the
-            // download thread. Add() never blocks; if the decrypt backlog would exceed the cap the consumer is
-            // hopelessly behind, so give up capture (forward-only) rather than stall the Store's install —
-            // correctness of the download always wins over capturing this title.
-            var q = st.Queue;
-            if (q != null && q.Bytes + len > q.Cap)
-            {
-                StreamAbort(st, $"decrypt backlog full (~{q.Bytes / 1048576} MB behind); giving up capture to keep the install at full speed");
-                return;
-            }
+            // download thread. Add() never blocks; the backlog gate above (evaluated under st.Lock) decides when
+            // the consumer is hopelessly behind, so we give up capture (forward-only) rather than stall the
+            // Store's install — correctness of the download always wins over capturing this title.
             var copy = new byte[len];
             Array.Copy(buf, 0, copy, 0, len);
-            q?.Add(absOff, copy);
+            st.Queue?.Add(absOff, copy);
             return;
         }
         if (progressMb > 0)
@@ -1066,6 +1098,31 @@ public sealed class XboxCacheProxyService : IDisposable
         foreach (var iv in merged) { if (iv.s > cur) holes.Add((cur, iv.s)); cur = Math.Max(cur, iv.e); if (cur >= fl) break; }
         if (cur < fl) holes.Add((cur, fl));
         return holes;
+    }
+
+    /// <summary>Kicks a CIK-store refresh in the BACKGROUND when a package download starts, so the key is already
+    /// in the store by the time the front is buffered and <see cref="ArmFromBuffer"/> arms on its first try.
+    /// <para>Without it, a missing key is only discovered inside ArmFromBuffer, which then runs CikExtractor
+    /// elevated <b>synchronously</b> (10-25 s observed). The download isn't paused for that, and while
+    /// <c>Arming</c> is set the pre-arm buffer grows unbounded — so arming drained a &gt;cap pile straight into the
+    /// capture queue and the capture was given up the same second it armed. Prewarming removes that window.</para>
+    /// <para>Safe to call speculatively: the hook is rate-limited (10 min) and dumps ALL device keys in one run,
+    /// so calls within the cooldown reuse the store without prompting.</para></summary>
+    private void PrewarmCiks()
+    {
+        if (RequestCikRefresh == null) return;
+        if (Interlocked.CompareExchange(ref _cikPrewarming, 1, 0) != 0) return; // one in flight is enough
+        new Thread(() =>
+        {
+            try
+            {
+                var folder = RequestCikRefresh?.Invoke();
+                if (!string.IsNullOrEmpty(folder)) _streamCikFolder = folder!;
+            }
+            catch (Exception ex) { Log?.Invoke($"STREAM CIK prewarm error: {ex.Message}"); }
+            finally { Interlocked.Exchange(ref _cikPrewarming, 0); }
+        })
+        { IsBackground = true, Name = "xbox-cik-prewarm" }.Start();
     }
 
     /// <summary>Builds the capture controller; if it can't because a content key is missing, refreshes the CIK
