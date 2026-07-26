@@ -92,13 +92,17 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
-          ## What's New in 3.0.9
+          ## What's New in 3.0.10
 
-          Hotfix for the streaming skeleton capture deadlocking Xbox installs at 100%.
+          Hotfix for large games silently skipping skeleton capture.
 
-          - **Fixed: Xbox installs frozen at 100% with the app idle** — when a game finished downloading, the streaming-capture finalizer held an internal lock while it fetched the last bytes from the CDN, which blocked every in-flight download request on that same lock and deadlocked the proxy (near-zero CPU, install stuck indefinitely). Finalize now runs lock-free, so the download always completes and the skeleton is written without stalling. This is the real fix for the 100% hang that 3.0.8 only partially addressed.
+          - **Fixed: big titles gave up capture the instant they started it** — a game whose content key wasn't yet in the key store had that key fetched *during* the arming step, which blocks for 10-25 seconds. The download isn't paused for that, so hundreds of MB piled up in memory and were handed to the capture all at once, immediately tripping the "decrypt backlog full" limit — capture was abandoned in the same second it began. Smaller games finished the key fetch quickly enough to slip under the limit, which is why only large ones were affected. The key fetch now starts in the background as soon as the download begins, so it's ready before arming, and the backlog limit no longer trips on a momentary burst that would have cleared on its own. Installs themselves were never affected — only whether a skeleton was captured.
 
-          Everything else from 3.0.8 carries over unchanged:
+          Everything else from 3.0.9 carries over unchanged:
+
+          - **Fixed: Xbox installs frozen at 100% with the app idle** — the streaming-capture finalizer no longer holds a lock while fetching the last bytes from the CDN, which previously deadlocked the proxy.
+
+          And from 3.0.8:
 
           - **Streaming capture is the default** — a game's skeleton is built straight from its install download (no full encrypted package written to disk). If capture can't run for a title, it's simply skipped that time — the install is never affected.
           - **Optional setting: "Also cache the full package to disk"** — off by default; keeps a full byte-for-byte package copy for other PCs on your LAN (uses a lot of disk) and acts as the capture fallback.
