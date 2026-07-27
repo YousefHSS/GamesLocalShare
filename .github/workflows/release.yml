@@ -92,6 +92,12 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
+          ## What's New in 3.0.12
+
+          Makes preparing a capture ~100x faster, which is what large games were actually blocked on.
+
+          - **Fixed: capture gave up ~30 seconds after starting, on large games** — before a capture can begin it reads the package's file layout, and that step took **203 seconds** on a 27 GB game. The download keeps running throughout, so by the time capture was ready the download had raced minutes ahead of it and the capture immediately fell over trying to catch up ("reorder buffer overflow"). The cause was that decryption rebuilt its cipher from scratch for every 4 KB page read — thousands of times over — instead of once per package region. It's now built once and reused, verified to produce byte-identical output. Small games were unaffected because their layout is read in a second or two.
+
           ## What's New in 3.0.11
 
           Makes skeleton capture work on large games. Games above roughly 11 GB could never be captured before this release.
