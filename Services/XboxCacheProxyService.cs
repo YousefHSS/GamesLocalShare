@@ -118,11 +118,13 @@ public sealed class XboxCacheProxyService : IDisposable
         // those ranges at Complete) so a slow arm can't grow the buffer without bound. Only reached once the
         // stall budget below is spent — throttling briefly is preferred to dropping.
         public bool PreArmSaturated;
-        // Total milliseconds this stream has held download threads for, to let the capture catch up. Capped by
-        // CaptureTotalStallBudgetMs; past that we stop throttling and fall back to dropping/giving up, so a
-        // wedged capture can never hold an install up indefinitely.
-        public long StallMs;
-        public long LoggedStallMs;
+        // Throttling budget, measured in WALL CLOCK from the first stall. Summing per-thread stall time was
+        // wrong: the Store downloads on ~8 parallel connections that all stall together, so a 60s budget was
+        // spent in ~8s of real time and throttling switched itself off almost immediately. What we actually
+        // care about is how long the download has been held back, which is elapsed time, not thread-seconds.
+        public long ThrottleStartTicks;   // Environment.TickCount64 at the first stall, 0 = never stalled
+        public long StallMs;              // aggregate thread stall, for reporting only
+        public long LoggedStallSec;
         public readonly object Lock = new();
         // Background-capture queue: the download threads copy+enqueue (fast, never blocked by decrypt); one
         // consumer thread decrypts/feeds the controller. Blocks the download only if it fills (decrypt can't keep
@@ -159,7 +161,9 @@ public sealed class XboxCacheProxyService : IDisposable
     // spent CaptureTotalStallBudgetMs in aggregate we stop throttling entirely and revert to the old
     // drop/give-up behaviour — the install must never be held up by a capture that is simply stuck.
     private static readonly TimeSpan CaptureStallBudget = TimeSpan.FromSeconds(2);
-    private const long CaptureTotalStallBudgetMs = 60_000;
+    // Wall-clock window, from the first stall, in which throttling is allowed at all. Not a sum of per-thread
+    // stall time — the Store's ~8 parallel connections stall together, so summing spent a 60s budget in ~8s.
+    private const long CaptureThrottleWindowMs = 120_000;
     private const int CaptureStallSliceMs = 10;
     // Update guard: how much of a package we'll pull from the CDN to COMPLETE a streaming capture, as a
     // fraction of the package total (gap-fill) / of the front (header holes). An update re-downloads only its
@@ -1123,28 +1127,35 @@ public sealed class XboxCacheProxyService : IDisposable
     {
         // Fast path runs for every chunk of every download, so it must stay allocation-free: two cheap checks
         // and out. Only a stream that actually needs headroom enters the wait loop.
-        if (Interlocked.Read(ref st.StallMs) >= CaptureTotalStallBudgetMs) return;
+        long start = Interlocked.Read(ref st.ThrottleStartTicks);
+        long now = Environment.TickCount64;
+        if (start != 0 && now - start >= CaptureThrottleWindowMs) return;   // budget spent
         if (!NeedsCaptureHeadroom(st, len)) return;
+        if (start == 0)
+        {
+            Interlocked.CompareExchange(ref st.ThrottleStartTicks, now, 0);
+            start = Interlocked.Read(ref st.ThrottleStartTicks);
+        }
 
-        long deadline = Environment.TickCount64 + (long)CaptureStallBudget.TotalMilliseconds;
+        long deadline = now + (long)CaptureStallBudget.TotalMilliseconds;
         long stalled = 0;
         while (Environment.TickCount64 < deadline)
         {
             Thread.Sleep(CaptureStallSliceMs);
             stalled += CaptureStallSliceMs;
-            if (Interlocked.Read(ref st.StallMs) + stalled >= CaptureTotalStallBudgetMs) break;
+            if (Environment.TickCount64 - start >= CaptureThrottleWindowMs) break;
             if (!NeedsCaptureHeadroom(st, len)) break;
         }
         if (stalled <= 0) return;
         long total = Interlocked.Add(ref st.StallMs, stalled);
-        // Log each further second of cumulative stall, so throttling is visible rather than silent.
-        long sec = total / 1000;
-        if (sec > Interlocked.Read(ref st.LoggedStallMs) / 1000)
-        {
-            Interlocked.Exchange(ref st.LoggedStallMs, total);
-            Log?.Invoke($"STREAM throttling {Path.GetFileName(st.File)} — held the download {total / 1000.0:F1}s "
-                      + $"in total so the capture could keep up (budget {CaptureTotalStallBudgetMs / 1000}s)");
-        }
+        // Log at most once per elapsed second of throttling — the previous version logged per thread per
+        // slice, which buried the rest of the log under dozens of near-identical lines.
+        long elapsedSec = (Environment.TickCount64 - start) / 1000;
+        long logged = Interlocked.Read(ref st.LoggedStallSec);
+        if (elapsedSec > logged && Interlocked.CompareExchange(ref st.LoggedStallSec, elapsedSec, logged) == logged)
+            Log?.Invoke($"STREAM throttling {Path.GetFileName(st.File)} — holding the download so the capture can "
+                      + $"keep up ({elapsedSec}s elapsed of a {CaptureThrottleWindowMs / 1000}s window, "
+                      + $"{total / 1000.0:F0}s across all connections)");
     }
 
     /// <summary>True while this stream's capture is behind enough that holding the download briefly would

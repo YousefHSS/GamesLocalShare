@@ -94,7 +94,10 @@ jobs:
 
           ## What's New in 3.0.13
 
-          Capture now briefly slows the download instead of giving up, and stops holding memory after it does give up.
+          Preparing a capture on a large game drops from over three minutes to seconds, and capture now briefly slows the download instead of giving up.
+
+          - **Fixed: capture still gave up on large games** — 3.0.12 made reading a game's file layout ~400x faster (203s to 0.5s), but that only exposed the real cost: the app was also parsing a table with one entry per 4 KB of the package — nearly 7 million entries for a 27 GB game — that capture never actually uses. It's now skipped. That accounted for 184 of the 185 seconds spent preparing a capture, which was the whole reason the download outran it.
+          - **Fixed: download throttling switched itself off almost immediately** — the limit on how long a download may be slowed was being measured by adding up time across all connections, but a Store download runs ~8 connections that pause together, so a 60-second allowance was spent in about 8 seconds of real time. It's now measured as elapsed time, as intended, and the log no longer repeats the same line dozens of times per second.
 
           - **Capture no longer abandons itself when it falls behind** — if the capture can't keep pace for a moment, the download is now held back very briefly (tens of milliseconds at a time) so it can catch up, rather than dropping data and abandoning the skeleton. There are hard limits on this: any single pause is capped, and once a game's download has been slowed by 60 seconds in total the throttling stops permanently and the old behaviour resumes. A game finishing correctly always takes priority over capturing it.
           - **Fixed: ~1.7 GB of memory held after a capture was abandoned** — a given-up capture kept its entire buffer alive until the app happened to clean up. Buffers are now released immediately.
