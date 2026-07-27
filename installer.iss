@@ -2,7 +2,7 @@
 ; Download Inno Setup from: https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Games Local Share"
-#define MyAppVersion "3.0.10"
+#define MyAppVersion "3.0.11"
 #define MyAppPublisher "YousefHSS"
 #define MyAppURL "https://github.com/YousefHSS/GamesLocalShare"
 #define MyAppExeName "GamesLocalShare.exe"

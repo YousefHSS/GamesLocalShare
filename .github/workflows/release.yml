@@ -92,13 +92,20 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
-          ## What's New in 3.0.10
+          ## What's New in 3.0.11
 
-          Hotfix for large games silently skipping skeleton capture.
+          Makes skeleton capture work on large games. Games above roughly 11 GB could never be captured before this release.
 
-          - **Fixed: big titles gave up capture the instant they started it** — a game whose content key wasn't yet in the key store had that key fetched *during* the arming step, which blocks for 10-25 seconds. The download isn't paused for that, so hundreds of MB piled up in memory and were handed to the capture all at once, immediately tripping the "decrypt backlog full" limit — capture was abandoned in the same second it began. Smaller games finished the key fetch quickly enough to slip under the limit, which is why only large ones were affected. The key fetch now starts in the background as soon as the download begins, so it's ready before arming, and the backlog limit no longer trips on a momentary burst that would have cleared on its own. Installs themselves were never affected — only whether a skeleton was captured.
+          - **Fixed: games above ~11 GB could never build a skeleton** — the capture buffered a fixed 64 MB from the front of a package before starting, but the point it actually has to reach grows with package size (it sits past the package's hash tree, which is about 1/169 of the total). That's ~22 MB into a 3.7 GB game but ~158 MB into a 27 GB one, so on large games the capture was reading past the end of what it had and failed with "no partition table". The required amount is now read from the package's own header and buffered before arming. Worse, the old shortfall failed *quietly* first — it could yield an all-zero content key — so that case is now rejected outright rather than captured wrong.
+          - **Fixed: capture given up the instant it started, on large games** — arming a big package takes minutes, and the download keeps running throughout, so over a GB of buffered bytes were handed to the capture at once and instantly tripped its backlog limit. Those bytes are already in memory (they move, rather than being copied), so the limit now accounts for them instead of discarding the capture to defend a ceiling already crossed.
+          - **Bounded memory while arming** — the pre-arm buffer no longer grows without limit during a slow arm; past its cap those ranges are fetched later when the skeleton is finalized.
+          - **Clearer logs** — capture now records the front size it computed and why, a timing breakdown of the arming phases, and, when a front never completes, what was actually reached. Previously that last case was always reported as "an update reusing local blocks", which was often simply wrong.
 
-          Everything else from 3.0.9 carries over unchanged:
+          Everything else from 3.0.10 carries over unchanged:
+
+          - **Fixed: big titles gave up capture the instant they started it** — the content key is now fetched in the background as the download begins, rather than blocking the arming step for 10-25 seconds.
+
+          And from 3.0.9:
 
           - **Fixed: Xbox installs frozen at 100% with the app idle** — the streaming-capture finalizer no longer holds a lock while fetching the last bytes from the CDN, which previously deadlocked the proxy.
 

@@ -94,19 +94,46 @@ public sealed class XboxCacheProxyService : IDisposable
         public readonly SortedDictionary<long, byte[]> PreArm = new();
         public long PreArmBytes, FrontContig;                 // FrontContig = contiguous byte coverage from 0 in PreArm
         public long LoggedFrontMb;                            // throttles the buffering-progress log
+        // Front sizing. FrontLen starts at the default and is REVISED UPWARD once the header has buffered
+        // (ProbeFrontLen) — the arm step reads at DriveDataOffset, which grows with package size. ForceFront
+        // and PreArmCap track FrontLen: as fixed constants they would trip BEFORE a large front assembled and
+        // arm prematurely on a short front, which is the very thing the probe exists to prevent.
+        public bool FrontProbed;
+        public long ForceFront = DefaultFrontLen + ForceFrontSlack;
+        public long PreArmCap = DefaultFrontLen + PreArmSlack;
         public bool Armed, Aborted, Parked, Arming;
         public DateTime LastWriteUtc = DateTime.UtcNow;
         // When the capture backlog first went over the soft cap (null = under it). Distinguishes a transient
         // burst — every capture starts with one, see CaptureBacklogGrace — from a consumer that can't keep up.
         public DateTime? OverCapSinceUtc;
+        // Backlog caps for THIS stream. Arming hands the whole pre-arm buffer to the queue in one go, so the
+        // queue legitimately starts life holding that much; the caps are raised by the drain size at arm and
+        // drop to the base values once the backlog has actually been worked down to them (CapsSettled).
+        // Sizing them from the drain is not slack: the drain MOVES bytes out of PreArm into the queue, so peak
+        // memory is unchanged by it — aborting on the drain frees nothing and just discards a live capture.
+        public long QueueSoftCap = CaptureQueueCapBytes;
+        public long QueueHardCap = CaptureQueueHardCapBytes;
+        public bool CapsSettled;
+        // Set when PreArm has hit its cap while arming: further bytes are not buffered (the gap-fill refetches
+        // those ranges at Complete) so a slow arm can't grow the buffer without bound.
+        public bool PreArmSaturated;
         public readonly object Lock = new();
         // Background-capture queue: the download threads copy+enqueue (fast, never blocked by decrypt); one
         // consumer thread decrypts/feeds the controller. Blocks the download only if it fills (decrypt can't keep
         // up), so a fast download isn't throttled by per-chunk decrypt latency.
         public ChunkQueue? Queue;
     }
-    private const long PreArmCapBytes = 256L << 20;           // give up streaming if the front never assembles
-    private const long ForceFrontBytes = 128L << 20;          // buffered this much w/o a contiguous front → complete it from the CDN + arm
+    // Front sizing. The 64 MB default is the span the offline test proved builds the map, and it holds as long
+    // as the embedded drive starts within it. It does not for large packages: the arm step reads at
+    // DriveDataOffset, which sits past the hash tree (~1/169 of the package), so it is ~22 MB into a 3.7 GB
+    // package but ~121 MB into a 20 GB one — beyond a flat 64 MB front, where PartialPackageStream silently
+    // serves zeros. ProbeFrontLen therefore reads the header (offset 0, cheap) and revises FrontLen to
+    // DriveDataOffset + VolumeMetadataSpan. The slacks are ADDITIVE so the default front reproduces the
+    // previous flat constants exactly (64+64 = 128, 64+192 = 256) while scaling with a larger front.
+    private const long DefaultFrontLen = 64L << 20;
+    private const long VolumeMetadataSpan = 64L << 20;        // partition table + NTFS boot sector + $MFT, past DriveDataOffset
+    private const long ForceFrontSlack = 64L << 20;           // buffered FrontLen+this w/o a contiguous front → complete from the CDN + arm
+    private const long PreArmSlack = 192L << 20;              // buffered FrontLen+this w/o a contiguous front → give up streaming
     // Background-capture backlog caps (the producer never blocks). The SOFT cap is the steady-state target: a
     // backlog above it only means the consumer is losing if it STAYS there for CaptureBacklogGrace — arming
     // drains the entire pre-arm buffer into the queue in one shot, so every capture legitimately starts out
@@ -114,6 +141,9 @@ public sealed class XboxCacheProxyService : IDisposable
     private const long CaptureQueueCapBytes = 256L << 20;
     private const long CaptureQueueHardCapBytes = 640L << 20;
     private static readonly TimeSpan CaptureBacklogGrace = TimeSpan.FromSeconds(20);
+    // How long a stream must go without bytes before the reaper treats it as finished (gap-fill if armed,
+    // give up if not). Named so the abandon message can quote it.
+    private const int StreamIdleSeconds = 30;
     // Update guard: how much of a package we'll pull from the CDN to COMPLETE a streaming capture, as a
     // fraction of the package total (gap-fill) / of the front (header holes). An update re-downloads only its
     // changed blocks and reuses the rest locally, so finishing its capture would re-fetch most of the game —
@@ -129,10 +159,12 @@ public sealed class XboxCacheProxyService : IDisposable
     public Func<string?>? RequestCikRefresh;
 
     /// <summary>A producer/consumer queue of encrypted chunks. <see cref="Add"/> NEVER blocks the producer — the
-    /// download thread must never be throttled or frozen by decrypt latency. The cap is advisory: the caller
-    /// (<see cref="StreamOnStoreBytes"/>) checks <see cref="Bytes"/> against <see cref="Cap"/> and gives up
-    /// capture (forward-only) when the backlog would exceed it, so memory stays bounded without ever stalling the
-    /// install. <see cref="TryTake"/> blocks until an item is available or the queue is closed and drained.</summary>
+    /// download thread must never be throttled or frozen by decrypt latency. The cap is advisory and enforced
+    /// entirely by the caller: <see cref="StreamOnStoreBytes"/> compares <see cref="Bytes"/> against the OWNING
+    /// STREAM's soft/hard caps (which start raised by the arm-time drain and settle to the base values) and gives
+    /// up capture (forward-only) when the backlog is genuinely runaway, so memory stays bounded without ever
+    /// stalling the install. <see cref="TryTake"/> blocks until an item is available or the queue is closed and
+    /// drained.</summary>
     private sealed class ChunkQueue
     {
         private readonly Queue<(long off, byte[] data)> _q = new();
@@ -822,22 +854,31 @@ public sealed class XboxCacheProxyService : IDisposable
             {
                 if (ct.IsCancellationRequested) break;
                 bool idle, armed, arming; long total; List<(long s, long e)> gaps = new();
+                long frontContig, frontLen, preArmBytes;
                 lock (st.Lock)
                 {
                     if (st.Aborted || st.Parked) continue;
                     armed = st.Armed; arming = st.Arming;
                     total = st.Total;
-                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > 30;
+                    frontContig = st.FrontContig; frontLen = st.FrontLen; preArmBytes = st.PreArmBytes;
+                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > StreamIdleSeconds;
                     if (idle && armed) gaps = ComplementLocked(st.Fed, total);
                 }
                 if (!idle) continue;
                 if (!armed)
                 {
                     if (arming) continue; // arming in progress — let ArmFromBuffer finish
-                    // The Store finished but the capture never armed: the header never assembled because the
-                    // download reused local blocks instead of sending them (an update). Completing it would mean
-                    // re-downloading the package, so don't — give up capture, forward-only.
-                    AbandonStream(st, "update: download finished without assembling the header (reused local blocks)");
+                    // Two very different causes land here and used to report identically, which sends the reader
+                    // hunting for an update that never happened. An UPDATE reuses local blocks, so the Store
+                    // sends almost none of the front. Anything else means the front was partway assembled and
+                    // the Store simply stopped — report how far it actually got. This matters more since the
+                    // front became package-sized: a 222 MB front is exposed to an idle lull far longer than the
+                    // old flat 64 MB one was.
+                    AbandonStream(st, frontLen > 0 && frontContig < frontLen / 4
+                        ? $"update: download finished without assembling the header (reused local blocks; only "
+                          + $"{frontContig / 1048576.0:F0} of {frontLen / 1048576.0:F0} MB of the front was sent)"
+                        : $"front [0,{frontLen / 1048576.0:F0} MB) never completed — Store sent {frontContig / 1048576.0:F0} MB "
+                          + $"contiguous ({preArmBytes / 1048576.0:F0} MB buffered) then went idle for {StreamIdleSeconds}s; no skeleton");
                     continue;
                 }
                 if (gaps.Count == 0) continue;
@@ -914,7 +955,7 @@ public sealed class XboxCacheProxyService : IDisposable
                 File = file, Host = host, RawPath = rawPath, Ip = ip, Total = total,
                 // 64 MB front is the size the offline test proved builds the map. It's reused from the Store's
                 // OWN bytes (buffered, not separately downloaded), so a larger front costs memory, not bandwidth.
-                FrontLen = Math.Min(64L << 20, total),
+                FrontLen = Math.Min(DefaultFrontLen, total),
             };
             _streams[file] = st;
             Interlocked.Increment(ref Filling);
@@ -933,7 +974,7 @@ public sealed class XboxCacheProxyService : IDisposable
     {
         if (len <= 0) return;
         bool feedNow = false, startArm = false, abandon = false; long progressMb = 0;
-        long backlogGiveUp = 0; bool backlogHard = false;
+        long backlogGiveUp = 0; bool backlogHard = false; string? probedFront = null; long saturated = -1;
         lock (st.Lock)
         {
             if (st.Aborted || st.Parked) return;
@@ -946,21 +987,44 @@ public sealed class XboxCacheProxyService : IDisposable
                 // backlog to stay over the soft cap for CaptureBacklogGrace before calling the consumer beaten.
                 var q0 = st.Queue;
                 long backlog = q0 == null ? 0 : q0.Bytes + len;
-                if (q0 == null || backlog <= CaptureQueueCapBytes) st.OverCapSinceUtc = null;
+                if (q0 == null) st.OverCapSinceUtc = null;
                 else
                 {
-                    var now = DateTime.UtcNow;
-                    st.OverCapSinceUtc ??= now;
-                    if (backlog > CaptureQueueHardCapBytes) { backlogGiveUp = backlog; backlogHard = true; feedNow = false; }
-                    else if (now - st.OverCapSinceUtc.Value > CaptureBacklogGrace) { backlogGiveUp = backlog; feedNow = false; }
+                    // The arm-time burst is worked off once the backlog reaches the base cap; from then on this
+                    // stream is held to the normal steady-state limits.
+                    if (!st.CapsSettled && backlog <= CaptureQueueCapBytes)
+                    {
+                        st.CapsSettled = true;
+                        st.QueueSoftCap = CaptureQueueCapBytes;
+                        st.QueueHardCap = CaptureQueueHardCapBytes;
+                    }
+                    if (backlog <= st.QueueSoftCap) st.OverCapSinceUtc = null;
+                    else
+                    {
+                        var now = DateTime.UtcNow;
+                        st.OverCapSinceUtc ??= now;
+                        if (backlog > st.QueueHardCap) { backlogGiveUp = backlog; backlogHard = true; feedNow = false; }
+                        else if (now - st.OverCapSinceUtc.Value > CaptureBacklogGrace) { backlogGiveUp = backlog; feedNow = false; }
+                    }
                 }
             }
             else
             {
+                // While Arming, the pre-arm buffer used to grow without bound: the cap below is only consulted
+                // when !Arming, and arming a large package is slow (a 222 MB front on a 26.8 GB title took ~7
+                // minutes), so the buffer reached >1 GB and blew the queue's cap the instant it was drained in.
+                // Past the cap, stop buffering instead — those ranges simply aren't fed, and the gap-fill
+                // refetches them at Complete. Bounded memory, capture preserved.
+                bool store = true;
+                if (st.Arming && st.PreArmBytes + len > st.PreArmCap)
+                {
+                    store = false;
+                    if (!st.PreArmSaturated) { st.PreArmSaturated = true; saturated = st.PreArmBytes; }
+                }
                 // Keep the LONGEST chunk seen at each offset (parallel/overlapping Store requests can deliver a
                 // short then a long chunk at the same offset). FrontContig is computed from the ACTUAL stored
                 // bytes so the assembled front never has a zero-filled hole.
-                if (!st.PreArm.TryGetValue(absOff, out var existing) || existing.Length < len)
+                if (store && (!st.PreArm.TryGetValue(absOff, out var existing) || existing.Length < len))
                 {
                     var copy = new byte[len];
                     Array.Copy(buf, 0, copy, 0, len);
@@ -969,13 +1033,16 @@ public sealed class XboxCacheProxyService : IDisposable
                 }
                 st.FrontContig = ContiguousFrontLocked(st.PreArm);
                 st.LastWriteUtc = DateTime.UtcNow;
+                // As soon as the header itself is contiguously buffered, size the front for THIS package.
+                if (!st.FrontProbed && st.FrontContig >= LibXboxOne.XvdStreamLayout.HeaderProbeBytes)
+                    probedFront = ProbeFrontLenLocked(st);
                 if (!st.Arming)
                 {
                     // Arm when the header is contiguously buffered, OR once we've buffered enough total (a
                     // parallel download whose front hasn't assembled) — ArmFromBuffer then fetches the few
                     // remaining header holes from the CDN. Only give up if even that much never accumulates.
-                    if (st.FrontContig >= st.FrontLen || st.PreArmBytes >= ForceFrontBytes) { st.Arming = true; startArm = true; }
-                    else if (st.PreArmBytes > PreArmCapBytes) abandon = true;
+                    if (st.FrontContig >= st.FrontLen || st.PreArmBytes >= st.ForceFront) { st.Arming = true; startArm = true; }
+                    else if (st.PreArmBytes > st.PreArmCap) abandon = true;
                     else
                     {
                         long mb = st.FrontContig / (16L << 20); // log every ~16 MB of front progress
@@ -987,7 +1054,7 @@ public sealed class XboxCacheProxyService : IDisposable
         if (backlogGiveUp > 0)
         {
             StreamAbort(st, backlogHard
-                ? $"decrypt backlog {backlogGiveUp / 1048576} MB (over the {CaptureQueueHardCapBytes / 1048576} MB hard cap); giving up capture to keep the install at full speed"
+                ? $"decrypt backlog {backlogGiveUp / 1048576} MB (over the {st.QueueHardCap / 1048576} MB hard cap); giving up capture to keep the install at full speed"
                 : $"decrypt backlog stuck at ~{backlogGiveUp / 1048576} MB for {CaptureBacklogGrace.TotalSeconds:F0}s; giving up capture to keep the install at full speed");
             return;
         }
@@ -1002,10 +1069,45 @@ public sealed class XboxCacheProxyService : IDisposable
             st.Queue?.Add(absOff, copy);
             return;
         }
+        if (probedFront != null) Log?.Invoke(probedFront);
+        if (saturated >= 0)
+            Log?.Invoke($"STREAM pre-arm buffer full {Path.GetFileName(st.File)} — {saturated / 1048576} MB held while arming; "
+                      + "not buffering further bytes (their ranges are refetched when the skeleton is finalized)");
         if (progressMb > 0)
             Log?.Invoke($"STREAM buffering {Path.GetFileName(st.File)} — {progressMb / 1048576} / {st.FrontLen / 1048576} MB of the install download (arms at {st.FrontLen / 1048576} MB)");
-        if (abandon) { AbandonStream(st, $"front [0,{st.FrontLen / 1048576} MB) not assembled within {PreArmCapBytes / 1048576} MB (non-sequential download)"); return; }
+        if (abandon) { AbandonStream(st, $"front [0,{st.FrontLen / 1048576} MB) not assembled within {st.PreArmCap / 1048576} MB (non-sequential download)"); return; }
         if (startArm) new Thread(() => ArmFromBuffer(st)) { IsBackground = true, Name = "xbox-stream-arm" }.Start();
+    }
+
+    /// <summary>Sizes the front for THIS package from its just-buffered header. The arm step reads at
+    /// <c>DriveDataOffset</c>, which sits past the hash tree and so grows with package size (~22 MB into a
+    /// 3.7 GB package, ~121 MB into a 20 GB one) — a flat 64 MB front only reaches it below ~10.8 GB, and
+    /// past that the arm silently reads zeros. Revises FrontLen (and the thresholds that gate it) upward;
+    /// never shrinks it, so a package whose header says it needs less still gets the proven default.
+    /// Caller must hold <c>st.Lock</c>. Returns a line to log outside the lock, or null.</summary>
+    private static string? ProbeFrontLenLocked(StreamState st)
+    {
+        st.FrontProbed = true; // one attempt: a header that won't parse won't parse later either
+        int probeLen = LibXboxOne.XvdStreamLayout.HeaderProbeBytes;
+        var head = new byte[probeLen];
+        foreach (var kv in st.PreArm) // ascending (SortedDictionary)
+        {
+            if (kv.Key >= probeLen) break;
+            int copyLen = (int)Math.Min(kv.Value.Length, probeLen - kv.Key);
+            if (copyLen > 0) Array.Copy(kv.Value, 0, head, (int)kv.Key, copyLen);
+        }
+        if (!LibXboxOne.XvdStreamLayout.TryGetRequiredFront(head, probeLen, st.Total, VolumeMetadataSpan,
+                out long required, out long driveDataOffset, out string why))
+            // Not fatal: fall through on the default front and let TryBegin decide (it now rejects a short
+            // front loudly rather than capturing from zeros).
+            return $"STREAM front probe {Path.GetFileName(st.File)} — using default {st.FrontLen / 1048576} MB ({why})";
+
+        if (required <= st.FrontLen) return null; // default already covers it — the common small-package case
+        st.FrontLen = required;
+        st.ForceFront = required + ForceFrontSlack;
+        st.PreArmCap = required + PreArmSlack;
+        return $"STREAM front {Path.GetFileName(st.File)} — {st.Total / 1048576.0:F0} MB package puts its embedded drive at "
+             + $"{driveDataOffset / 1048576.0:F0} MB; buffering {required / 1048576.0:F0} MB before arming";
     }
 
     /// <summary>Arms the controller from the buffered front bytes (no separate front download), then feeds the
@@ -1014,12 +1116,18 @@ public sealed class XboxCacheProxyService : IDisposable
     /// object falls back to the tee.</summary>
     private void ArmFromBuffer(StreamState st)
     {
+        // Phase timings. Arming a large package took ~7 minutes on a 26.8 GB title and the log gave no way to
+        // tell whether that was CDN hole fetches or the NTFS map build inside TryBegin — so time each phase.
+        var swTotal = System.Diagnostics.Stopwatch.StartNew();
+        var sw = new System.Diagnostics.Stopwatch();
+        double tHoles = 0, tFront = 0, tTail = 0, tBegin = 0; long holeBytes = 0; int holeCount = 0;
         try
         {
             long fl = st.FrontLen;
 
             // Fix: complete any holes in [0,FrontLen) from the CDN so the header is whole regardless of the
             // Store's (possibly very parallel) download order. Extra bandwidth = just the holes (usually small).
+            sw.Restart();
             var holes = FrontHoles(st, fl);
             if (holes.Count > 0)
             {
@@ -1032,6 +1140,7 @@ public sealed class XboxCacheProxyService : IDisposable
                     return;
                 }
                 Log?.Invoke($"STREAM completing header {Path.GetFileName(st.File)} — fetching {holes.Count} hole(s), {hb / 1048576.0:F1} MB the parallel download hadn't delivered");
+                holeCount = holes.Count; holeBytes = hb;
                 foreach (var h in holes)
                 {
                     byte[]? data = FetchRangeBytes(st.Host, st.Ip, st.RawPath, h.s, h.e);
@@ -1039,7 +1148,9 @@ public sealed class XboxCacheProxyService : IDisposable
                     lock (st.Lock) { st.PreArm[h.s] = data; st.PreArmBytes += data.Length; }
                 }
             }
+            tHoles = sw.Elapsed.TotalSeconds;
 
+            sw.Restart();
             byte[] front = new byte[fl];
             lock (st.Lock)
             {
@@ -1050,30 +1161,48 @@ public sealed class XboxCacheProxyService : IDisposable
                     if (copyLen > 0) Array.Copy(kv.Value, 0, front, (int)kv.Key, copyLen);
                 }
             }
+            tFront = sw.Elapsed.TotalSeconds;
+
+            sw.Restart();
             int tailLen = (int)Math.Min(4096, st.Total);
             long tailOff = st.Total - tailLen;
             byte[] tail = tailLen > 0 && tailOff >= fl
                 ? (FetchRangeBytes(st.Host, st.Ip, st.RawPath, tailOff, tailOff + tailLen) ?? Array.Empty<byte>())
                 : Array.Empty<byte>();
+            tTail = sw.Elapsed.TotalSeconds;
 
             string blob = Path.Combine(_streamBlobDir, MakeBlobName(st.File));
+            sw.Restart();
             var ctl = TryBeginWithKeyRefresh(st, front, fl, tail, tailOff, blob);
+            tBegin = sw.Elapsed.TotalSeconds;
+            Log?.Invoke($"STREAM arm timing {Path.GetFileName(st.File)} — holes {tHoles:F1}s ({holeCount}, {holeBytes / 1048576.0:F1} MB), "
+                      + $"front {tFront:F1}s, tail {tTail:F1}s, begin {tBegin:F1}s, total {swTotal.Elapsed.TotalSeconds:F1}s");
             if (ctl == null) { AbandonStream(st, "could not arm (see prior line)"); return; }
 
             // Start the background consumer, then hand off the buffered bytes + switch to live enqueueing.
-            var queue = new ChunkQueue(CaptureQueueCapBytes);
             var consumer = new Thread(() => StreamConsumer(st)) { IsBackground = true, Name = "xbox-stream-consume" };
             List<(long off, byte[] data)> drain;
+            long drainBytes;
             lock (st.Lock)
             {
                 st.Ctl = ctl;
-                st.Queue = queue;
                 drain = st.PreArm.Select(kv => (kv.Key, kv.Value)).ToList();
+                drainBytes = st.PreArmBytes;
+                // Raise this stream's caps by what we're about to hand the queue. These bytes are already
+                // resident (the drain moves them out of PreArm), so admitting them costs no extra memory —
+                // whereas rejecting them aborts a capture to defend a limit already breached. The caps fall
+                // back to the base values once the consumer has worked the backlog down (see CapsSettled).
+                st.QueueSoftCap = CaptureQueueCapBytes + drainBytes;
+                st.QueueHardCap = CaptureQueueHardCapBytes + drainBytes;
+                st.CapsSettled = false;
+                st.Queue = new ChunkQueue(st.QueueHardCap);
                 st.PreArm.Clear(); st.PreArmBytes = 0;
                 st.Armed = true; st.Arming = false; st.LastWriteUtc = DateTime.UtcNow;
             }
+            var queue = st.Queue!;
             consumer.Start();
-            Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB) from the Store's own bytes — 1x bandwidth");
+            Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB) from the Store's own bytes — 1x bandwidth"
+                      + (drainBytes > CaptureQueueCapBytes ? $"; handing {drainBytes / 1048576} MB of buffered bytes to the capture" : ""));
             // Enqueue everything buffered so far; live bytes now arriving (Armed==true) enqueue too. The consumer
             // feeds the controller, which reorders by offset — enqueue order doesn't matter.
             foreach (var (off, data) in drain) queue.Add(off, data);
