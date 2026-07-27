@@ -267,6 +267,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _cacheProxy.TryFinalizeStreamed(contentGuid, installDir, skelPath, out var status, out var served)
                     ? (true, status, served)
                     : (false, status, served);
+            // Lets the watcher see whether anything is actually parked before announcing (and attempting) a
+            // finalize — the 10-minute scan checks every installed title, and almost none have one.
+            _skeletonWatcher.HasParkedStreamed = contentGuid => _cacheProxy.HasParkedStreamed(contentGuid);
             // Let streaming fetch a missing content key mid-download (CikExtractor) so titles whose key wasn't
             // pre-extracted still capture at 1x instead of aborting.
             _cacheProxy.RequestCikRefresh = () => _skeletonWatcher.RefreshCiks();

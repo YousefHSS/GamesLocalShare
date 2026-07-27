@@ -762,6 +762,10 @@ public sealed class SkeletonWatcherService : IDisposable
     /// in the restore manifest). Null when streaming isn't enabled.</summary>
     public Func<string?, string, string, (bool ok, string status, string? servedPath)>? TryStreamedFinalize;
 
+    /// <summary>Optional companion to <see cref="TryStreamedFinalize"/>: true if a parked streamed capture
+    /// exists for this content GUID. Checked first so a finalize is only announced when there is one.</summary>
+    public Func<string?, bool>? HasParkedStreamed;
+
     /// <summary>Tries to finalize a proxy-streamed skeleton for a title (no cached package needed). On success
     /// writes the restore manifest + fires <see cref="CaptureCompleted"/>, mirroring the batch-capture path.</summary>
     private bool TryFinalizeStreamedCapture(string name, string installDir)
@@ -780,6 +784,11 @@ public sealed class SkeletonWatcherService : IDisposable
                 if (xvi != null) contentGuid = Path.GetFileNameWithoutExtension(xvi);
             }
             catch { }
+
+            // Bail BEFORE announcing anything. This runs for every installed title on every 10-minute scan and
+            // almost none have a parked capture, so announcing first meant claiming a finalize was underway
+            // for five titles every ten minutes when nothing was happening at all.
+            if (HasParkedStreamed?.Invoke(contentGuid) == false) return false;
 
             // Announce the attempt BEFORE it runs. Complete() rebuilds the skeleton against the install and
             // refetches every range the Store never sent, which can take minutes on a large title with no
