@@ -92,6 +92,14 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
+          ## What's New in 3.0.13
+
+          Capture now briefly slows the download instead of giving up, and stops holding memory after it does give up.
+
+          - **Capture no longer abandons itself when it falls behind** — if the capture can't keep pace for a moment, the download is now held back very briefly (tens of milliseconds at a time) so it can catch up, rather than dropping data and abandoning the skeleton. There are hard limits on this: any single pause is capped, and once a game's download has been slowed by 60 seconds in total the throttling stops permanently and the old behaviour resumes. A game finishing correctly always takes priority over capturing it.
+          - **Fixed: ~1.7 GB of memory held after a capture was abandoned** — a given-up capture kept its entire buffer alive until the app happened to clean up. Buffers are now released immediately.
+          - **Fixed: captures of large games abandoned during a normal download lull** — a game whose download pauses briefly (the Store interleaves several files) could have its capture discarded after 30 seconds and reported as "an update reusing local blocks", which was simply wrong. Large games take longer to prepare and are far more exposed to this, so the wait is now much longer and the message says what actually happened.
+
           ## What's New in 3.0.12
 
           Makes preparing a capture ~100x faster, which is what large games were actually blocked on.

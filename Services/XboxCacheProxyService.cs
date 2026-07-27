@@ -115,8 +115,14 @@ public sealed class XboxCacheProxyService : IDisposable
         public long QueueHardCap = CaptureQueueHardCapBytes;
         public bool CapsSettled;
         // Set when PreArm has hit its cap while arming: further bytes are not buffered (the gap-fill refetches
-        // those ranges at Complete) so a slow arm can't grow the buffer without bound.
+        // those ranges at Complete) so a slow arm can't grow the buffer without bound. Only reached once the
+        // stall budget below is spent — throttling briefly is preferred to dropping.
         public bool PreArmSaturated;
+        // Total milliseconds this stream has held download threads for, to let the capture catch up. Capped by
+        // CaptureTotalStallBudgetMs; past that we stop throttling and fall back to dropping/giving up, so a
+        // wedged capture can never hold an install up indefinitely.
+        public long StallMs;
+        public long LoggedStallMs;
         public readonly object Lock = new();
         // Background-capture queue: the download threads copy+enqueue (fast, never blocked by decrypt); one
         // consumer thread decrypts/feeds the controller. Blocks the download only if it fills (decrypt can't keep
@@ -142,8 +148,19 @@ public sealed class XboxCacheProxyService : IDisposable
     private const long CaptureQueueHardCapBytes = 640L << 20;
     private static readonly TimeSpan CaptureBacklogGrace = TimeSpan.FromSeconds(20);
     // How long a stream must go without bytes before the reaper treats it as finished (gap-fill if armed,
-    // give up if not). Named so the abandon message can quote it.
+    // give up if not). An UNARMED stream gets much longer: assembling a package-sized front legitimately
+    // involves lulls (the Store interleaves objects), and a 222 MB front is exposed to that far longer than
+    // the old flat 64 MB one — reaping it at 30s throws away captures that were still progressing.
     private const int StreamIdleSeconds = 30;
+    private const int StreamIdleSecondsUnarmed = 150;
+    // Backpressure. Holding a download thread briefly so the capture can catch up is preferable to dropping
+    // bytes (which leaves a hole the capture's reorder buffer then can't bridge) or giving up outright. Both
+    // budgets are deliberately small: a single chunk waits at most CaptureStallBudget, and once a stream has
+    // spent CaptureTotalStallBudgetMs in aggregate we stop throttling entirely and revert to the old
+    // drop/give-up behaviour — the install must never be held up by a capture that is simply stuck.
+    private static readonly TimeSpan CaptureStallBudget = TimeSpan.FromSeconds(2);
+    private const long CaptureTotalStallBudgetMs = 60_000;
+    private const int CaptureStallSliceMs = 10;
     // Update guard: how much of a package we'll pull from the CDN to COMPLETE a streaming capture, as a
     // fraction of the package total (gap-fill) / of the front (header holes). An update re-downloads only its
     // changed blocks and reuses the rest locally, so finishing its capture would re-fetch most of the game —
@@ -194,6 +211,13 @@ public sealed class XboxCacheProxyService : IDisposable
             }
         }
         public void Close() { lock (_g) { _closed = true; Monitor.PulseAll(_g); } }
+        /// <summary>Drops every queued chunk and returns how many bytes were released. Closing alone only
+        /// stops new work — an aborted stream's consumer exits without draining, so the chunks (large object
+        /// heap byte[]s) stay referenced by the queue until the whole state is collected.</summary>
+        public long DiscardAll()
+        {
+            lock (_g) { long n = _bytes; _q.Clear(); _bytes = 0; Monitor.PulseAll(_g); return n; }
+        }
     }
     private readonly Dictionary<string, StreamState> _streams = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _streamAbandoned = new(StringComparer.OrdinalIgnoreCase);
@@ -861,7 +885,8 @@ public sealed class XboxCacheProxyService : IDisposable
                     armed = st.Armed; arming = st.Arming;
                     total = st.Total;
                     frontContig = st.FrontContig; frontLen = st.FrontLen; preArmBytes = st.PreArmBytes;
-                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > StreamIdleSeconds;
+                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds
+                           > (armed ? StreamIdleSeconds : StreamIdleSecondsUnarmed);
                     if (idle && armed) gaps = ComplementLocked(st.Fed, total);
                 }
                 if (!idle) continue;
@@ -878,7 +903,7 @@ public sealed class XboxCacheProxyService : IDisposable
                         ? $"update: download finished without assembling the header (reused local blocks; only "
                           + $"{frontContig / 1048576.0:F0} of {frontLen / 1048576.0:F0} MB of the front was sent)"
                         : $"front [0,{frontLen / 1048576.0:F0} MB) never completed — Store sent {frontContig / 1048576.0:F0} MB "
-                          + $"contiguous ({preArmBytes / 1048576.0:F0} MB buffered) then went idle for {StreamIdleSeconds}s; no skeleton");
+                          + $"contiguous ({preArmBytes / 1048576.0:F0} MB buffered) then went idle for {StreamIdleSecondsUnarmed}s; no skeleton");
                     continue;
                 }
                 if (gaps.Count == 0) continue;
@@ -973,6 +998,7 @@ public sealed class XboxCacheProxyService : IDisposable
     private void StreamOnStoreBytes(StreamState st, long absOff, byte[] buf, int len)
     {
         if (len <= 0) return;
+        ThrottleForCapture(st, len);
         bool feedNow = false, startArm = false, abandon = false; long progressMb = 0;
         long backlogGiveUp = 0; bool backlogHard = false; string? probedFront = null; long saturated = -1;
         lock (st.Lock)
@@ -1077,6 +1103,60 @@ public sealed class XboxCacheProxyService : IDisposable
             Log?.Invoke($"STREAM buffering {Path.GetFileName(st.File)} — {progressMb / 1048576} / {st.FrontLen / 1048576} MB of the install download (arms at {st.FrontLen / 1048576} MB)");
         if (abandon) { AbandonStream(st, $"front [0,{st.FrontLen / 1048576} MB) not assembled within {st.PreArmCap / 1048576} MB (non-sequential download)"); return; }
         if (startArm) new Thread(() => ArmFromBuffer(st)) { IsBackground = true, Name = "xbox-stream-arm" }.Start();
+    }
+
+    /// <summary>Briefly holds the calling download thread while the capture catches up, rather than dropping
+    /// bytes or giving up. Two cases are worth waiting on:
+    /// <list type="bullet">
+    /// <item><b>Arming</b> — the controller doesn't exist yet, so bytes can only be buffered. Dropping them
+    /// leaves a hole the capture's reorder buffer later can't bridge (it must drain in ascending offset order),
+    /// which killed a 26.8 GB capture 31s after it armed. Headroom appears the moment arming finishes and the
+    /// buffer drains, so these waits are short.</item>
+    /// <item><b>Armed</b> — the decrypt consumer is behind. Waiting lets it drain instead of abandoning the
+    /// capture.</item>
+    /// </list>
+    /// <para>Never holds <c>st.Lock</c> while sleeping, and never waits unboundedly: a single chunk waits at
+    /// most <see cref="CaptureStallBudget"/>, and once the stream's aggregate stall reaches
+    /// <see cref="CaptureTotalStallBudgetMs"/> this returns immediately forever after, handing control back to
+    /// the drop/give-up paths. The install finishing correctly always outranks capturing it.</para></summary>
+    private void ThrottleForCapture(StreamState st, int len)
+    {
+        // Fast path runs for every chunk of every download, so it must stay allocation-free: two cheap checks
+        // and out. Only a stream that actually needs headroom enters the wait loop.
+        if (Interlocked.Read(ref st.StallMs) >= CaptureTotalStallBudgetMs) return;
+        if (!NeedsCaptureHeadroom(st, len)) return;
+
+        long deadline = Environment.TickCount64 + (long)CaptureStallBudget.TotalMilliseconds;
+        long stalled = 0;
+        while (Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(CaptureStallSliceMs);
+            stalled += CaptureStallSliceMs;
+            if (Interlocked.Read(ref st.StallMs) + stalled >= CaptureTotalStallBudgetMs) break;
+            if (!NeedsCaptureHeadroom(st, len)) break;
+        }
+        if (stalled <= 0) return;
+        long total = Interlocked.Add(ref st.StallMs, stalled);
+        // Log each further second of cumulative stall, so throttling is visible rather than silent.
+        long sec = total / 1000;
+        if (sec > Interlocked.Read(ref st.LoggedStallMs) / 1000)
+        {
+            Interlocked.Exchange(ref st.LoggedStallMs, total);
+            Log?.Invoke($"STREAM throttling {Path.GetFileName(st.File)} — held the download {total / 1000.0:F1}s "
+                      + $"in total so the capture could keep up (budget {CaptureTotalStallBudgetMs / 1000}s)");
+        }
+    }
+
+    /// <summary>True while this stream's capture is behind enough that holding the download briefly would
+    /// help: the pre-arm buffer is full while arming, or the decrypt queue is over its soft cap.</summary>
+    private static bool NeedsCaptureHeadroom(StreamState st, int len)
+    {
+        lock (st.Lock)
+        {
+            if (st.Aborted || st.Parked) return false;
+            if (st.Armed) { var q = st.Queue; return q != null && q.Bytes + len > st.QueueSoftCap; }
+            return st.Arming && st.PreArmBytes + len > st.PreArmCap;
+        }
     }
 
     /// <summary>Sizes the front for THIS package from its just-buffered header. The arm step reads at
@@ -1348,14 +1428,37 @@ public sealed class XboxCacheProxyService : IDisposable
         st.Queue?.Close();
         lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
         Interlocked.Decrement(ref Filling);
+        ReleaseBuffers(st);
         GiveUpCapture(st, reason);
+    }
+
+    /// <summary>Drops the buffered bytes a dead stream is still holding. Without this an abandoned capture
+    /// kept its whole pre-arm buffer (up to PreArmCap) AND everything sitting in the chunk queue alive: the
+    /// consumer exits on <c>Aborted</c> without draining, and <see cref="ChunkQueue.Close"/> only flips a
+    /// flag. Those are multi-hundred-MB byte[] allocations on the large object heap, which is why the process
+    /// sat at ~1.7 GB after giving up a capture. Freeing them here makes the memory collectable immediately
+    /// instead of whenever the last thread referencing the state happens to exit.</summary>
+    private void ReleaseBuffers(StreamState st)
+    {
+        long freed;
+        lock (st.Lock)
+        {
+            freed = st.PreArmBytes;
+            st.PreArm.Clear();
+            st.PreArmBytes = 0; st.FrontContig = 0;
+        }
+        freed += st.Queue?.DiscardAll() ?? 0;
+        if (freed > 64L << 20)
+            Log?.Invoke($"STREAM released {freed / 1048576} MB of buffered bytes from {Path.GetFileName(st.File)}");
     }
 
     private void AbandonStream(StreamState st, string reason)
     {
         lock (st.Lock) { st.Aborted = true; st.Arming = false; try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
+        st.Queue?.Close();
         lock (_gate) { _streams.Remove(st.File); _streamAbandoned.Add(st.File); }
         Interlocked.Decrement(ref Filling);
+        ReleaseBuffers(st);
         GiveUpCapture(st, reason);
     }
 
