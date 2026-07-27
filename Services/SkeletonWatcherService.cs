@@ -308,6 +308,15 @@ public sealed class SkeletonWatcherService : IDisposable
             var name = kv.Key;
             var installDir = kv.Value;
             if (!NeedsCapture(name, installDir, out var why)) continue; // up-to-date skeleton already present
+
+            // A streamed capture parked by the proxy finalizes with no cached package at all. This scan is
+            // the ONLY thing that runs indefinitely: the install-detected event fires once, and the
+            // ScheduleCaptureWhenReady poll gives up after 15 minutes. If the install completed before the
+            // stream parked, both of those windows close and the finished capture sat here forever while
+            // this scan reported "no cached package" every 10 minutes and told the user to route the
+            // download through the proxy — which they already had.
+            if (TryFinalizeStreamedCapture(name, installDir)) { candidates++; continue; }
+
             var pkg = FindDropFor(name) ?? LocatePackage(installDir);
             if (pkg == null)
             {
@@ -762,10 +771,26 @@ public sealed class SkeletonWatcherService : IDisposable
             }
             catch { }
 
+            // Announce the attempt BEFORE it runs. Complete() rebuilds the skeleton against the install and
+            // refetches every range the Store never sent, which can take minutes on a large title with no
+            // output of any kind — leaving "awaiting install to finalize skeleton" as the last line for an
+            // hour with no way to tell whether it was working or wedged.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Report($"{name}: finalizing streamed skeleton (matching the install and refetching anything the "
+                 + "Store never sent — this can take several minutes on a large game) …");
+
             (bool ok, string status, string? servedPath) r;
             try { r = hook(contentGuid, live, skel); }
-            catch (Exception ex) { Report($"{name}: streamed finalize error — {ex.Message}"); return false; }
-            if (!r.ok) return false;
+            catch (Exception ex) { Report($"{name}: streamed finalize error after {sw.Elapsed.TotalSeconds:F0}s — {ex.Message}"); return false; }
+            if (!r.ok)
+            {
+                // "no matching streamed capture" is the normal not-applicable case and stays quiet; anything
+                // else means a real attempt failed and the user should see why.
+                if (!string.IsNullOrEmpty(r.status) &&
+                    r.status.IndexOf("no matching streamed capture", StringComparison.OrdinalIgnoreCase) < 0)
+                    Report($"{name}: streamed finalize failed after {sw.Elapsed.TotalSeconds:F0}s — {r.status}");
+                return false;
+            }
 
             long uSize = ReadSkelUSize(skel);
             var ver = GetInstalledVersion(live);
@@ -776,7 +801,8 @@ public sealed class SkeletonWatcherService : IDisposable
                 Ok = true, Verified = true, SkelPath = skel, SkelFileSize = skelSize, USize = uSize,
             });
             var vtag = ver != null ? $" v{ver}" : "";
-            Report($"✓ {name}{vtag}: streamed skeleton {skelSize / 1048576.0:F2} MB captured (no package stored) — {r.status}");
+            Report($"✓ {name}{vtag}: streamed skeleton {skelSize / 1048576.0:F2} MB captured in {sw.Elapsed.TotalSeconds:F0}s "
+                 + $"(no package stored) — {r.status}");
             return true;
         }
         finally { _inFlight.TryRemove(name, out _); }
