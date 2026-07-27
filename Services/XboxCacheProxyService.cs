@@ -1272,8 +1272,32 @@ public sealed class XboxCacheProxyService : IDisposable
             tTail = sw.Elapsed.TotalSeconds;
 
             string blob = Path.Combine(_streamBlobDir, MakeBlobName(st.File));
+
+            // Spill the assembled front to disk and hand the capture a FileStream over it. The front is the
+            // biggest thing a capture holds (DriveDataOffset + 64 MB — ~222 MB for a 27 GB package) and it
+            // stays resident until the skeleton is finalized, which waits on the game finishing installing.
+            // DeleteOnClose means the controller disposing the stream removes the file, on every path.
+            // On any IO failure fall back to the in-memory front — capturing matters more than the saving.
+            FileStream? frontFs = null;
+            try
+            {
+                string frontPath = blob + ".front";
+                using (var w = new FileStream(frontPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+                    w.Write(front, 0, (int)fl);
+                frontFs = new FileStream(frontPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20,
+                                         FileOptions.DeleteOnClose | FileOptions.RandomAccess);
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"STREAM front spill failed for {Path.GetFileName(st.File)} ({ex.Message}) — keeping it in memory");
+                try { frontFs?.Dispose(); } catch { }
+                frontFs = null;
+            }
+
             sw.Restart();
-            var ctl = TryBeginWithKeyRefresh(st, front, fl, tail, tailOff, blob);
+            var ctl = TryBeginWithKeyRefresh(st, front, frontFs, fl, tail, tailOff, blob);
+            if (ctl == null) { try { frontFs?.Dispose(); } catch { } }
+            front = null!; // the capture reads from frontFs now; let the assembled array go
             tBegin = sw.Elapsed.TotalSeconds;
             Log?.Invoke($"STREAM arm timing {Path.GetFileName(st.File)} — holes {tHoles:F1}s ({holeCount}, {holeBytes / 1048576.0:F1} MB), "
                       + $"front {tFront:F1}s, tail {tTail:F1}s, begin {tBegin:F1}s, total {swTotal.Elapsed.TotalSeconds:F1}s");
@@ -1357,13 +1381,17 @@ public sealed class XboxCacheProxyService : IDisposable
     /// <summary>Builds the capture controller; if it can't because a content key is missing, refreshes the CIK
     /// store (CikExtractor, elevated) once and retries — the download keeps buffering meanwhile, so a title
     /// whose key wasn't ready is still captured at 1x. Returns null (reason already logged) if it still can't.</summary>
-    private LibXboxOne.StreamingCaptureController? TryBeginWithKeyRefresh(StreamState st, byte[] front, long fl, byte[] tail, long tailOff, string blob)
+    private LibXboxOne.StreamingCaptureController? TryBeginWithKeyRefresh(StreamState st, byte[] front,
+        FileStream? frontFs, long fl, byte[] tail, long tailOff, string blob)
     {
         for (int attempt = 0; attempt < 2; attempt++)
         {
             string lastMsg = "";
-            var ctl = LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
-                _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20);
+            var ctl = frontFs != null
+                ? LibXboxOne.StreamingCaptureController.TryBeginFromFile(st.Total, frontFs, fl, tail, tailOff,
+                    _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20)
+                : LibXboxOne.StreamingCaptureController.TryBegin(st.Total, front, fl, tail, tailOff,
+                    _streamCikFolder, blob, m => { lastMsg = m; Log?.Invoke(m); }, bufferCap: 256L << 20);
             if (ctl != null) return ctl;
             if (attempt == 0 && lastMsg.IndexOf("MISSING KEY", StringComparison.OrdinalIgnoreCase) >= 0 && RequestCikRefresh != null)
             {
