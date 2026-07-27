@@ -35,6 +35,9 @@ public sealed class SkeletonWatcherService : IDisposable
     private readonly ConcurrentDictionary<string, string> _installs = new(StringComparer.OrdinalIgnoreCase);
     // single-flight guard per title
     private readonly ConcurrentDictionary<string, bool> _inFlight = new(StringComparer.OrdinalIgnoreCase);
+    // title -> the "needs capture" reason last announced as having no cached package, so the 10-minute scan
+    // reports a given state once instead of re-listing every waiting title on every pass.
+    private readonly ConcurrentDictionary<string, string> _noPkgReported = new(StringComparer.OrdinalIgnoreCase);
     // titles with a background poller waiting for their package to finish caching
     private readonly ConcurrentDictionary<string, bool> _pending = new(StringComparer.OrdinalIgnoreCase);
     // persistent capture log (mirrors every status line so failures survive an app restart)
@@ -315,18 +318,25 @@ public sealed class SkeletonWatcherService : IDisposable
             // stream parked, both of those windows close and the finished capture sat here forever while
             // this scan reported "no cached package" every 10 minutes and told the user to route the
             // download through the proxy — which they already had.
-            if (TryFinalizeStreamedCapture(name, installDir)) { candidates++; continue; }
+            if (TryFinalizeStreamedCapture(name, installDir)) { _noPkgReported.TryRemove(name, out _); candidates++; continue; }
 
             var pkg = FindDropFor(name) ?? LocatePackage(installDir);
             if (pkg == null)
             {
                 // New title, or an update landed (installed version > skeleton version), but there's no
-                // encrypted package cached to (re)capture from. Log the reason so it's visible; the cache
-                // watcher picks the package up if it appears later.
-                Report($"{name}: {why}, but no cached package present to capture from " +
-                       "(route its download/update through the proxy, or drop its .msixvc)");
+                // encrypted package cached to (re)capture from. Say so ONCE per title per reason: this scan
+                // runs every 10 minutes over every installed title, and repeating an unchanged status buried
+                // the log under dozens of identical lines and hid the events that mattered. It is re-announced
+                // if the reason changes (e.g. an update lands) or after the title is next captured.
+                if (!_noPkgReported.TryGetValue(name, out var prev) || prev != why)
+                {
+                    _noPkgReported[name] = why;
+                    Report($"{name}: {why}, but no cached package present to capture from " +
+                           "(route its download/update through the proxy, or drop its .msixvc)");
+                }
                 continue;
             }
+            _noPkgReported.TryRemove(name, out _);
             candidates++;
             Report($"{name}: {why} — capturing from {Path.GetFileName(pkg)}");
             await TryCaptureAsync(name, installDir, pkg);
