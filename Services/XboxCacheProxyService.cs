@@ -153,8 +153,10 @@ public sealed class XboxCacheProxyService : IDisposable
     // give up if not). An UNARMED stream gets much longer: assembling a package-sized front legitimately
     // involves lulls (the Store interleaves objects), and a 222 MB front is exposed to that far longer than
     // the old flat 64 MB one — reaping it at 30s throws away captures that were still progressing.
-    private const int StreamIdleSeconds = 30;
-    private const int StreamIdleSecondsUnarmed = 150;
+    // 30s was far too short for a package-sized download: a network blip or an Xbox app restart is enough to
+    // make the Store go quiet, and the reaper then declared a 27 GB download "finished" at 55% coverage and
+    // discarded the capture. Both states get the long timeout.
+    private const int StreamIdleSeconds = 150;
     // Backpressure. Holding a download thread briefly so the capture can catch up is preferable to dropping
     // bytes (which leaves a hole the capture's reorder buffer then can't bridge) or giving up outright. Both
     // budgets are deliberately small: a single chunk waits at most CaptureStallBudget, and once a stream has
@@ -889,8 +891,7 @@ public sealed class XboxCacheProxyService : IDisposable
                     armed = st.Armed; arming = st.Arming;
                     total = st.Total;
                     frontContig = st.FrontContig; frontLen = st.FrontLen; preArmBytes = st.PreArmBytes;
-                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds
-                           > (armed ? StreamIdleSeconds : StreamIdleSecondsUnarmed);
+                    idle = total > 0 && (DateTime.UtcNow - st.LastWriteUtc).TotalSeconds > StreamIdleSeconds;
                     if (idle && armed) gaps = ComplementLocked(st.Fed, total);
                 }
                 if (!idle) continue;
@@ -907,7 +908,7 @@ public sealed class XboxCacheProxyService : IDisposable
                         ? $"update: download finished without assembling the header (reused local blocks; only "
                           + $"{frontContig / 1048576.0:F0} of {frontLen / 1048576.0:F0} MB of the front was sent)"
                         : $"front [0,{frontLen / 1048576.0:F0} MB) never completed — Store sent {frontContig / 1048576.0:F0} MB "
-                          + $"contiguous ({preArmBytes / 1048576.0:F0} MB buffered) then went idle for {StreamIdleSecondsUnarmed}s; no skeleton");
+                          + $"contiguous ({preArmBytes / 1048576.0:F0} MB buffered) then went idle for {StreamIdleSeconds}s; no skeleton");
                     continue;
                 }
                 if (gaps.Count == 0) continue;
@@ -917,8 +918,16 @@ public sealed class XboxCacheProxyService : IDisposable
                 // so abandon capture and forward only; the update installs from the Store's own bytes.
                 if (gapBytes > (long)(total * MaxCompleteFraction))
                 {
-                    Log?.Invoke($"STREAM update {Path.GetFileName(st.File)} — Store sent {(total - gapBytes) / 1048576.0:F1} of {total / 1048576.0:F1} MB; not re-downloading {gapBytes / 1048576.0:F1} MB to complete the skeleton");
-                    StreamAbort(st, "update: skipping gap-fill to avoid re-downloading the package");
+                    // Report the observation, not a guessed cause. An UPDATE (which reuses local blocks) and
+                    // an INTERRUPTED download look identical from here — both leave a large unsent remainder —
+                    // and this used to assert "update" either way, which sent the reader hunting for the wrong
+                    // thing after a network drop mid-download.
+                    double sentPct = total > 0 ? 100.0 * (total - gapBytes) / total : 0;
+                    Log?.Invoke($"STREAM incomplete {Path.GetFileName(st.File)} — Store sent {(total - gapBytes) / 1048576.0:F1} of "
+                              + $"{total / 1048576.0:F1} MB ({sentPct:F0}%) then stopped for {StreamIdleSeconds}s; completing the "
+                              + $"skeleton would need {gapBytes / 1048576.0:F1} MB, so not fetching it. Expected for an update "
+                              + $"(reuses local blocks); if the download was interrupted, restart it for a clean capture.");
+                    StreamAbort(st, $"only {sentPct:F0}% of the package was sent; skipping gap-fill rather than re-downloading it");
                     continue;
                 }
                 Log?.Invoke($"STREAM gap-fill {Path.GetFileName(st.File)}: {gaps.Count} range(s), {gapBytes / 1048576.0:F1} MB the Store never sent");
