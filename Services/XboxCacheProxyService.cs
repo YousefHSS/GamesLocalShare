@@ -114,6 +114,9 @@ public sealed class XboxCacheProxyService : IDisposable
         public long QueueSoftCap = CaptureQueueCapBytes;
         public long QueueHardCap = CaptureQueueHardCapBytes;
         public bool CapsSettled;
+        // Spill/park files backing this capture. Deleted on abort and after a successful finalize; a park that
+        // outlives the process is what a later run resumes from.
+        public string BlobPath = "", FrontPath = "", ParkPath = "";
         // Set when PreArm has hit its cap while arming: further bytes are not buffered (the gap-fill refetches
         // those ranges at Complete) so a slow arm can't grow the buffer without bound. Only reached once the
         // stall budget below is spent — throttling briefly is preferred to dropping.
@@ -250,6 +253,72 @@ public sealed class XboxCacheProxyService : IDisposable
         Log?.Invoke(enabled
             ? $"streaming capture ENABLED (cik: {_streamCikFolder}, blobs: {_streamBlobDir}); full-package cache {(_teeEnabled ? "ON" : "off")}"
             : $"streaming capture disabled; full-package cache {(_teeEnabled ? "ON" : "off")}");
+        if (enabled) RestoreParks();
+    }
+
+    /// <summary>Re-registers captures parked by a previous run so they finalize normally. A parked capture is
+    /// finished — every byte streamed and hashed — and only waits for the game to finish installing, which can
+    /// outlast the app. Without this, closing the app discarded a completed capture and the whole title had to
+    /// be downloaded again. Any park whose backing files are gone (or that no longer loads) is swept up.</summary>
+    private void RestoreParks()
+    {
+        List<string> parks;
+        try { parks = Directory.GetFiles(_streamBlobDir, "*.park").ToList(); }
+        catch { return; }
+        if (parks.Count == 0) return;
+
+        int restored = 0;
+        foreach (var park in parks)
+        {
+            string file = "", host = "", ip = "", rawPath = "", frontPath = "";
+            long total = 0, frontLen = 0;
+            void ReadOrigin(Stream s)
+            {
+                file = LibXboxOne.StreamingSkeletonizer.RStr(s);
+                host = LibXboxOne.StreamingSkeletonizer.RStr(s);
+                ip = LibXboxOne.StreamingSkeletonizer.RStr(s);
+                rawPath = LibXboxOne.StreamingSkeletonizer.RStr(s);
+                frontPath = LibXboxOne.StreamingSkeletonizer.RStr(s);
+                total = (long)LibXboxOne.StreamingSkeletonizer.RU64(s);
+                frontLen = (long)LibXboxOne.StreamingSkeletonizer.RU64(s);
+            }
+
+            // Peek the origin first: Resume needs the package size and front length to rebuild the stream.
+            var ctl = LibXboxOne.StreamingSkeletonizer.TryReadOrigin(park, ReadOrigin) && total > 0
+                ? LibXboxOne.StreamingCaptureController.Resume(park, frontPath, total, frontLen,
+                    _streamCikFolder, Log, readOrigin: ReadOrigin)
+                : null;
+            if (ctl == null)
+            {
+                Log?.Invoke($"STREAM discarding an unusable parked capture ({Path.GetFileName(park)})");
+                TryDelete(park); TryDelete(frontPath);
+                continue;
+            }
+
+            var st = new StreamState
+            {
+                File = file, Host = host, Ip = ip, RawPath = rawPath, Total = total, FrontLen = frontLen,
+                Ctl = ctl, Parked = true, BlobPath = park.Substring(0, park.Length - ".park".Length),
+                FrontPath = frontPath, ParkPath = park,
+            };
+            lock (_gate) _streams[st.File] = st;
+            restored++;
+            Log?.Invoke($"STREAM restored a parked capture from a previous run: {Path.GetFileName(file)} "
+                      + $"({total / 1048576.0:F0} MB) — it will finalize once the game is installed");
+        }
+        if (restored > 0) StatsChanged?.Invoke();
+    }
+
+    private static string ProbeFrontPath(string parkPath)
+    {
+        var b = parkPath.Substring(0, parkPath.Length - ".park".Length);
+        return b + ".front";
+    }
+
+    private static void TryDelete(string? p)
+    {
+        if (string.IsNullOrEmpty(p)) return;
+        try { if (File.Exists(p)) File.Delete(p); } catch { }
     }
     // Active peer-origin overrides: when a request's URL path contains one of these keys (e.g. a title's
     // PackageFullName / content GUID), forward it to a peer's streaming-reconstruct endpoint instead of the CDN
@@ -1276,16 +1345,20 @@ public sealed class XboxCacheProxyService : IDisposable
             // Spill the assembled front to disk and hand the capture a FileStream over it. The front is the
             // biggest thing a capture holds (DriveDataOffset + 64 MB — ~222 MB for a 27 GB package) and it
             // stays resident until the skeleton is finalized, which waits on the game finishing installing.
-            // DeleteOnClose means the controller disposing the stream removes the file, on every path.
+            // NOT DeleteOnClose: a parked capture is resumable across a restart, and the front is what its
+            // decrypt context is rebuilt from — so it has to outlive the process. Cleanup is explicit instead
+            // (ReleaseBuffers on abort, DiscardPark after a successful finalize, and a sweep at startup).
             // On any IO failure fall back to the in-memory front — capturing matters more than the saving.
             FileStream? frontFs = null;
+            st.BlobPath = blob;
             try
             {
                 string frontPath = blob + ".front";
                 using (var w = new FileStream(frontPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
                     w.Write(front, 0, (int)fl);
                 frontFs = new FileStream(frontPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20,
-                                         FileOptions.DeleteOnClose | FileOptions.RandomAccess);
+                                         FileOptions.RandomAccess);
+                st.FrontPath = frontPath;
             }
             catch (Exception ex)
             {
@@ -1462,9 +1535,40 @@ public sealed class XboxCacheProxyService : IDisposable
             st.Queue?.Close(); // coverage done → let the background consumer exit
             Interlocked.Decrement(ref Filling);
             Log?.Invoke($"STREAM ready {Path.GetFileName(st.File)} — awaiting install to finalize skeleton");
+            SavePark(st);
             StatsChanged?.Invoke();
         }
     }
+
+    /// <summary>Persists a just-parked capture so it survives the app closing. A park can wait a long time —
+    /// the skeleton can only be finalized once the game has finished installing — and until now that whole
+    /// wait lived in memory: closing the app threw away a completed capture and the title had to be
+    /// downloaded again. Everything heavy (blob, structural region, front) is already on disk; this writes the
+    /// small binding table plus the origin needed to refetch at finalize.</summary>
+    private void SavePark(StreamState st)
+    {
+        var ctl = st.Ctl;
+        if (ctl == null || string.IsNullOrEmpty(st.FrontPath)) return;
+        try
+        {
+            var park = st.BlobPath + ".park";
+            ctl.SavePark(park, s =>
+            {
+                LibXboxOne.StreamingSkeletonizer.WStr(s, st.File);
+                LibXboxOne.StreamingSkeletonizer.WStr(s, st.Host);
+                LibXboxOne.StreamingSkeletonizer.WStr(s, st.Ip);
+                LibXboxOne.StreamingSkeletonizer.WStr(s, st.RawPath);
+                LibXboxOne.StreamingSkeletonizer.WStr(s, st.FrontPath);
+                WriteU64(s, (ulong)st.Total);
+                WriteU64(s, (ulong)st.FrontLen);
+            });
+            st.ParkPath = park;
+            Log?.Invoke($"STREAM parked {Path.GetFileName(st.File)} — saved to disk; it will finalize even if the app restarts");
+        }
+        catch (Exception ex) { Log?.Invoke($"STREAM park save failed for {Path.GetFileName(st.File)}: {ex.Message}"); }
+    }
+
+    private static void WriteU64(Stream s, ulong v) { for (int i = 0; i < 8; i++) s.WriteByte((byte)(v >> 8 * i)); }
 
     /// <summary>Gives up streaming for an object. With the full-package cache opted in, kicks a normal
     /// whole-object download so it still caches; otherwise the object is just forwarded (no skeleton, no disk
@@ -1498,6 +1602,21 @@ public sealed class XboxCacheProxyService : IDisposable
         freed += st.Queue?.DiscardAll() ?? 0;
         if (freed > 64L << 20)
             Log?.Invoke($"STREAM released {freed / 1048576} MB of buffered bytes from {Path.GetFileName(st.File)}");
+        DiscardPark(st);
+    }
+
+    /// <summary>Removes the on-disk spill/park for a capture that is finished with — aborted, or finalized.
+    /// The skeletonizer's own Dispose removes the blob and structural spill; the front and park are the
+    /// proxy's to clean, since it opened them deliberately without DeleteOnClose so a park could outlive the
+    /// process.</summary>
+    private static void DiscardPark(StreamState st)
+    {
+        foreach (var p in new[] { st.ParkPath, st.FrontPath })
+        {
+            if (string.IsNullOrEmpty(p)) continue;
+            try { if (File.Exists(p)) File.Delete(p); } catch { }
+        }
+        st.ParkPath = ""; st.FrontPath = "";
     }
 
     private void AbandonStream(StreamState st, string reason)
@@ -1560,6 +1679,7 @@ public sealed class XboxCacheProxyService : IDisposable
             // Captured → the package is intentionally not on disk; serve future MISSes transiently, never tee.
             lock (_gate) { _streams.Remove(st.File); _streamCaptured.Add(st.File); }
             try { st.Ctl.Dispose(); } catch { }
+            DiscardPark(st);   // the skeleton is written; the park it could have been rebuilt from is now dead weight
             Log?.Invoke($"STREAM finalized {Path.GetFileName(st.File)} — {status}");
             StatsChanged?.Invoke();
         }
