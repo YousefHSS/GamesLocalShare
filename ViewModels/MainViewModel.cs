@@ -3697,6 +3697,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Legacy batch-capture phases (fallback path / older bundled tool).
         ("SELF-VERIFY",               5, "Verifying result"),
         ("skeleton.skl size",         4, "Writing skeleton"),
+        ("writing the skeleton",      4, "Writing skeleton"),
+        ("finalizing — refetched",    4, "Refetching missing ranges"),
+        ("matching",                  3, "Matching installed files"),
         ("genuine structural region", 3, "Matching installed files"),
         ("hashing genuine package",   2, "Hashing package"),
         ("Verifying data hashes",     1, "Reading package"),
@@ -3720,8 +3723,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // A streamed capture finalizes instead of running xvdtool, so it has its own start line. It reports
+        // real percentages (PROGRESS n) from the matching / refetch / write phases below.
+        const string finalizeTag = ": finalizing streamed skeleton";
+        int fi = line.IndexOf(finalizeTag, StringComparison.OrdinalIgnoreCase);
+        if (fi > 0)
+        {
+            SkeletonCapturing = new SkeletonCaptureProgress
+            {
+                Name = line.Substring(0, fi).Trim(),
+                Step = 3, TotalSteps = 5,
+                Phase = "Matching installed files",
+                StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            };
+            return;
+        }
+
         var cur = SkeletonCapturing;
         if (cur == null) return; // markers only count while a capture is active
+
+        // A streamed finalize that fails reports it and stops — clear the bar rather than leaving it stuck.
+        if (line.IndexOf("streamed finalize failed", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            line.IndexOf("streamed finalize error", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            SkeletonCapturing = null;
+            return;
+        }
 
         // Exact progress from the engine ("PROGRESS n") — drives a real determinate bar. Monotonic.
         if (line.StartsWith("PROGRESS ", StringComparison.OrdinalIgnoreCase)
