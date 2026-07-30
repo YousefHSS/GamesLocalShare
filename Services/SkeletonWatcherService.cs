@@ -1188,7 +1188,7 @@ public sealed class SkeletonWatcherService : IDisposable
             TryDeleteFile(staging);
 
             var where = toChosen ? target : Path.GetFileName(target);
-            Report($"reconstructing package for {name} (rebuild + re-encrypt → {where}) …");
+            Report($"restoring genuine package for {name} (rebuild + re-encrypt → {where}) …");
             var res = await _skeleton.RestoreToPackageAsync(
                 skel, installDir, cikFolder, staging,
                 onOutput: line => Report(line),
@@ -1197,7 +1197,7 @@ public sealed class SkeletonWatcherService : IDisposable
             if (!res.Ok)
             {
                 TryDeleteFile(staging);
-                RestoreFailed?.Invoke($"{name}: reconstruct failed - {res.Error}");
+                RestoreFailed?.Invoke($"{name}: restore failed - {res.Error}");
                 return false;
             }
 

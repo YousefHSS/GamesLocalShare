@@ -16,7 +16,9 @@ namespace GamesLocalShare.Services;
 /// identically. After a verified capture the game is stored as (installed files) + (tiny skeleton).</para>
 ///
 /// <para><b>reconstruct</b>: given a .skl + the installed files, rebuilds the decrypted package U' (pure
-/// file I/O). <b>encrypt</b> re-encrypts U' back into the genuine, byte-identical .msixvc.</para>
+/// file I/O). <b>restore</b> goes all the way to the genuine, byte-identical .msixvc: reconstruct, then
+/// re-encrypt the data pages and stamp the skeleton's genuine structural region (header + hash tree) back
+/// over the front — the header is never rewritten, so nothing is rehashed or resigned.</para>
 ///
 /// <para>Decryption/encryption are done by xvdtool with the user's own CIK on the user's own licensed
 /// content; the app never implements the cipher itself.</para>
@@ -131,33 +133,12 @@ public sealed class SkeletonService
     }
 
     /// <summary>
-    /// Re-encrypts a reconstructed package U' back into the genuine .msixvc (in place), using a CIK store.
-    /// This is the final restore step after <see cref="ReconstructAsync"/>.
+    /// Rebuilds the genuine encrypted <c>.msixvc</c> from a skeleton + the installed files in one xvdtool
+    /// call: reconstruct U', re-encrypt its data pages with the CIK, and stamp the skeleton's genuine
+    /// structural region (header + hash tree) back over the front. xvdtool verifies the result against the
+    /// genuine package hash recorded at capture; the outcome is read from the on-disk result.json.
     /// </summary>
-    public async Task<bool> EncryptAsync(
-        string packagePath,
-        string cikFolder,
-        Action<string>? onOutput = null,
-        CancellationToken ct = default)
-    {
-        var args = new List<string>
-        {
-            "-ee", "-pdu",
-            "--cikfolder", cikFolder,
-            packagePath,
-        };
-        return await RunAsync(args, onOutput, ct) == 0;
-    }
-
-    /// <summary>
-    /// Full restore: rebuilds U' from the skeleton + installed files, re-encrypts it in place into the
-    /// genuine <c>.msixvc</c> at <paramref name="outPackagePath"/>, and confirms the result is byte-identical
-    /// to the original package (final SHA == the gsha stored in the .skl). This is the package the LAN-cache
-    /// proxy serves back to Gaming Services for a Verify/update HIT — no re-download.
-    /// <para>The output is written straight to <paramref name="outPackagePath"/>; the caller is responsible
-    /// for staging (e.g. writing to a temp path then moving into the served cache path).</para>
-    /// </summary>
-    public async Task<SkeletonRestoreResult> RestoreToPackageAsync(
+    public async Task<SkeletonRestoreResult> RestoreGenuineAsync(
         string skeletonPath,
         string installPath,
         string cikFolder,
@@ -165,62 +146,38 @@ public sealed class SkeletonService
         Action<string>? onOutput = null,
         CancellationToken ct = default)
     {
-        // 1) skeleton + install -> U' (pure I/O, SHA-checked vs the .skl's usha by xvdtool).
-        var rec = await ReconstructAsync(skeletonPath, installPath, outPackagePath, onOutput, ct);
-        if (!rec.Ok || !rec.Identical)
-        {
-            return new SkeletonRestoreResult
-            {
-                ReconstructIdentical = rec.Identical,
-                Gsha = rec.Gsha,
-                PackageBytes = rec.USize,
-                OutPath = outPackagePath,
-                Error = $"reconstruct did not rebuild U byte-identically (exit {rec.ExitCode})",
-            };
-        }
+        var resultJson = outPackagePath + ".result.json";
+        TryDelete(resultJson);
 
-        // 2) U' -> genuine encrypted .msixvc, in place.
-        bool enc = await EncryptAsync(outPackagePath, cikFolder, onOutput, ct);
-        if (!enc)
+        var args = new List<string>
         {
-            return new SkeletonRestoreResult
-            {
-                ReconstructIdentical = true,
-                Encrypted = false,
-                Gsha = rec.Gsha,
-                PackageBytes = rec.USize,
-                OutPath = outPackagePath,
-                Error = "re-encryption (-ee -pdu) failed",
-            };
-        }
-
-        // 3) Confirm the produced package equals the genuine one (gsha from the .skl).
-        string outSha = await Task.Run(() => Sha256File(outPackagePath), ct);
-        bool match = !string.IsNullOrEmpty(rec.Gsha)
-                     && outSha.Equals(rec.Gsha, StringComparison.OrdinalIgnoreCase);
-
-        return new SkeletonRestoreResult
-        {
-            Ok = match,
-            ReconstructIdentical = true,
-            Encrypted = true,
-            OutSha = outSha,
-            Gsha = rec.Gsha,
-            PackageBytes = rec.USize,
-            OutPath = outPackagePath,
-            Error = match ? null
-                : string.IsNullOrEmpty(rec.Gsha)
-                    ? "skeleton has no genuine-package hash (gsha) to verify against"
-                    : "restored package SHA does not match the genuine package (gsha)",
+            "--restore",
+            "--skel", skeletonPath,
+            "--install", installPath,
+            "--cikfolder", cikFolder,
+            "-o", outPackagePath,
         };
+
+        int exit = await RunAsync(args, onOutput, ct);
+        return ParseRestore(resultJson, exit, outPackagePath);
     }
 
-    private static string Sha256File(string path)
-    {
-        using var sha = System.Security.Cryptography.SHA256.Create();
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
-        return Convert.ToHexString(sha.ComputeHash(fs)).ToLowerInvariant();
-    }
+    /// <summary>
+    /// Full restore to the genuine <c>.msixvc</c> at <paramref name="outPackagePath"/>, byte-identical to the
+    /// original (final SHA == the gsha stored in the .skl). This is the package the LAN-cache proxy serves
+    /// back to Gaming Services for a Verify/update HIT — no re-download.
+    /// <para>The output is written straight to <paramref name="outPackagePath"/>; the caller is responsible
+    /// for staging (e.g. writing to a temp path then moving into the served cache path).</para>
+    /// <para>Alias for <see cref="RestoreGenuineAsync"/>, kept for callers.</para>
+    /// </summary>
+    public Task<SkeletonRestoreResult> RestoreToPackageAsync(
+        string skeletonPath,
+        string installPath,
+        string cikFolder,
+        string outPackagePath,
+        Action<string>? onOutput = null,
+        CancellationToken ct = default)
+        => RestoreGenuineAsync(skeletonPath, installPath, cikFolder, outPackagePath, onOutput, ct);
 
     /// <summary>Runs xvdtool elevated via the UAC "runas" verb (so it can read high-integrity Xbox install
     /// files). Shell-execute is required for runas, which precludes stdout redirection, so progress isn't
@@ -339,6 +296,47 @@ public sealed class SkeletonService
         catch
         {
             return new SkeletonReconstructResult { Ok = false, ExitCode = exit };
+        }
+    }
+
+    /// <summary>Reads the <c>--restore</c> outcome. xvdtool writes the same result.json for a failure before
+    /// the rebuild (v1 skeleton, missing gsha, structural size mismatch) with an <c>error</c> string, so a
+    /// missing file means the process died before it could report anything.</summary>
+    private static SkeletonRestoreResult ParseRestore(string jsonPath, int exit, string outPackagePath)
+    {
+        if (!File.Exists(jsonPath))
+            return new SkeletonRestoreResult
+            {
+                OutPath = outPackagePath,
+                Error = $"xvdtool did not report a restore result (exit {exit})",
+            };
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
+            var r = doc.RootElement;
+            bool ok = GetBool(r, "ok");
+            var err = GetStr(r, "error");
+            return new SkeletonRestoreResult
+            {
+                Ok = ok,
+                ReconstructIdentical = ok,
+                Encrypted = ok,
+                OutSha = GetStr(r, "outSha"),
+                Gsha = GetStr(r, "gsha"),
+                PackageBytes = GetLong(r, "uSize"),
+                OutPath = GetStr(r, "outPath") is { Length: > 0 } p ? p : outPackagePath,
+                Error = ok ? null
+                    : err.Length > 0 ? err
+                    : "restored package is not byte-identical to the genuine package (gsha)",
+            };
+        }
+        catch
+        {
+            return new SkeletonRestoreResult
+            {
+                OutPath = outPackagePath,
+                Error = $"could not read the restore result (exit {exit})",
+            };
         }
     }
 

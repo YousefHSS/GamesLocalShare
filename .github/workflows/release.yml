@@ -92,7 +92,12 @@ jobs:
           - Creates Start Menu shortcuts
           - Optional: Start with Windows (registers an elevated logon task so the app starts without a UAC prompt each session)
 
-          ## What's New in 3.0.13
+          ## What's New in 3.1.0
+
+          Rebuilding a stored game back into its original package now works. This was the missing half of single-copy storage: the app could shrink a game to its installed files plus a ~17 MB skeleton, but turning that back into the package Xbox asks for during a Verify or an update failed every time — so the space saving was never safe to rely on.
+
+          - **Fixed: restoring a game from its skeleton always failed at the last step** — the rebuild itself was perfect (the app confirmed a byte-identical result every time), but the final re-encryption silently did nothing, and the restore was rejected as "does not match the genuine package". The re-encryption step was written for an older skeleton format; on the current one it saw a package that already looked encrypted and quietly declined, leaving the file unencrypted. Restoring now takes a single path built for the current format, which never rewrites the package header at all — so there is nothing to re-sign and nothing to get out of step. Verified byte-identical on a 316 MB game and a 4.3 GB one.
+          - **Clearer logs when a restore fails** — every restore printed "Warning: CIK could not be loaded!", including successful steps, which read like the cause of the failure and it never was. That warning now appears only when it's real; a genuinely missing key is still named explicitly.
 
           Large games can now be captured at all — end to end, from download to finished skeleton. Preparing a capture drops from over three minutes to about a second, a finished capture no longer gets stranded waiting to be saved, and the app tells you what it's doing while it works.
 
