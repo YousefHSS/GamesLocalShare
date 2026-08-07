@@ -27,36 +27,78 @@ function StatusPill({ on, onLabel, offLabel }: { on: boolean; onLabel: string; o
   );
 }
 
+/** Headline verb per stage. A wait is not work in progress, and saying "Preparing" through it (as the old
+ *  single-stage card did) made an idle park look like a job that had hung. */
+const STAGE_TITLE: Record<SkeletonCaptureProgress['stage'], (name: string) => string> = {
+  buffering:  (n) => `Preparing "${n}"…`,
+  capturing:  (n) => `Capturing "${n}" from its download…`,
+  waiting:    (n) => `"${n}" is captured — waiting for the install to finish`,
+  restored:   (n) => `"${n}" is captured — waiting for the install to finish`,
+  finalizing: (n) => `Finishing "${n}"…`,
+  preparing:  (n) => `Preparing "${n}"…`,
+};
+
+/** Stages that are actively working (spinner + animated bar) vs parked ones (steady, no spinner). */
+const ACTIVE_STAGES = new Set(['buffering', 'capturing', 'finalizing', 'preparing']);
+
 function CapturingCard({ cap, now }: { cap: SkeletonCaptureProgress; now: number }) {
-  const total = cap.totalSteps || 5;
-  // Prefer the engine's exact percent (a real progress bar); fall back to the coarse step bar when unknown.
+  const active = ACTIVE_STAGES.has(cap.stage);
+  const steps = cap.totalSteps || 0;
+
+  // Three ways a bar gets its width, in order of fidelity: the stage's own byte counts (streaming), an exact
+  // percent (the engine's PROGRESS during a finalize), or the coarse step count (legacy batch capture).
   const hasPercent = typeof cap.percent === 'number' && cap.percent >= 0;
   const pct = hasPercent
     ? Math.min(100, Math.max(0, cap.percent))
-    : Math.min(100, Math.max(0, (cap.step / total) * 100));
+    : steps > 0 ? Math.min(100, Math.max(0, (cap.step / steps) * 100))
+    : 0;
+  const indeterminate = active && !hasPercent && steps === 0;
+
   const elapsed = Math.max(0, Math.floor((now - cap.startedAtMs) / 1000));
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
+
+  const detail = cap.bytesTotal > 0 && cap.stage !== 'waiting' && cap.stage !== 'restored'
+    ? `${fmtBytes(cap.bytesDone)} / ${fmtBytes(cap.bytesTotal)} · ${cap.phase}`
+    : hasPercent ? `${pct}% · ${cap.phase}`
+    : steps > 0 ? `Step ${cap.step}/${steps} · ${cap.phase}`
+    : cap.phase;
+
   return (
-    <div className="bg-blue-950/40 border border-blue-800/50 rounded-lg px-3 py-2.5">
+    <div
+      data-testid="capturing-card"
+      data-stage={cap.stage}
+      className={`rounded-lg px-3 py-2.5 border ${
+        active ? 'bg-blue-950/40 border-blue-800/50' : 'bg-slate-800/40 border-slate-700/50'
+      }`}
+    >
       <div className="flex items-center justify-between gap-2 mb-1.5">
-        <p className="text-sm text-blue-100 flex items-center gap-1.5 min-w-0">
-          <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin flex-shrink-0" />
-          <span className="truncate">Preparing <span className="font-medium">"{cap.name}"</span>…</span>
+        <p className={`text-sm flex items-center gap-1.5 min-w-0 ${active ? 'text-blue-100' : 'text-slate-300'}`}>
+          {active
+            ? <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin flex-shrink-0" />
+            : <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />}
+          <span className="truncate">{STAGE_TITLE[cap.stage]?.(cap.name) ?? cap.name}</span>
         </p>
-        <span className="text-[11px] text-blue-300/80 font-mono flex-shrink-0 tabular-nums">{mm}:{ss}</span>
+        {active && (
+          <span className="text-[11px] text-blue-300/80 font-mono flex-shrink-0 tabular-nums">{mm}:{ss}</span>
+        )}
       </div>
-      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-        <div
-          className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full transition-all duration-500 relative overflow-hidden"
-          style={{ width: `${pct}%` }}
-        >
-          <div className="absolute inset-0 bg-white/20 animate-pulse" />
+      {/* A park has nothing left to measure — showing it a bar (full or empty) would both mislead. */}
+      {active && (
+        <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+          {indeterminate ? (
+            <div className="h-full w-1/3 bg-gradient-to-r from-blue-600 to-blue-400 rounded-full animate-pulse" />
+          ) : (
+            <div
+              className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full transition-all duration-500 relative overflow-hidden"
+              style={{ width: `${pct}%` }}
+            >
+              <div className="absolute inset-0 bg-white/20 animate-pulse" />
+            </div>
+          )}
         </div>
-      </div>
-      <p className="text-[11px] text-blue-300/70 mt-1">
-        {hasPercent ? `${pct}% · ${cap.phase}` : `Step ${cap.step}/${total} · ${cap.phase}`}
-      </p>
+      )}
+      <p className={`text-[11px] mt-1 ${active ? 'text-blue-300/70' : 'text-slate-400/80'}`}>{detail}</p>
     </div>
   );
 }
@@ -65,14 +107,16 @@ export default function SkeletonPanel() {
   const s = useAppState();
   const [advanced, setAdvanced] = useState(false);
 
-  // Tick once a second while a capture is running so the elapsed timer advances without new state pushes.
+  // Tick once a second while a capture is actively working so the elapsed timer advances without new state
+  // pushes. Parked captures show no timer, so they must not keep the interval alive — a park can sit for hours.
+  const anyActive = s.skeletonCapturing.some((c) => ACTIVE_STAGES.has(c.stage));
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!s.skeletonCapturing) return;
+    if (!anyActive) return;
     setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [s.skeletonCapturing]);
+  }, [anyActive]);
 
   const watching = s.isSkeletonWatching;
   const proxy = s.isCacheProxyRunning;
@@ -170,8 +214,14 @@ export default function SkeletonPanel() {
 
       {/* Content: captures + log */}
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
-        {/* In-progress capture progress bar */}
-        {s.skeletonCapturing && <CapturingCard cap={s.skeletonCapturing} now={now} />}
+        {/* In-progress captures — several titles can be capturing (or parked) at once */}
+        {s.skeletonCapturing.length > 0 && (
+          <div className="space-y-2">
+            {s.skeletonCapturing.map((cap) => (
+              <CapturingCard key={cap.id || cap.name} cap={cap} now={now} />
+            ))}
+          </div>
+        )}
 
         <div>
           <div className="flex items-center justify-between mb-2">

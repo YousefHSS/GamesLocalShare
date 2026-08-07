@@ -650,6 +650,30 @@ public sealed class SkeletonWatcherService : IDisposable
         return null;
     }
 
+    /// <summary>Maps a package cache path to the friendly installed-title name, for the streaming capture's
+    /// progress UI. The proxy only knows the CDN path, which carries the content GUID
+    /// (<c>…\&lt;contentGuid&gt;\…\&lt;PackageFullName&gt;.msixvc</c>); the installed title is whichever one has
+    /// that GUID as its <c>.xvi</c> filename. Returns null when no install matches — a capture usually starts
+    /// <i>before</i> the title exists on disk, and the caller falls back to the package filename until it does.
+    /// </summary>
+    public string? ResolveTitleNameForPackagePath(string packagePath)
+    {
+        if (string.IsNullOrWhiteSpace(packagePath)) return null;
+        foreach (var kv in _installs.ToArray())
+        {
+            string? guid = null;
+            try
+            {
+                var xvi = Directory.EnumerateFiles(kv.Value, "*.xvi").FirstOrDefault();
+                if (xvi != null) guid = Path.GetFileNameWithoutExtension(xvi);
+            }
+            catch { continue; }   // install folder vanished mid-scan; the next call picks it up
+            if (!string.IsNullOrEmpty(guid) && packagePath.IndexOf(guid!, StringComparison.OrdinalIgnoreCase) >= 0)
+                return kv.Key;
+        }
+        return null;
+    }
+
     /// <summary>
     /// Locates the cached encrypted package for an installed title under <see cref="PackageCacheRoot"/>.
     /// <para>Primary match is the <b>content GUID</b> — the <c>.xvi</c> filename at the install root — which

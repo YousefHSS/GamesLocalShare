@@ -146,13 +146,25 @@ export interface SkeletonCaptureEntry {
   capturedAt: string;
 }
 
-/** Live progress of a skeleton capture in flight (drives the "Preparing…" bar). null when idle. */
+/**
+ * Lifecycle stage of a capture. The streaming path (skeleton built from the Store's own install download)
+ * walks buffering → capturing → waiting → finalizing; `restored` is a park recovered from a previous run,
+ * still waiting; `preparing` is the legacy batch xvdtool capture, which is step-based rather than byte-based.
+ */
+export type SkeletonCaptureStage =
+  | 'buffering' | 'capturing' | 'waiting' | 'restored' | 'finalizing' | 'preparing';
+
+/** Live progress of one skeleton capture in flight. Several can run at once. */
 export interface SkeletonCaptureProgress {
+  id: string;          // stable row key (package cache path, or "batch:<name>")
   name: string;
-  step: number;        // 1..totalSteps, monotonic
-  totalSteps: number;  // 5
+  stage: SkeletonCaptureStage;
+  bytesDone: number;   // within the current stage; 0 when the stage has no byte measure
+  bytesTotal: number;  // within the current stage; 0 when unknown
+  step: number;        // 1..totalSteps, monotonic (batch path only; 0 for streaming)
+  totalSteps: number;  // 5 (batch path only; 0 for streaming)
   phase: string;       // e.g. "Matching installed files"
-  percent: number;     // exact 0..100 from the engine; -1 = unknown (fall back to step bar)
+  percent: number;     // 0..100 WITHIN the current stage; -1 = unknown (indeterminate bar)
   startedAtMs: number; // epoch ms, for elapsed time
 }
 
@@ -234,7 +246,7 @@ export interface AppState {
 
   // Skeleton capture
   isSkeletonWatching: boolean;
-  skeletonCapturing: SkeletonCaptureProgress | null;
+  skeletonCapturing: SkeletonCaptureProgress[];
   skeletonDropFolder: string;
   skeletonCaptures: SkeletonCaptureEntry[];
   skeletonLog: string[];
@@ -305,7 +317,7 @@ const initialState: Omit<AppState, 'updateState' | 'reset'> = {
   xboxRootPath: '',
 
   isSkeletonWatching: false,
-  skeletonCapturing: null,
+  skeletonCapturing: [],
   skeletonDropFolder: '',
   skeletonCaptures: [],
   skeletonLog: [],
