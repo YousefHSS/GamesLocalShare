@@ -55,10 +55,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isSkeletonWatching;
 
-    /// <summary>Non-null while a skeleton capture is in progress; drives the WebUI "Preparing…" progress bar.
-    /// xvdtool emits named phases (not an exact %), so this tracks a monotonic step (1..TotalSteps).</summary>
+    /// <summary>Every skeleton capture currently in flight, driving the WebUI progress bars. Empty when none.
+    /// <para>It is a list, not a single value, because the proxy can be capturing several titles at once (the
+    /// Store happily installs in parallel) and a parked capture can sit here for hours — a single slot meant a
+    /// second download silently overwrote the first one's row.</para>
+    /// <para>Streaming captures come from <see cref="XboxCacheProxyService.SnapshotCaptures"/> (real byte
+    /// counts); the legacy batch xvdtool capture has no such counters and is still tracked from its log
+    /// markers in <see cref="_batchCapturing"/>, which is appended to this list.</para></summary>
     [ObservableProperty]
-    private SkeletonCaptureProgress? _skeletonCapturing;
+    private IReadOnlyList<SkeletonCaptureProgress> _skeletonCapturing = [];
+
+    /// <summary>The legacy batch (xvdtool) capture in flight, or null. Merged into <see cref="SkeletonCapturing"/>.</summary>
+    private SkeletonCaptureProgress? _batchCapturing;
+
+    /// <summary>Latest streaming snapshot from the proxy. Merged into <see cref="SkeletonCapturing"/>.</summary>
+    private IReadOnlyList<SkeletonCaptureProgress> _streamCapturing = [];
 
     [ObservableProperty]
     private string _skeletonDropFolder = string.Empty;
@@ -273,6 +284,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Let streaming fetch a missing content key mid-download (CikExtractor) so titles whose key wasn't
             // pre-extracted still capture at 1x instead of aborting.
             _cacheProxy.RequestCikRefresh = () => _skeletonWatcher.RefreshCiks();
+            // Live capture progress, straight from the proxy's own byte counters (not scraped from its log).
+            _cacheProxy.CaptureProgressChanged += OnStreamCaptureProgress;
+            // Names the bars after the installed title instead of the package's content-GUID filename.
+            _cacheProxy.ResolveTitleName = path => _skeletonWatcher.ResolveTitleNameForPackagePath(path);
         }
 
         // Initialize drive detection
@@ -3706,75 +3721,119 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ("Loading file",              1, "Reading package"),
     };
 
+    /// <summary>Tracks the LEGACY BATCH capture (xvdtool over a cached package) from its log markers. The
+    /// streaming path does not come through here — it reports real byte counts through
+    /// <see cref="OnStreamCaptureProgress"/> — with one exception: the engine's "PROGRESS n" lines during a
+    /// streamed finalize, which are the only progress signal that exists for that stage and are routed onto
+    /// the matching streaming row below.</summary>
     private void UpdateSkeletonCaptureProgress(string line)
     {
         const string startTag = "capturing skeleton for ";
         if (line.StartsWith(startTag, StringComparison.OrdinalIgnoreCase))
         {
             var name = line.Substring(startTag.Length).TrimEnd(' ', '…', '.').Trim();
-            SkeletonCapturing = new SkeletonCaptureProgress
+            _batchCapturing = new SkeletonCaptureProgress
             {
+                Id = "batch:" + name,
                 Name = name,
+                Stage = "preparing",
                 Step = 1,
                 TotalSteps = 5,
                 Phase = "Reading package",
                 StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             };
+            PublishSkeletonCapturing();
             return;
         }
 
-        // A streamed capture finalizes instead of running xvdtool, so it has its own start line. It reports
-        // real percentages (PROGRESS n) from the matching / refetch / write phases below.
-        const string finalizeTag = ": finalizing streamed skeleton";
-        int fi = line.IndexOf(finalizeTag, StringComparison.OrdinalIgnoreCase);
-        if (fi > 0)
-        {
-            SkeletonCapturing = new SkeletonCaptureProgress
-            {
-                Name = line.Substring(0, fi).Trim(),
-                Step = 3, TotalSteps = 5,
-                Phase = "Matching installed files",
-                StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            };
-            return;
-        }
-
-        var cur = SkeletonCapturing;
-        if (cur == null) return; // markers only count while a capture is active
-
-        // A streamed finalize that fails reports it and stops — clear the bar rather than leaving it stuck.
-        if (line.IndexOf("streamed finalize failed", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            line.IndexOf("streamed finalize error", StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            SkeletonCapturing = null;
-            return;
-        }
-
-        // Exact progress from the engine ("PROGRESS n") — drives a real determinate bar. Monotonic.
+        // Exact progress from the engine ("PROGRESS n"). During a streamed finalize this is the finalize's own
+        // percent, so it belongs on the streaming row; otherwise it drives the batch row's bar.
         if (line.StartsWith("PROGRESS ", StringComparison.OrdinalIgnoreCase)
             && int.TryParse(line.AsSpan(9).Trim(), out var pctVal))
         {
-            pctVal = Math.Clamp(pctVal, 0, 100);
-            if (pctVal > cur.Percent)
-                SkeletonCapturing = new SkeletonCaptureProgress
-                {
-                    Name = cur.Name, Step = cur.Step, TotalSteps = cur.TotalSteps,
-                    Phase = cur.Phase, Percent = pctVal, StartedAtMs = cur.StartedAtMs,
-                };
+            ApplyEnginePercent(Math.Clamp(pctVal, 0, 100));
             return;
         }
+
+        var cur = _batchCapturing;
+        if (cur == null) return; // markers only count while a batch capture is active
 
         foreach (var (needle, step, phase) in CapturePhaseMarkers)
         {
             if (line.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0) continue;
             if (step > cur.Step) // monotonic — never regress (e.g. a CIK-refresh retry restarts xvdtool's output)
-                SkeletonCapturing = new SkeletonCaptureProgress
-                {
-                    Name = cur.Name, Step = step, TotalSteps = cur.TotalSteps, Phase = phase,
-                    Percent = cur.Percent, StartedAtMs = cur.StartedAtMs,
-                };
+            {
+                cur.Step = step;
+                cur.Phase = phase;
+                PublishSkeletonCapturing();
+            }
             return;
         }
+    }
+
+    /// <summary>Routes an engine "PROGRESS n" to whichever capture is actually running: a streaming row that
+    /// has entered its finalize stage, else the batch row. Monotonic within a row.</summary>
+    private void ApplyEnginePercent(int pct)
+    {
+        var finalizing = _streamCapturing.FirstOrDefault(c => c.Stage == "finalizing");
+        var target = finalizing ?? _batchCapturing;
+        if (target == null || pct <= target.Percent) return;
+        target.Percent = pct;
+        target.Phase = pct < 70 ? "Matching installed files"
+                     : pct < 92 ? "Refetching missing ranges"
+                     : "Writing skeleton";
+        PublishSkeletonCapturing();
+    }
+
+    /// <summary>Rebuilds <see cref="SkeletonCapturing"/> from the proxy's live streaming captures. Called on the
+    /// proxy's throttled progress event, so this is the hot path for the bars.</summary>
+    private void OnStreamCaptureProgress()
+    {
+        if (_cacheProxy == null) return;
+        var snaps = _cacheProxy.SnapshotCaptures();
+        // Carry the finalize percent across snapshots: it arrives out-of-band on "PROGRESS n" log lines, so a
+        // fresh snapshot (which knows nothing about it) would reset the bar to indeterminate every second.
+        var prior = _streamCapturing;
+        var next = new List<SkeletonCaptureProgress>(snaps.Count);
+        foreach (var s in snaps)
+        {
+            var was = prior.FirstOrDefault(p => p.Id == s.Id);
+            next.Add(new SkeletonCaptureProgress
+            {
+                Id = s.Id,
+                Name = s.Name,
+                Stage = s.Stage,
+                BytesDone = s.BytesDone,
+                BytesTotal = s.BytesTotal,
+                Percent = s.Stage == "finalizing" && was?.Stage == "finalizing" ? was.Percent : s.Percent,
+                Phase = StagePhase(s.Stage, was),
+                Step = 0, TotalSteps = 0,   // streaming rows are byte-driven, not step-driven
+                StartedAtMs = s.StartedAtMs,
+            });
+        }
+        _streamCapturing = next;
+        Dispatcher.UIThread.Post(PublishSkeletonCapturing);
+    }
+
+    /// <summary>Human label for a streaming stage. A finalize keeps whatever sub-phase the engine last
+    /// reported ("Refetching missing ranges" etc.) rather than reverting to the generic label.</summary>
+    private static string StagePhase(string stage, SkeletonCaptureProgress? prior) => stage switch
+    {
+        "buffering"  => "Reading the start of the download",
+        "capturing"  => "Capturing from the install download",
+        "waiting"    => "Waiting for the game to finish installing",
+        "restored"   => "Waiting for the game to finish installing",
+        "finalizing" => prior?.Stage == "finalizing" && !string.IsNullOrEmpty(prior.Phase)
+                        ? prior.Phase : "Matching installed files",
+        _            => "Preparing",
+    };
+
+    /// <summary>Publishes the merged streaming + batch rows. Must run on the UI thread.</summary>
+    private void PublishSkeletonCapturing()
+    {
+        var merged = new List<SkeletonCaptureProgress>(_streamCapturing);
+        if (_batchCapturing != null) merged.Add(_batchCapturing);
+        SkeletonCapturing = merged;
     }
 
     private void OnSkeletonCaptureCompleted(SkeletonCaptureResult res)
@@ -3791,14 +3850,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 SavedBytes = Math.Max(0, res.USize - res.SkelFileSize),
                 CapturedAt = DateTime.Now.ToString("o"),
             });
-            SkeletonCapturing = null; // capture done — hide the "Preparing…" bar
+            // Capture done. The streaming rows clear themselves (the proxy drops the finalized stream and
+            // raises), so only the batch row needs clearing here.
+            _batchCapturing = null;
+            PublishSkeletonCapturing();
         });
     }
 
     private void OnSkeletonCaptureFailed(string message)
     {
         AddLog($"[Skeleton] {message}", LogMessageType.Error);
-        Dispatcher.UIThread.Post(() => SkeletonCapturing = null); // clear the "Preparing…" bar on failure
+        Dispatcher.UIThread.Post(() =>
+        {
+            _batchCapturing = null;
+            PublishSkeletonCapturing();
+        });
     }
 
     private void OnXboxTransferStateChanged(object? sender, XboxTransferState state)
@@ -4150,6 +4216,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _fileTransferService.ProgressChanged -= OnTransferProgress;
         _fileTransferService.TransferCompleted -= OnTransferCompleted;
         _fileTransferService.TransferStopped -= OnTransferStopped;
+
+        if (_cacheProxy != null)
+        {
+            _cacheProxy.CaptureProgressChanged -= OnStreamCaptureProgress;
+            _cacheProxy.Log -= OnSkeletonStatus;
+            _cacheProxy.StatsChanged -= OnCacheProxyStatsChanged;
+        }
 
         if (_skeletonWatcher != null)
         {

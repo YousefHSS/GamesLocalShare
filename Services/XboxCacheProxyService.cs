@@ -102,6 +102,12 @@ public sealed class XboxCacheProxyService : IDisposable
         public long ForceFront = DefaultFrontLen + ForceFrontSlack;
         public long PreArmCap = DefaultFrontLen + PreArmSlack;
         public bool Armed, Aborted, Parked, Arming;
+        // Progress-reporting only. Restored marks a park recovered from a previous run (it never streamed in
+        // this session, so it has no meaningful start time of its own); Finalizing is set while the watcher's
+        // finalize hook runs so the UI can distinguish "waiting for the install" from "working on it".
+        public bool Restored, Finalizing;
+        public long StartedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        public string? TitleName;                             // resolved lazily via ResolveTitleName, then cached
         public DateTime LastWriteUtc = DateTime.UtcNow;
         // When the capture backlog first went over the soft cap (null = under it). Distinguishes a transient
         // burst — every capture starts with one, see CaptureBacklogGrace — from a consumer that can't keep up.
@@ -299,14 +305,14 @@ public sealed class XboxCacheProxyService : IDisposable
             {
                 File = file, Host = host, Ip = ip, RawPath = rawPath, Total = total, FrontLen = frontLen,
                 Ctl = ctl, Parked = true, BlobPath = park.Substring(0, park.Length - ".park".Length),
-                FrontPath = frontPath, ParkPath = park,
+                FrontPath = frontPath, ParkPath = park, Restored = true,
             };
             lock (_gate) _streams[st.File] = st;
             restored++;
             Log?.Invoke($"STREAM restored a parked capture from a previous run: {Path.GetFileName(file)} "
                       + $"({total / 1048576.0:F0} MB) — it will finalize once the game is installed");
         }
-        if (restored > 0) StatsChanged?.Invoke();
+        if (restored > 0) { StatsChanged?.Invoke(); RaiseCaptureProgress(force: true); }
     }
 
     private static string ProbeFrontPath(string parkPath)
@@ -349,6 +355,17 @@ public sealed class XboxCacheProxyService : IDisposable
     public event Action<string>? Log;
     /// <summary>Raised on any counter change so the UI can refresh stats.</summary>
     public event Action? StatsChanged;
+
+    /// <summary>Raised (throttled to ~1/s, immediately on a stage change) while any streaming capture is live,
+    /// so the UI can redraw its progress bars from <see cref="SnapshotCaptures"/>. This replaces scraping the
+    /// <c>STREAM</c> log lines: the counters below are the same ones the capture itself runs on, so the bar
+    /// cannot drift from reality the way a log-line match silently did whenever a message was reworded.</summary>
+    public event Action? CaptureProgressChanged;
+
+    /// <summary>Optional hook: maps a package cache path to the friendly installed-title name (the watcher
+    /// owns the content-GUID → install-name index). Falls back to the package filename when unset or unknown —
+    /// a capture starts before its title is installed, so a name is not always available yet.</summary>
+    public Func<string, string?>? ResolveTitleName;
 
     public XboxCacheProxyService()
     {
@@ -450,6 +467,7 @@ public sealed class XboxCacheProxyService : IDisposable
             lock (st.Lock) { try { st.Ctl?.Dispose(); } catch { } st.Ctl = null; }
             if (!st.Parked && !st.Aborted) Interlocked.Decrement(ref Filling);
         }
+        if (pendingStreams.Count > 0) RaiseCaptureProgress(force: true); // no captures left to draw
         try { _listener?.Stop(); _listener?.Close(); } catch { }
         _listener = null;
         if (_hostsApplied)
@@ -1043,6 +1061,110 @@ public sealed class XboxCacheProxyService : IDisposable
 
     // ---- streaming skeleton capture --------------------------------------
 
+    /// <summary>A live streaming capture, as the UI sees it. <see cref="Percent"/> is progress within
+    /// <see cref="Stage"/>, not through the whole job — the stages are wildly different lengths (a 64 MB front
+    /// vs a 26 GB download vs a wait that can outlive the app), so a single blended number would be a lie.
+    /// </summary>
+    public sealed record StreamCaptureSnapshot(
+        string Id, string Name, string Stage, long BytesDone, long BytesTotal, int Percent, long StartedAtMs);
+
+    /// <summary>Minimum gap between unforced capture-progress notifications. One a second is well past what
+    /// the eye reads on a progress bar, and the armed path would otherwise raise thousands per second.</summary>
+    private const int ProgressThrottleMs = 1000;
+
+    private long _lastProgressTicks;
+    private int _progressPumpQueued;
+    private readonly object _pumpGate = new();
+
+    /// <summary>Point-in-time view of every live streaming capture, for the UI's progress bars. Aborted
+    /// captures are omitted — they are no longer going to produce a skeleton.</summary>
+    public List<StreamCaptureSnapshot> SnapshotCaptures()
+    {
+        List<StreamState> states;
+        lock (_gate) states = _streams.Values.ToList();
+
+        var result = new List<StreamCaptureSnapshot>(states.Count);
+        foreach (var st in states)
+        {
+            string stage; long done, total, startedAt;
+            lock (st.Lock)
+            {
+                if (st.Aborted) continue;
+                startedAt = st.StartedAtMs;
+                if (st.Finalizing)   { stage = "finalizing"; done = 0;            total = 0; }
+                else if (st.Parked)  { stage = st.Restored ? "restored" : "waiting"; done = st.Total; total = st.Total; }
+                else if (st.Armed)   { stage = "capturing";  done = CoveredBytesLocked(st); total = Math.Max(0, st.Total); }
+                else                 { stage = "buffering";  done = Math.Min(st.FrontContig, st.FrontLen); total = st.FrontLen; }
+            }
+            // A finalize reports its own percent through the engine's "PROGRESS n" lines; -1 lets the UI show
+            // an indeterminate bar until the first one lands rather than a bar pinned at 0%.
+            int pct = stage == "finalizing" ? -1
+                    : total > 0 ? (int)Math.Clamp(done * 100 / total, 0, 100)
+                    : 0;
+            result.Add(new StreamCaptureSnapshot(st.File, ResolveName(st), stage, done, total, pct, startedAt));
+        }
+        return result;
+    }
+
+    /// <summary>Total bytes of the package fed to the capture so far. Caller holds <c>st.Lock</c>.</summary>
+    private static long CoveredBytesLocked(StreamState st)
+    {
+        long covered = 0;
+        foreach (var (s, e) in st.Fed) covered += Math.Max(0, e - s);
+        return st.Total > 0 ? Math.Min(covered, st.Total) : covered;
+    }
+
+    /// <summary>Friendly title name for a capture, resolved once and cached. A capture typically starts before
+    /// its title exists on disk, so this stays the package filename until the install shows up.</summary>
+    private string ResolveName(StreamState st)
+    {
+        var cached = st.TitleName;
+        if (!string.IsNullOrEmpty(cached)) return cached!;
+        string? name = null;
+        try { name = ResolveTitleName?.Invoke(st.File); } catch { }
+        if (string.IsNullOrWhiteSpace(name)) return Path.GetFileNameWithoutExtension(st.File);
+        st.TitleName = name;
+        return name!;
+    }
+
+    /// <summary>Signals the UI that capture progress moved. Throttled to ~1/s because the armed path calls this
+    /// once per forwarded chunk (thousands per second on a fast link); <paramref name="force"/> bypasses the
+    /// throttle for stage transitions, which are rare and must never be dropped.
+    /// <para>The handler is NEVER run on the calling thread. Callers reach here holding <c>_gate</c> or
+    /// <c>st.Lock</c> on the download's hot path, and the handler calls back into
+    /// <see cref="SnapshotCaptures"/>, which takes both — running it inline would nest the proxy's locks
+    /// through arbitrary UI code, the same shape as the finalize deadlock documented in
+    /// <see cref="TryFinalizeStreamed"/>. Queueing it also keeps a slow handler off the download thread.</para>
+    /// </summary>
+    private void RaiseCaptureProgress(bool force = false)
+    {
+        var handler = CaptureProgressChanged;
+        if (handler == null) return;
+        long now = Environment.TickCount64;
+        if (force) Interlocked.Exchange(ref _lastProgressTicks, now);
+        else
+        {
+            long last = Interlocked.Read(ref _lastProgressTicks);
+            if (now - last < ProgressThrottleMs) return;
+            if (Interlocked.CompareExchange(ref _lastProgressTicks, now, last) != last) return; // another thread won
+        }
+        // Single-flight: one pending pump is enough, since the handler reads current state rather than a
+        // queued delta. _pumpGate then serializes execution so two pumps can't publish snapshots out of order.
+        if (Interlocked.Exchange(ref _progressPumpQueued, 1) == 1) return;
+        try
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(_ =>
+            {
+                lock (_pumpGate)
+                {
+                    Interlocked.Exchange(ref _progressPumpQueued, 0);
+                    try { handler(); } catch { }
+                }
+            }, null);
+        }
+        catch { Interlocked.Exchange(ref _progressPumpQueued, 0); }
+    }
+
     /// <summary>Returns the streaming state that should capture this object, creating it on the first MISS.
     /// The capture is armed lazily from the Store's OWN forwarded front bytes (no separate front download) and
     /// fed from the Store's ongoing bytes — 1x bandwidth. Returns null when streaming is disabled, the object is
@@ -1069,6 +1191,7 @@ public sealed class XboxCacheProxyService : IDisposable
             StatsChanged?.Invoke();
             Log?.Invoke($"STREAM start {Path.GetFileName(file)} — capturing from the install download (arms once its first {st.FrontLen / 1048576} MB arrives)");
             PrewarmCiks();
+            RaiseCaptureProgress(force: true);
             return st;
         }
     }
@@ -1177,6 +1300,7 @@ public sealed class XboxCacheProxyService : IDisposable
             st.Queue?.Add(absOff, copy);
             return;
         }
+        RaiseCaptureProgress(); // pre-arm: the front is growing, so the buffering bar has moved
         if (probedFront != null) Log?.Invoke(probedFront);
         if (saturated >= 0)
             Log?.Invoke($"STREAM pre-arm buffer full {Path.GetFileName(st.File)} — {saturated / 1048576} MB held while arming; "
@@ -1400,6 +1524,7 @@ public sealed class XboxCacheProxyService : IDisposable
             consumer.Start();
             Log?.Invoke($"STREAM armed {Path.GetFileName(st.File)} ({st.Total / 1048576.0:F0} MB) from the Store's own bytes — 1x bandwidth"
                       + (drainBytes > CaptureQueueCapBytes ? $"; handing {drainBytes / 1048576} MB of buffered bytes to the capture" : ""));
+            RaiseCaptureProgress(force: true); // buffering → capturing
             // Enqueue everything buffered so far; live bytes now arriving (Armed==true) enqueue too. The consumer
             // feeds the controller, which reorders by offset — enqueue order doesn't matter.
             foreach (var (off, data) in drain) queue.Add(off, data);
@@ -1530,14 +1655,17 @@ public sealed class XboxCacheProxyService : IDisposable
             complete = st.Total > 0 && st.Fed.Count == 1 && st.Fed[0].s <= 0 && st.Fed[0].e >= st.Total;
             if (complete) st.Parked = true;
         }
-        if (complete)
+        if (!complete)
         {
-            st.Queue?.Close(); // coverage done → let the background consumer exit
-            Interlocked.Decrement(ref Filling);
-            Log?.Invoke($"STREAM ready {Path.GetFileName(st.File)} — awaiting install to finalize skeleton");
-            SavePark(st);
-            StatsChanged?.Invoke();
+            RaiseCaptureProgress(); // armed: coverage grew, so the capture bar has moved
+            return;
         }
+        st.Queue?.Close(); // coverage done → let the background consumer exit
+        Interlocked.Decrement(ref Filling);
+        Log?.Invoke($"STREAM ready {Path.GetFileName(st.File)} — awaiting install to finalize skeleton");
+        SavePark(st);
+        StatsChanged?.Invoke();
+        RaiseCaptureProgress(force: true); // capturing → waiting
     }
 
     /// <summary>Persists a just-parked capture so it survives the app closing. A park can wait a long time —
@@ -1564,6 +1692,7 @@ public sealed class XboxCacheProxyService : IDisposable
             });
             st.ParkPath = park;
             Log?.Invoke($"STREAM parked {Path.GetFileName(st.File)} — saved to disk; it will finalize even if the app restarts");
+            RaiseCaptureProgress(force: true);
         }
         catch (Exception ex) { Log?.Invoke($"STREAM park save failed for {Path.GetFileName(st.File)}: {ex.Message}"); }
     }
@@ -1641,6 +1770,7 @@ public sealed class XboxCacheProxyService : IDisposable
         else
             Log?.Invoke($"STREAM give up {Path.GetFileName(st.File)} — {reason}; forwarding only (no skeleton, no disk copy)");
         StatsChanged?.Invoke();
+        RaiseCaptureProgress(force: true); // the capture is off the books — drop its row rather than leave it stuck
     }
 
     /// <summary>Finalizes a parked streamed skeleton against a now-available install. Matches the parked
@@ -1671,9 +1801,21 @@ public sealed class XboxCacheProxyService : IDisposable
         lock (st.Lock) { ctl = st.Ctl; host = st.Host; ip = st.Ip; rawPath = st.RawPath; }
         if (ctl == null) { status = "no matching streamed capture"; return false; }
 
-        try { Directory.CreateDirectory(Path.GetDirectoryName(skelPath)!); } catch { }
-        bool ok = ctl.Complete(installDir, skelPath,
-            (o, c) => FetchRangeBytes(host, ip, rawPath, o, o + c) ?? new byte[c], out status);
+        // Flip the row to "finalizing" for the duration. Complete() can run for many minutes on a large title,
+        // and it is the one stage where the row would otherwise still read "waiting for the install" while the
+        // app is in fact working hard on it. Cleared in the finally so a throwing Complete() can't strand it.
+        lock (st.Lock) st.Finalizing = true;
+        RaiseCaptureProgress(force: true);
+
+        bool ok;
+        try
+        {
+            try { Directory.CreateDirectory(Path.GetDirectoryName(skelPath)!); } catch { }
+            ok = ctl.Complete(installDir, skelPath,
+                (o, c) => FetchRangeBytes(host, ip, rawPath, o, o + c) ?? new byte[c], out status);
+        }
+        finally { lock (st.Lock) st.Finalizing = false; }
+
         if (ok)
         {
             // Captured → the package is intentionally not on disk; serve future MISSes transiently, never tee.
@@ -1683,6 +1825,7 @@ public sealed class XboxCacheProxyService : IDisposable
             Log?.Invoke($"STREAM finalized {Path.GetFileName(st.File)} — {status}");
             StatsChanged?.Invoke();
         }
+        RaiseCaptureProgress(force: true); // finalized (row gone) or back to waiting for a retry
         return ok;
     }
 
