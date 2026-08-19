@@ -41,7 +41,13 @@ public partial class MainWindow : Window
     {
         base.OnOpened(e);
 
-        // Initialize WebView and InteropBridge
+        // Initialize WebView and InteropBridge — ONCE. Avalonia raises Opened again every time the
+        // window is re-shown (restoring from the tray calls Show()), and building a second bridge here
+        // used to leave two live WebMessageReceived subscriptions, so every WebUI command ran twice
+        // (three times after two restores) — e.g. the "Receive Xbox Game" folder picker opening again
+        // and again. Reload the page too and the in-page state would be lost on every restore.
+        if (_bridge != null) return;
+
         var webView = this.FindControl<WebView>("MainWebView");
         if (webView != null && DataContext is MainViewModel viewModel)
         {

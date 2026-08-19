@@ -439,7 +439,7 @@ public sealed class SkeletonWatcherService : IDisposable
     /// <c>"*.xvi"</c> filter never sees a directory rename. So we watch directory names too and route both the
     /// rename and a freshly-named directory here.
     /// </summary>
-    private void OnDirRenamed(object? sender, RenamedEventArgs e) => HandleInstallDir(e.FullPath);
+    private void OnDirRenamed(object? sender, RenamedEventArgs e) => HandleInstallDir(e.FullPath, fromRename: true);
 
     private void OnDirCreated(object? sender, FileSystemEventArgs e)
     {
@@ -489,7 +489,11 @@ public sealed class SkeletonWatcherService : IDisposable
 
     /// <summary>Core install-detected handling, shared by the <c>.xvi</c>-file and directory-name watchers.
     /// Idempotent and guarded so the two paths firing for the same title don't double-capture.</summary>
-    private void HandleInstallDir(string installDir)
+    /// <param name="fromRename">True when this came from the staging-folder rename, which is an unambiguous
+    /// "install just completed" signal even for a title we already knew about (a re-install or an update
+    /// re-uses the existing name, so the <c>isNew</c> test alone would swallow it and leave a receiver's
+    /// transfer bar waiting forever).</param>
+    private void HandleInstallDir(string installDir, bool fromRename = false)
     {
         try
         {
@@ -503,7 +507,7 @@ public sealed class SkeletonWatcherService : IDisposable
             // Announce the completed install BEFORE the skeleton-exists check, so consumers (e.g. the streaming
             // peer-install finalizer) still hear it even when a skeleton is already present (it was copied from
             // the peer). The check below only skips re-CAPTURING, not detection.
-            if (isNew) InstallDetected?.Invoke(installDir);
+            if (isNew || fromRename) InstallDetected?.Invoke(installDir);
 
             // (Re)capture only when there's no skeleton yet, or the install has been updated past the version
             // the existing skeleton was captured for. An up-to-date skeleton is left alone.
