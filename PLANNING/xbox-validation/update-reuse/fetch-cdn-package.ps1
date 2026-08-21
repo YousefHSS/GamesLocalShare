@@ -1,4 +1,4 @@
-<#
+﻿<#
   fetch-cdn-package.ps1 — pull ANY version of a package straight from the Xbox CDN.
 
   Removes the "wait for a real update" step from the cross-version experiment. The CDN serves

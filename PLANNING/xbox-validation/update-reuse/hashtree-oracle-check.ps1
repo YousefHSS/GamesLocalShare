@@ -1,4 +1,4 @@
-<#
+﻿<#
   hashtree-oracle-check.ps1 — is a package's own hash tree usable as a VERIFICATION ORACLE?
 
   This is the gate on the whole cross-version reuse idea, and it needs exactly ONE package —

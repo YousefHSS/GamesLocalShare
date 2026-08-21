@@ -1,0 +1,571 @@
+
+== inputs ==============================================================
+package    : F:\Games\assets1.xboxlive.com\8\416c8895-c1b1-4160-85e1-0b100ebf6505\51fa6b33-17e1-4ac5-b552-f2904b45aa50\1.2.18.0.d00bf8d8-b510-4d59-9565-ea25fdba1d57\NuggetsEntertainmentAB.RVThereYet_1.2.18.0_x64__4kh8ecef8wxy6.msixvc
+size       : 1,747,423,232 bytes (1.63 GB)
+xvdtool    : F:\Documents\GamesLocalShare\tools\xvdtool\XVDTool.exe
+cik folder : C:\Users\SIGMA\AppData\Local\GamesLocalShare\xbox-skeleton\cik
+info args  : -i
+
+== xvdtool --help (captured for the record) ============================
+XVDTool 1.0.0+92022917beecaada12069e3eccdc1229bc2d9035: XVD file manipulator
+Usage  : xvdtool.exe [parameters] [filename]
+
+Parameters:
+    -h (-help) - print xvdtool usage
+    -i (-info) - print info about package
+    -wi (-writeinfo) - write info about package to [filename].txt
+    -o (-output) <output-path> - specify output filename
+
+    -m (-mount) - mount package
+    -um (-unmount) - unmount package
+    -mp (-mountpoint) - Mount point for package (e.g. "X:")
+
+    -lk (-listkeys) - List known keys including their hashes / availability
+
+    -signfile <path-to-file> - Path to xvd sign key (RSA)
+    -odkfile <path-to-file> - Path to Offline Distribution key
+    -cikfile <path-to-file> - Path to Content Instance key
+
+    -sk (-signkey) <key-name> - Name of xvd sign key to use
+    -odk (-odkid) <id> - Id of Offline Distribution key to use (uint)
+    -cik (-cikguid) <GUID> - Guid of Content Instance key to use
+
+    -nd (-nodatahash) - disable data hash checking, speeds up -l and -f
+    -ne (-noextract) - disable data (embedded XVD/user data) extraction, speeds up -l and -f
+
+    -eu (-decrypt) - decrypt output xvd
+    -ee (-encrypt) - encrypt output xvd
+        XVDs will have a new CIK generated (if CIK in XVD header is empty), which will be encrypted with the ODK and stored in the XVD header
+    -pdu (-preservedataunits) - keep the per-page XTS data-units when (de/re)hashing
+        pass to BOTH -eu and -ee so decrypt->encrypt reproduces the original ciphertext exactly
+        (an unedited round-trip stays byte-for-byte identical and passes strict verification)
+
+    -hd (-removehash) - remove hash tree/data integrity from package
+    -he (-addhash) - add hash tree/data integrity to package
+
+    -md (-removemdu) - remove mutable data (MDU) from package
+    -ma (-addmdu) - add mutable data (MDU) to package
+
+    -r (-rehash) - fix data integrity hashes inside package
+    -rs (-resign) - sign package using the private key from rsa3_key.bin
+
+    -xe (-extractembedded) <output-file> - extract embedded XVD from package
+    -xu (-extractuserdata) <output-file> - extract user data from package
+    -xv (-extractvhd) <output-vhd> - extracts filesystem from XVD into a VHD file
+    -xi (-extractimage) <output-file> - extract raw filesystem image
+    -xf (-extractfiles) <output-folder> - extract files from XVD filesystem
+    -xri (-reverseextractfiles) <source-folder> - reverse extract (inject) files into XVD filesystem
+        preserves the original header (no rehash/resign) - data hashes will no longer match
+    -tph (-transplantheader) <source-package> - copy the header (signature + header struct)
+        from another package onto [filename], leaving payload/hashtree intact (layout must match)
+
+    The next two commands will write info about each package found to [filename].txt
+    also extracts embedded XVD and user data to [filename].exvd.bin / [filename].userdata.bin
+    -l (-filelist) <path-to-file-list> - use each XVD specified in the list
+    -f (-folder) <path-to-folder> - scan folder for XVD files
+
+To mount a package in Windows you'll have to decrypt it and remove the hash tables & mutable data first (-eu -hd -md)
+
+
+== info: PRISTINE package ==============================================
+XVDTool 1.0.0+92022917beecaada12069e3eccdc1229bc2d9035: XVD file manipulator
+
+Loaded 30 CIK(s) from C:\Users\SIGMA\AppData\Local\GamesLocalShare\xbox-skeleton\cik
+No desired signkey provided, falling back to RedXvdPrivateKey
+No desired or invalid ODK provided, will try to use ODK indicated by XVD header
+Warning: Signkey could not be loaded, you will be unable to resign XVD headers!
+
+Loading file from F:\Games\assets1.xboxlive.com\8\416c8895-c1b1-4160-85e1-0b100ebf6505\51fa6b33-17e1-4ac5-b552-f2904b45aa50\1.2.18.0.d00bf8d8-b510-4d59-9565-ea25fdba1d57\NuggetsEntertainmentAB.RVThereYet_1.2.18.0_x64__4kh8ecef8wxy6.msixvc...
+
+Verifying data hashes, use -nd to disable:
+XvdMiscInfo:
+    Page Count: 0x678A6 
+    Embedded XVD Offset: 0x3000 
+    MDU Offset: 0x3000 
+    HashTree Offset: 0x4000 
+    User Data Offset: 0x9D3000 
+    XVC Data Offset: 0x9DB000 
+    Dynamic Header Offset: 0x9E0000 
+    Drive Data Offset: 0x9E0000 
+    Hash Tree Page Count: 0x9CF 
+    Hash Tree Levels: 0x3 
+    Hash Tree Valid: True 
+    Data Hash Tree Valid: True 
+    XVC Data Hash Valid: False 
+
+XvdHeader:
+    Signed by: <UNKNOWN> 
+    Using ODK keyslot: StandardOdk 
+    Read-only flag set 
+    Encrypted 
+    Data integrity enabled (uses hash tree) 
+    Sector Size (4096 bytes) 
+    ResiliencyEnabled not set 
+    SraReadOnly not set 
+    RegionIdInXts set 
+    EraSpecific not set 
+
+    Magic: msft-xvd 
+    Volume Flags: 0x00000041 
+    Format Version: 0x3 
+    File Time Created: 7/22/2026 5:48:41 PM 
+    Drive Size: 0x67899000 
+    VDUID / Drive Id: 51fa6b33-17e1-4ac5-b552-f2904b45aa50 
+    UDUID / User Id: 51fa6b33-17e1-4ac5-b552-f2904b45aa50 
+    Top Hash Block Hash: 
+    35 7E 40 50 15 4B 2A 44 65 39 06 3E 39 F2 40 8D 66 96 FC 85 E2 45 01 2A 5A 09 88 06 95 95 11 E4  
+    Original XVC Data Hash: 
+    D8 04 E0 4D EA 54 B6 D8 98 94 3E 86 EB 8B FE FC 3F E1 78 99 A1 AF 04 84 CE 28 0C F6 FA E0 C6 09  
+    XvdType: Fixed 
+    Content Type: 0x00000001 (Title) 
+    Embedded XVD PDUID/Build Id: 00000000-0000-0000-0000-000000000000 
+    Embedded XVD Length: 0x0 
+    User Data Length: 0x7919 
+    XVC Data Length: 0x5000 
+    Dynamic Header Length: 0x0 
+    BlockSize: 0xAA000 
+    Ext Entries: 0 
+    Capabilities: 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000  
+    PE Catalog Hash: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    Userdata hash: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    PE Catalog Caps: 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000  
+    PE Catalogs: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    Writeable Expiration Date: 0x0 
+    Writeable Policy flags: 0x0 
+    Persistent Local storage length: 0x0 
+    Mutable data page count: 0x1 (0x1000 bytes) 
+    Sandbox Id:  
+    Product Id: 37574d39-4239-304a-c056-463351585100 
+    PDUID/Build Id: 68265d83-cd2d-4a80-88ec-6ac75f73142f 
+    Sequence Number: 0 
+    Package Version: 1.2.18.0 
+    Required System Version: 10.0.18362.0 
+    ODK Keyslot ID: StandardOdk 
+    KeyMaterial: 
+    00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    Resilient Data offset: 0x0 
+    Resilient Data length: 0x0 
+    Unknown271: 0x1 
+
+Decrypt key for xvc keyslot 0: E5 CC 26 99 89 54 7D 73 8A 0F 18 DE 0B B8 6D AE DA 2F 60 DB 83 E0 1C 83 90 72 AD 18 9E 66 14 3D 
+(key is wrong though until the obfuscation/encryption on it is figured out)
+
+XvcInfo:
+    Flags != 0 
+    Reserved != null 
+    Submission-crypted (not using test key) (/L) 
+    /updcompat type 2 
+
+    ContentID: c0b4172a-ac02-291b-e2ef-0dd5b4f4786e 
+    Encryption Key 0 GUID: 1b16ded5-d0d1-7b9e-3794-e9c0fbafe868 
+    Encryption Key 1 GUID: 37715e88-0c99-02f7-ceae-6bb1684ba25c 
+
+    Description:  
+    Version: 0x2 
+    Region Count: 0x7 
+    Flags: 0x7 
+    Key Count: 0x1 
+    InitialPlay Region Id: 0x2 
+    InitialPlay Offset: 0x68279000 
+    File Time Created: 7/22/2026 5:48:41 PM 
+    Preview Region Id: 0x0 
+    Update Segment Count: 37 
+    Preview Offset: 0x0 
+    Unused Space: 0x0 
+
+    ReservedD54: 
+    CA 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+
+
+Region 0 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000005 Header):
+    Description: XVC-HD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x0 
+    Length: 0x3000 
+    Hash: 0x4D59B510D00BF8D8 
+    First Segment Index: 0 
+
+
+Region 1 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000004 EmbeddedXvd):
+    Description: XVC-EXVD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x3000 
+    Length: 0x0 
+    Hash: 0x0 
+    First Segment Index: 0 
+
+
+Region 2 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000006 MutableData):
+    Description: XVC-MDU 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x3000 
+    Length: 0x1000 
+    Hash: 0x0 
+    First Segment Index: 0 
+
+
+Region 3 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000001 MetadataXvc):
+    Description: XVC-MD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x4000 
+    Length: 0x9DC000 
+    Hash: 0x4D59B510D00BF8D8 
+    First Segment Index: 0 
+
+
+Region 4 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000002 MetadataFilesystem):
+    Description: FS-MD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x9E0000 
+    Length: 0x2CF000 
+    Hash: 0xEEFB45B3C33D417B 
+    First Segment Index: 0 
+
+
+Region 5 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000003 Unknown):
+    Description:  
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x0 
+    Offset: 0xCAF000 
+    Length: 0x1FB000 
+    Hash: 0x53EBEE56D41B62CF 
+    First Segment Index: 0 
+
+
+Region 6 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x2 2):
+    Description:  
+    Key ID: 0x0 
+    Flags: 0x4 
+        - Preview 
+    Offset: 0xEAA000 
+    Length: 0x673CF000 
+    Hash: 0x7F4C0EB1A355507D 
+    First Segment Index: 9 
+
+
+Update Segments:
+
+ | Id | PageNum (Offset)     | Hash               | 
+ |------------------------------------------------| 
+ | 0  | 0xCAF (0xCAF000)     | 0xD9EDE29390596268 | 
+ | 1  | 0xCB0 (0xCB0000)     | 0x310D491521732DB5 | 
+ | 2  | 0xCB1 (0xCB1000)     | 0xFCA5223AD463E711 | 
+ | 3  | 0xCBA (0xCBA000)     | 0xE06215B40EBE9C5F | 
+ | 4  | 0xCBD (0xCBD000)     | 0xB0F4BD463136FCF5 | 
+ | 5  | 0xE7E (0xE7E000)     | 0x62A034754E3DC4D3 | 
+ | 6  | 0xEA1 (0xEA1000)     | 0xB4C2F093DFB60D64 | 
+ | 7  | 0xEA7 (0xEA7000)     | 0x671F905DB8B099D7 | 
+ | 8  | 0xEA9 (0xEA9000)     | 0x7F6912214DDBDC24 | 
+ | 9  | 0xEAA (0xEAA000)     | 0x46BF633A94D4708C | 
+ | 10 | 0x11D9 (0x11D9000)   | 0x3AB8E0DEE96B13DD | 
+ | 11 | 0x175B (0x175B000)   | 0x736D41066D744EA4 | 
+ | 12 | 0x29B9 (0x29B9000)   | 0x4F0EF9CA5D28E93B | 
+ | 13 | 0x2AF5 (0x2AF5000)   | 0x5D674B6FEE98E248 | 
+ | 14 | 0x2E41 (0x2E41000)   | 0x8C5B8918D1CAB177 | 
+ | 15 | 0x2F55 (0x2F55000)   | 0x478483A951B86E8  | 
+ | 16 | 0xCF54 (0xCF54000)   | 0x84B760190E6E044  | 
+ | 17 | 0xCF85 (0xCF85000)   | 0x7B79D9CC671823AF | 
+ | 18 | 0xD06D (0xD06D000)   | 0x5DD8DCBC9AE57D76 | 
+ | 19 | 0xD0BC (0xD0BC000)   | 0xC796E03B92B50500 | 
+ | 20 | 0xD0D7 (0xD0D7000)   | 0x3C3FE7D7805A304A | 
+ | 21 | 0xD1A6 (0xD1A6000)   | 0xF27799188501FCF5 | 
+ | 22 | 0xD26F (0xD26F000)   | 0x90199986EEF1036B | 
+ | 23 | 0xD27B (0xD27B000)   | 0xBE2F5EE8C6C1DA44 | 
+ | 24 | 0xD41E (0xD41E000)   | 0x3ED3C0BD9E7D1C52 | 
+ | 25 | 0xD428 (0xD428000)   | 0xE5EC6DEA444D6ABA | 
+ | 26 | 0xD4F7 (0xD4F7000)   | 0xC1BA46BFD7A8DC1D | 
+ | 27 | 0xD537 (0xD537000)   | 0x1E956B9F0829AC86 | 
+ | 28 | 0xF1CF (0xF1CF000)   | 0x9C9F3288AD7B13E6 | 
+ | 29 | 0x10D09 (0x10D09000) | 0x3C76DFADCD080F83 | 
+ | 30 | 0x10D0A (0x10D0A000) | 0xB319C34A4B08C1BF | 
+ | 31 | 0x10D34 (0x10D34000) | 0x5BF81FF3AAF62D7E | 
+ | 32 | 0x14974 (0x14974000) | 0xCE1787B1637DBB2B | 
+ | 33 | 0x14C63 (0x14C63000) | 0x87D94CE4C2F3D926 | 
+ | 34 | 0x680AD (0x680AD000) | 0xB93BA83E1D2D6757 | 
+ | 35 | 0x680AE (0x680AE000) | 0x14F407B4CC66CEDB | 
+ | 36 | 0x68272 (0x68272000) | 0x629C7F77B6B6A93C | 
+
+Cannot get XvdFilesystem from encrypted package
+
+
+
+== hash verdict lines (pristine) =======================================
+  Hash Tree Valid: True
+  Data Hash Tree Valid: True
+  XVC Data Hash Valid: False
+
+== discrimination test =================================================
+flipping ONE byte at offset 1,310,567,424 in: F:\Games\assets1.xboxlive.com\8\416c8895-c1b1-4160-85e1-0b100ebf6505\51fa6b33-17e1-4ac5-b552-f2904b45aa50\1.2.18.0.d00bf8d8-b510-4d59-9565-ea25fdba1d57\NuggetsEntertainmentAB.RVThereYet_1.2.18.0_x64__4kh8ecef8wxy6.msixvc
+original byte value: 0x29  (restore this if the script dies before it does)
+
+== info: CORRUPTED package =============================================
+XVDTool 1.0.0+92022917beecaada12069e3eccdc1229bc2d9035: XVD file manipulator
+
+Loaded 30 CIK(s) from C:\Users\SIGMA\AppData\Local\GamesLocalShare\xbox-skeleton\cik
+No desired signkey provided, falling back to RedXvdPrivateKey
+No desired or invalid ODK provided, will try to use ODK indicated by XVD header
+Warning: Signkey could not be loaded, you will be unable to resign XVD headers!
+
+Loading file from F:\Games\assets1.xboxlive.com\8\416c8895-c1b1-4160-85e1-0b100ebf6505\51fa6b33-17e1-4ac5-b552-f2904b45aa50\1.2.18.0.d00bf8d8-b510-4d59-9565-ea25fdba1d57\NuggetsEntertainmentAB.RVThereYet_1.2.18.0_x64__4kh8ecef8wxy6.msixvc...
+
+Verifying data hashes, use -nd to disable:
+XvdMiscInfo:
+    Page Count: 0x678A6 
+    Embedded XVD Offset: 0x3000 
+    MDU Offset: 0x3000 
+    HashTree Offset: 0x4000 
+    User Data Offset: 0x9D3000 
+    XVC Data Offset: 0x9DB000 
+    Dynamic Header Offset: 0x9E0000 
+    Drive Data Offset: 0x9E0000 
+    Hash Tree Page Count: 0x9CF 
+    Hash Tree Levels: 0x3 
+    Hash Tree Valid: True 
+    Data Hash Tree Valid: False 
+    XVC Data Hash Valid: False 
+
+XvdHeader:
+    Signed by: <UNKNOWN> 
+    Using ODK keyslot: StandardOdk 
+    Read-only flag set 
+    Encrypted 
+    Data integrity enabled (uses hash tree) 
+    Sector Size (4096 bytes) 
+    ResiliencyEnabled not set 
+    SraReadOnly not set 
+    RegionIdInXts set 
+    EraSpecific not set 
+
+    Magic: msft-xvd 
+    Volume Flags: 0x00000041 
+    Format Version: 0x3 
+    File Time Created: 7/22/2026 5:48:41 PM 
+    Drive Size: 0x67899000 
+    VDUID / Drive Id: 51fa6b33-17e1-4ac5-b552-f2904b45aa50 
+    UDUID / User Id: 51fa6b33-17e1-4ac5-b552-f2904b45aa50 
+    Top Hash Block Hash: 
+    35 7E 40 50 15 4B 2A 44 65 39 06 3E 39 F2 40 8D 66 96 FC 85 E2 45 01 2A 5A 09 88 06 95 95 11 E4  
+    Original XVC Data Hash: 
+    D8 04 E0 4D EA 54 B6 D8 98 94 3E 86 EB 8B FE FC 3F E1 78 99 A1 AF 04 84 CE 28 0C F6 FA E0 C6 09  
+    XvdType: Fixed 
+    Content Type: 0x00000001 (Title) 
+    Embedded XVD PDUID/Build Id: 00000000-0000-0000-0000-000000000000 
+    Embedded XVD Length: 0x0 
+    User Data Length: 0x7919 
+    XVC Data Length: 0x5000 
+    Dynamic Header Length: 0x0 
+    BlockSize: 0xAA000 
+    Ext Entries: 0 
+    Capabilities: 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000  
+    PE Catalog Hash: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    Userdata hash: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    PE Catalog Caps: 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000 0x0000  
+    PE Catalogs: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    Writeable Expiration Date: 0x0 
+    Writeable Policy flags: 0x0 
+    Persistent Local storage length: 0x0 
+    Mutable data page count: 0x1 (0x1000 bytes) 
+    Sandbox Id:  
+    Product Id: 37574d39-4239-304a-c056-463351585100 
+    PDUID/Build Id: 68265d83-cd2d-4a80-88ec-6ac75f73142f 
+    Sequence Number: 0 
+    Package Version: 1.2.18.0 
+    Required System Version: 10.0.18362.0 
+    ODK Keyslot ID: StandardOdk 
+    KeyMaterial: 
+    00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+    Resilient Data offset: 0x0 
+    Resilient Data length: 0x0 
+    Unknown271: 0x1 
+
+Decrypt key for xvc keyslot 0: E5 CC 26 99 89 54 7D 73 8A 0F 18 DE 0B B8 6D AE DA 2F 60 DB 83 E0 1C 83 90 72 AD 18 9E 66 14 3D 
+(key is wrong though until the obfuscation/encryption on it is figured out)
+
+XvcInfo:
+    Flags != 0 
+    Reserved != null 
+    Submission-crypted (not using test key) (/L) 
+    /updcompat type 2 
+
+    ContentID: c0b4172a-ac02-291b-e2ef-0dd5b4f4786e 
+    Encryption Key 0 GUID: 1b16ded5-d0d1-7b9e-3794-e9c0fbafe868 
+    Encryption Key 1 GUID: 37715e88-0c99-02f7-ceae-6bb1684ba25c 
+
+    Description:  
+    Version: 0x2 
+    Region Count: 0x7 
+    Flags: 0x7 
+    Key Count: 0x1 
+    InitialPlay Region Id: 0x2 
+    InitialPlay Offset: 0x68279000 
+    File Time Created: 7/22/2026 5:48:41 PM 
+    Preview Region Id: 0x0 
+    Update Segment Count: 37 
+    Preview Offset: 0x0 
+    Unused Space: 0x0 
+
+    ReservedD54: 
+    CA 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+
+
+Region 0 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000005 Header):
+    Description: XVC-HD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x0 
+    Length: 0x3000 
+    Hash: 0x4D59B510D00BF8D8 
+    First Segment Index: 0 
+
+
+Region 1 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000004 EmbeddedXvd):
+    Description: XVC-EXVD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x3000 
+    Length: 0x0 
+    Hash: 0x0 
+    First Segment Index: 0 
+
+
+Region 2 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000006 MutableData):
+    Description: XVC-MDU 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x3000 
+    Length: 0x1000 
+    Hash: 0x0 
+    First Segment Index: 0 
+
+
+Region 3 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000001 MetadataXvc):
+    Description: XVC-MD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x4000 
+    Length: 0x9DC000 
+    Hash: 0x4D59B510D00BF8D8 
+    First Segment Index: 0 
+
+
+Region 4 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000002 MetadataFilesystem):
+    Description: FS-MD 
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x1 
+        - Resident 
+    Offset: 0x9E0000 
+    Length: 0x2CF000 
+    Hash: 0xEEFB45B3C33D417B 
+    First Segment Index: 0 
+
+
+Region 5 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x40000003 Unknown):
+    Description:  
+    Key ID: 0xFFFF (not encrypted) 
+    Flags: 0x0 
+    Offset: 0xCAF000 
+    Length: 0x1FB000 
+    Hash: 0x53EBEE56D41B62CF 
+    First Segment Index: 0 
+
+
+Region 6 (present, available)
+XvcRegionHeader (ID/EncryptionIV: 0x2 2):
+    Description:  
+    Key ID: 0x0 
+    Flags: 0x4 
+        - Preview 
+    Offset: 0xEAA000 
+    Length: 0x673CF000 
+    Hash: 0x7F4C0EB1A355507D 
+    First Segment Index: 9 
+
+
+Update Segments:
+
+ | Id | PageNum (Offset)     | Hash               | 
+ |------------------------------------------------| 
+ | 0  | 0xCAF (0xCAF000)     | 0xD9EDE29390596268 | 
+ | 1  | 0xCB0 (0xCB0000)     | 0x310D491521732DB5 | 
+ | 2  | 0xCB1 (0xCB1000)     | 0xFCA5223AD463E711 | 
+ | 3  | 0xCBA (0xCBA000)     | 0xE06215B40EBE9C5F | 
+ | 4  | 0xCBD (0xCBD000)     | 0xB0F4BD463136FCF5 | 
+ | 5  | 0xE7E (0xE7E000)     | 0x62A034754E3DC4D3 | 
+ | 6  | 0xEA1 (0xEA1000)     | 0xB4C2F093DFB60D64 | 
+ | 7  | 0xEA7 (0xEA7000)     | 0x671F905DB8B099D7 | 
+ | 8  | 0xEA9 (0xEA9000)     | 0x7F6912214DDBDC24 | 
+ | 9  | 0xEAA (0xEAA000)     | 0x46BF633A94D4708C | 
+ | 10 | 0x11D9 (0x11D9000)   | 0x3AB8E0DEE96B13DD | 
+ | 11 | 0x175B (0x175B000)   | 0x736D41066D744EA4 | 
+ | 12 | 0x29B9 (0x29B9000)   | 0x4F0EF9CA5D28E93B | 
+ | 13 | 0x2AF5 (0x2AF5000)   | 0x5D674B6FEE98E248 | 
+ | 14 | 0x2E41 (0x2E41000)   | 0x8C5B8918D1CAB177 | 
+ | 15 | 0x2F55 (0x2F55000)   | 0x478483A951B86E8  | 
+ | 16 | 0xCF54 (0xCF54000)   | 0x84B760190E6E044  | 
+ | 17 | 0xCF85 (0xCF85000)   | 0x7B79D9CC671823AF | 
+ | 18 | 0xD06D (0xD06D000)   | 0x5DD8DCBC9AE57D76 | 
+ | 19 | 0xD0BC (0xD0BC000)   | 0xC796E03B92B50500 | 
+ | 20 | 0xD0D7 (0xD0D7000)   | 0x3C3FE7D7805A304A | 
+ | 21 | 0xD1A6 (0xD1A6000)   | 0xF27799188501FCF5 | 
+ | 22 | 0xD26F (0xD26F000)   | 0x90199986EEF1036B | 
+ | 23 | 0xD27B (0xD27B000)   | 0xBE2F5EE8C6C1DA44 | 
+ | 24 | 0xD41E (0xD41E000)   | 0x3ED3C0BD9E7D1C52 | 
+ | 25 | 0xD428 (0xD428000)   | 0xE5EC6DEA444D6ABA | 
+ | 26 | 0xD4F7 (0xD4F7000)   | 0xC1BA46BFD7A8DC1D | 
+ | 27 | 0xD537 (0xD537000)   | 0x1E956B9F0829AC86 | 
+ | 28 | 0xF1CF (0xF1CF000)   | 0x9C9F3288AD7B13E6 | 
+ | 29 | 0x10D09 (0x10D09000) | 0x3C76DFADCD080F83 | 
+ | 30 | 0x10D0A (0x10D0A000) | 0xB319C34A4B08C1BF | 
+ | 31 | 0x10D34 (0x10D34000) | 0x5BF81FF3AAF62D7E | 
+ | 32 | 0x14974 (0x14974000) | 0xCE1787B1637DBB2B | 
+ | 33 | 0x14C63 (0x14C63000) | 0x87D94CE4C2F3D926 | 
+ | 34 | 0x680AD (0x680AD000) | 0xB93BA83E1D2D6757 | 
+ | 35 | 0x680AE (0x680AE000) | 0x14F407B4CC66CEDB | 
+ | 36 | 0x68272 (0x68272000) | 0x629C7F77B6B6A93C | 
+
+Cannot get XvdFilesystem from encrypted package
+
+
+
+== hash verdict lines (corrupted) ======================================
+  Hash Tree Valid: True
+  Data Hash Tree Valid: False
+  XVC Data Hash Valid: False
+restored byte at 1,310,567,424 (verified 0x29)
+
+== RESULT ==============================================================
+ORACLE WORKS — the hash verdict CHANGED when one byte was corrupted.
+The tree notices wrong bytes, so it can verify ranges we produce locally without ever
+holding the whole genuine package. This unblocks the reuse design (and, with it, any
+merge of an old skeleton into a new capture).
+
+Next: fetch-cdn-package.ps1 to pull an older version, then diff-packages.ps1 to size
+how much of the package is reusable at the same offset.
+

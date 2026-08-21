@@ -1,4 +1,4 @@
-<#
+﻿<#
   diff-packages.ps1 — measure the cross-version REUSE POTENTIAL for Xbox package updates.
 
   Compares two ENCRYPTED .msixvc packages of the SAME game — an OLD version and the NEW
