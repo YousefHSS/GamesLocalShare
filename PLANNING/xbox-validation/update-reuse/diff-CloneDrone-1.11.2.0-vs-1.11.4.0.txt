@@ -1,0 +1,37 @@
+﻿Step 2 - cross-version reuse measurement
+Title    : Clone Drone in the Danger Zone
+OLD      : F:\Games\assets1.xboxlive.com\11\331e9e1f-a73b-4f79-a85b-0e3f5411a427\368b2c2c-c6e2-4472-acda-52a5f18a1d51\1.11.2.0.200e61dc-a7a0-4bce-b62e-1dbb2ba394a6\DoborogGames.CloneDroneintheDangerZone_1.11.2.0_x64__w6hf08ggk4es4.msixvc
+NEW      : F:\Games\assets1.xboxlive.com\2\8035fbc1-5933-4347-ab20-264fc2478002\368b2c2c-c6e2-4472-acda-52a5f18a1d51\1.11.4.0.da2872f8-6b3b-4536-a9a9-21235ede9ab6\DoborogGames.CloneDroneintheDangerZone_1.11.4.0_x64__w6hf08ggk4es4.msixvc
+Source   : both versions were ALREADY in the local package cache (F:\Games\),
+           so fetch-cdn-package.ps1 was not needed - no CDN download was made.
+Note     : this pair skips 1.11.3.0, so it spans two releases, not one.
+
+== package diff (same-offset, block=4096) ==
+old size          : 1,846,427,648  (1760.9 MB)
+new size          : 1,846,431,744  (1760.9 MB)
+size delta        : 4,096 B
+common length     : 1,846,427,648  (1760.9 MB)
+blocks compared   : 450,788
+identical blocks  : 15,187
+IDENTICAL @ offset: 3.37 %   <-- reuse ceiling (download we could avoid)
+identical bytes   : 62,205,952  (59.3 MB)
+first difference  : 0
+changed regions   : 38
+
+largest changed regions (offset, length):
+      390,856,704    1,022,730,240 B  (975.4 MB)
+    1,528,479,744      298,373,120 B  (284.6 MB)
+       75,046,912      216,379,392 B  (206.4 MB)
+      336,191,488       54,661,120 B  (52.1 MB)
+    1,475,788,800       38,318,080 B  (36.5 MB)
+    1,425,477,632       32,288,768 B  (30.8 MB)
+    1,826,861,056       19,566,592 B  (18.7 MB)
+      308,035,584       19,079,168 B  (18.2 MB)
+    1,514,110,976       14,364,672 B  (13.7 MB)
+    1,457,770,496       13,889,536 B  (13.2 MB)
+
+identity map (left=start .. right=end of common length):
+  1###8...................................................................................................................
+  legend: '#'=identical  '.'=changed  0-9=tens-of-% identical  ' '=no data
+
+elapsed 0.7s
