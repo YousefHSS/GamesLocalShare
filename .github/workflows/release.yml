@@ -94,6 +94,11 @@ jobs:
 
           ## What's New in 3.1.0
 
+          Two fixes to receiving an Xbox game from a drive: you pick the folder once, and the transfer bar now ends when the install does.
+
+          - **Fixed: the folder picker opened two or three times in a row** — every time the window was closed to the tray and reopened, the app built a second connection to its own interface without dropping the first, so each button press was delivered once per restore. "Receive Xbox Game" made that visible: pick a folder, and the picker immediately reappeared, once per extra connection. The connection is now built once for the lifetime of the window, and only one folder picker can ever be on screen at a time.
+          - **Fixed: the transfer bar sat on "click Install in the Xbox app" after the game had installed** — finishing the transfer relied on spotting the finished install under a watched Xbox folder, which never happened if the game was installed to a drive the app wasn't watching, and was skipped outright when the title was already known (a re-install or an update). The bar now also finishes on its own once the Xbox app stops asking for the package — a minute after the last byte for a completed package — and a completed re-install is recognised as one.
+
           Rebuilding a stored game back into its original package now works. This was the missing half of single-copy storage: the app could shrink a game to its installed files plus a ~17 MB skeleton, but turning that back into the package Xbox asks for during a Verify or an update failed every time — so the space saving was never safe to rely on.
 
           - **Fixed: restoring a game from its skeleton always failed at the last step** — the rebuild itself was perfect (the app confirmed a byte-identical result every time), but the final re-encryption silently did nothing, and the restore was rejected as "does not match the genuine package". The re-encryption step was written for an older skeleton format; on the current one it saw a package that already looked encrypted and quietly declined, leaving the file unencrypted. Restoring now takes a single path built for the current format, which never rewrites the package header at all — so there is nothing to re-sign and nothing to get out of step. Verified byte-identical on a 316 MB game and a 4.3 GB one.

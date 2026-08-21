@@ -3328,6 +3328,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _xboxTransferService.Cancel();
         // If a streaming peer install is showing in the bar, tear it down too.
+        _peerWatchdogCts?.Cancel();
+        _peerWatchdogCts = null;
         EndXboxPeerInstall();
         _peerInstallState = null;
         IsXboxTransferActive = false;
@@ -3352,6 +3354,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void DismissXboxTransfer()
     {
+        _peerWatchdogCts?.Cancel();
+        _peerWatchdogCts = null;
         EndXboxPeerInstall();
         _peerInstallState = null;
         IsXboxTransferActive = false;
@@ -3617,7 +3621,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 (!string.IsNullOrEmpty(_activePeerMatchKey) || !string.IsNullOrEmpty(_activeDriveServeRoot)))
             {
                 long got = _cacheProxy.PeerBytes, total = _cacheProxy.PeerTotal;
+                bool fromDrive = !string.IsNullOrEmpty(_activeDriveServeRoot);
                 var now = DateTime.UtcNow;
+                if (got > _peerProgressBytes) { _peerProgressBytes = got; _peerProgressUtc = now; }
                 double secs = (now - _peerLastTick).TotalSeconds;
                 if (secs >= 0.5)
                 {
@@ -3634,26 +3640,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         : "";
                     if (got >= total && _peerInstallState.CurrentStep == XboxTransferStep.DownloadingFromPeer)
                     {
-                        // All bytes streamed. Show "finishing" but KEEP the peer origin active until the install
-                        // is actually detected complete (the Store may re-request tail ranges) — see
-                        // OnReceiverInstallDetected, which finalizes + clears the origin.
-                        _peerInstallState.StatusMessage =
-                            $"Streamed {total / 1048576.0:F0} MB from the peer — Xbox app is finishing the install…";
-                        // Safety-net: if the watcher never reports the install (e.g. installed to an unwatched
-                        // root), finalize the bar anyway after a grace period so it can't get stuck.
-                        if (!_peerFinishScheduled)
-                        {
-                            _peerFinishScheduled = true;
-                            long totalSnap = total;
-                            _ = Task.Run(async () =>
-                            {
-                                await Task.Delay(TimeSpan.FromSeconds(60));
-                                if (_peerInstallState != null &&
-                                    _peerInstallState.CurrentStep == XboxTransferStep.DownloadingFromPeer)
-                                    FinalizePeerInstallBar(
-                                        $"Streamed {totalSnap / 1048576.0:F0} MB from the peer — install finishing in the Xbox app");
-                            });
-                        }
+                        // All bytes streamed. Show "finishing" but KEEP the source active until the install is
+                        // actually detected complete (the Store may re-request tail ranges) — see
+                        // OnReceiverInstallDetected, which finalizes + clears it. The watchdog below is the
+                        // backstop for when that detection never arrives.
+                        _peerInstallState.StatusMessage = fromDrive
+                            ? $"Served {total / 1048576.0:F0} MB from the drive — Xbox app is finishing the install…"
+                            : $"Streamed {total / 1048576.0:F0} MB from the peer — Xbox app is finishing the install…";
                     }
                 }
                 XboxTransfer = _peerInstallState;
@@ -3893,7 +3886,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private XboxTransferState? _peerInstallState;         // receiver: drives the transfer bar during a peer install
     private long _peerLastBytes;
     private DateTime _peerLastTick;
-    private bool _peerFinishScheduled;                    // one-shot guard for the finalize safety-net
+    private long _peerProgressBytes;                      // highest PeerBytes seen (progress, not speed, sampling)
+    private DateTime _peerProgressUtc;                    // when PeerBytes last went up
+    private CancellationTokenSource? _peerWatchdogCts;    // drives the "install finished" backstop loop
+
+    // The Xbox app asks for the package in bursts; a gap this long after the last served byte means it is no
+    // longer pulling from us. Short when every byte has been served (the install is done bar the unpacking),
+    // long otherwise, since a paused-then-resumed install may go quiet for a while mid-package.
+    private static readonly TimeSpan PeerIdleFinishAll = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan PeerIdleFinishPartial = TimeSpan.FromMinutes(3);
     private XboxTransferState? _driveCopyState;            // active "Copy to Drive" reconstruct → transfer bar
     private string? _lastCacheProxyLog;                    // most recent proxy Log line (for failure toasts)
 
@@ -4039,7 +4040,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             PeerId = peer.PeerId,
             AppId = gameAppId,
         };
-        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow; _peerFinishScheduled = false;
+        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow;
+        StartPeerInstallWatchdog();
         Dispatcher.UIThread.Post(() =>
         {
             XboxTransfer = _peerInstallState;
@@ -4074,6 +4076,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Backstop for the receive transfer bar. The bar is normally finalized by <see cref="OnReceiverInstallDetected"/>,
+    /// but that depends on the skeleton watcher seeing the install land under a watched Xbox root — it doesn't fire
+    /// when the game is installed to a root we aren't watching, and it can't fire at all if the Xbox app never
+    /// renames a staging folder. When that happened the bar sat on "click Install in the Xbox app" forever even
+    /// though the game was already installed and playable. So watch the proxy instead: once it has served bytes
+    /// and then goes quiet, the Xbox app is done pulling from us and the transfer is over.
+    /// </summary>
+    private void StartPeerInstallWatchdog()
+    {
+        _peerWatchdogCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _peerWatchdogCts = cts;
+        _peerProgressBytes = 0;
+        _peerProgressUtc = DateTime.UtcNow;
+        var ct = cts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try { await Task.Delay(TimeSpan.FromSeconds(5), ct); } catch { return; }
+
+                var st = _peerInstallState;
+                if (_cacheProxy == null || st == null || st.CurrentStep != XboxTransferStep.DownloadingFromPeer)
+                    return;
+
+                long got = _cacheProxy.PeerBytes, total = _cacheProxy.PeerTotal;
+                if (got > _peerProgressBytes) { _peerProgressBytes = got; _peerProgressUtc = DateTime.UtcNow; }
+                if (got <= 0) continue; // the user hasn't started the install yet — keep waiting
+
+                var idle = DateTime.UtcNow - _peerProgressUtc;
+                bool allServed = total > 0 && got >= total;
+                if (idle < (allServed ? PeerIdleFinishAll : PeerIdleFinishPartial)) continue;
+
+                bool fromDrive = !string.IsNullOrEmpty(_activeDriveServeRoot);
+                string source = fromDrive ? "the drive" : "the peer";
+                FinalizePeerInstallBar(allServed
+                    ? $"Installed \"{st.GameName}\" — {got / 1048576.0:F0} MB from {source} (no internet download)"
+                    : $"Finished — {got / 1048576.0:F0} MB served from {source}. If the Xbox app is still installing, " +
+                      $"start the receive again to keep serving it locally.");
+                AddLog($"Xbox transfer: {source} went idle for {idle.TotalSeconds:F0}s after {got / 1048576.0:F0} MB " +
+                       $"— treating the install as finished and releasing the source", LogMessageType.Info);
+                return;
+            }
+        }, ct);
+    }
+
     /// <summary>Receiver: the watcher saw a new install complete while a streaming peer install is active —
     /// finalize the transfer bar and stop forwarding to the peer.</summary>
     private void OnReceiverInstallDetected(string installDir)
@@ -4092,6 +4142,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void FinalizePeerInstallBar(string statusMessage)
     {
         if (_peerInstallState == null) return;
+        _peerWatchdogCts?.Cancel();
+        _peerWatchdogCts = null;
         EndXboxPeerInstall();
         Dispatcher.UIThread.Post(() =>
         {
@@ -4144,11 +4196,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return false;
 
         // Find a reconstructed package: <…>\assets1.xboxlive.com\…\<PFN>.msixvc
+        // A drive can hold more than one — a title's update is a NEW package object (new name + CDN path),
+        // so rebuilding an updated game leaves the old version's file sitting next to it. Serve the newest.
         string? msixvc = null;
         try
         {
-            msixvc = Directory.EnumerateFiles(path, "*.msixvc", SearchOption.AllDirectories)
-                .FirstOrDefault(f => f.IndexOf("assets1.xboxlive.com", StringComparison.OrdinalIgnoreCase) >= 0);
+            var packages = Directory.EnumerateFiles(path, "*.msixvc", SearchOption.AllDirectories)
+                .Where(f => f.IndexOf("assets1.xboxlive.com", StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderByDescending(f => { try { return new FileInfo(f).LastWriteTimeUtc; } catch { return DateTime.MinValue; } })
+                .ToList();
+            msixvc = packages.FirstOrDefault();
+            if (packages.Count > 1)
+                AddLog($"Xbox drive receive: {packages.Count} packages on this drive — serving the newest " +
+                       $"({Path.GetFileName(msixvc!)})", LogMessageType.Info);
         }
         catch { }
         if (msixvc == null) return false; // not a Smart copy here
@@ -4176,7 +4236,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentStep = XboxTransferStep.DownloadingFromPeer,
             StatusMessage = $"Click Install on \"{friendly}\" in the Xbox app — installing from the drive",
         };
-        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow; _peerFinishScheduled = false;
+        _peerLastBytes = 0; _peerLastTick = DateTime.UtcNow;
+        StartPeerInstallWatchdog();
         Dispatcher.UIThread.Post(() =>
         {
             XboxTransfer = _peerInstallState;
@@ -4201,6 +4262,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _peerWatchdogCts?.Cancel();
         _autoUpdateTimer?.Stop();
         _autoUpdateTimer?.Dispose();
 

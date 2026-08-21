@@ -23,6 +23,11 @@ public class InteropBridge : IDisposable
     private CancellationTokenSource? _debounceCts;
     private const int DebounceMs = 80;
 
+    /// <summary>Guards every folder picker: only one dialog may be open at a time. A duplicated command
+    /// (or an impatient double-click on a WebUI button) would otherwise stack several native dialogs on
+    /// top of each other, so the user had to pick a folder two or three times over.</summary>
+    private int _pickerOpen;
+
     // Serialization options for JSON
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -39,7 +44,32 @@ public class InteropBridge : IDisposable
 
         if (_webView == null) return;
 
+        // Defensive: never end up with two live subscriptions if a bridge is ever rebuilt for the same
+        // WebView — a doubled handler runs every WebUI command twice.
+        _webView.WebMessageReceived -= OnWebMessageReceived;
         _webView.WebMessageReceived += OnWebMessageReceived;
+    }
+
+    /// <summary>Opens a single folder picker, or returns null when one is already on screen.</summary>
+    private async Task<string?> PickFolderAsync(string title)
+    {
+        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (topLevel == null) return null;
+        if (Interlocked.Exchange(ref _pickerOpen, 1) == 1) return null; // a dialog is already up
+
+        try
+        {
+            var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = title,
+                AllowMultiple = false
+            });
+            return result.Count > 0 ? result[0].Path.LocalPath : null;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _pickerOpen, 0);
+        }
     }
 
     public async Task InitializeAsync()
@@ -937,104 +967,51 @@ public class InteropBridge : IDisposable
     private async Task HandleReconstructSkeletonAsync(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return;
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
 
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = $"Choose where to reconstruct \"{name}\" (e.g. an external drive cache root)",
-            AllowMultiple = false
-        });
-
-        if (result.Count > 0)
-            await _viewModel.RestoreSkeletonToFolderAsync(name, result[0].Path.LocalPath);
+        var path = await PickFolderAsync($"Choose where to reconstruct \"{name}\" (e.g. an external drive cache root)");
+        if (path != null)
+            await _viewModel.RestoreSkeletonToFolderAsync(name, path);
     }
 
     /// <summary>Browse for the drive/folder a game was copied to, then serve a Smart (updatable) copy via the
     /// proxy. If it isn't a Smart copy, fall back to the Basic/overlay receive modal.</summary>
     private async Task HandleReceiveXboxFromDriveAsync()
     {
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
+        var path = await PickFolderAsync("Select the drive or folder you copied the Xbox game to");
+        if (path == null) return;
 
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select the drive or folder you copied the Xbox game to",
-            AllowMultiple = false
-        });
-        if (result.Count == 0) return;
-
-        bool handled = await _viewModel.ReceiveXboxFromDriveAsync(result[0].Path.LocalPath);
+        bool handled = await _viewModel.ReceiveXboxFromDriveAsync(path);
         if (!handled)
             await ExecuteJavaScriptAsync("window.__openXboxReceiveModal && window.__openXboxReceiveModal();");
     }
 
     private async Task HandleBrowseXboxSourceAsync()
     {
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
-
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select Xbox staged game folder (must contain transfer-summary.json)",
-            AllowMultiple = false
-        });
-
-        if (result.Count > 0)
-        {
-            _viewModel.XboxSourcePath = result[0].Path.LocalPath;
-        }
+        var path = await PickFolderAsync("Select Xbox staged game folder (must contain transfer-summary.json)");
+        if (path != null)
+            _viewModel.XboxSourcePath = path;
     }
 
     private async Task HandleBrowseXboxDestinationAsync()
     {
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
-
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select destination folder for Xbox staged game (USB/shared drive)",
-            AllowMultiple = false
-        });
-
-        if (result.Count > 0)
-        {
-            _viewModel.XboxDestinationPath = result[0].Path.LocalPath;
-        }
+        var path = await PickFolderAsync("Select destination folder for Xbox staged game (USB/shared drive)");
+        if (path != null)
+            _viewModel.XboxDestinationPath = path;
     }
 
     private async Task HandleBrowseXboxRootAsync()
     {
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
-
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select the Xbox install root (e.g. the XboxGames folder on the install drive)",
-            AllowMultiple = false
-        });
-
-        if (result.Count > 0)
-        {
-            _viewModel.XboxRootPath = result[0].Path.LocalPath;
-        }
+        var path = await PickFolderAsync("Select the Xbox install root (e.g. the XboxGames folder on the install drive)");
+        if (path != null)
+            _viewModel.XboxRootPath = path;
     }
 
     /// <summary>Pick + persist the Xbox LAN cache folder, then (optionally) re-run the command that needed it
     /// (auto-retry). Raised from a "no cache folder set" / "proxy didn't start" toast action.</summary>
     private async Task HandleBrowseXboxCacheRootAsync(string? retryCommand)
     {
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
-
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Choose a folder for the Xbox LAN cache (stores cached game packages)",
-            AllowMultiple = false
-        });
-        if (result.Count == 0) return;
-
-        var path = result[0].Path.LocalPath;
+        var path = await PickFolderAsync("Choose a folder for the Xbox LAN cache (stores cached game packages)");
+        if (path == null) return;
 
         // Called from the Settings modal (no retry): just fill the form field; the modal's Save persists it,
         // so Cancel still discards. Called from a toast action (retry set): persist immediately + auto-retry.
@@ -1068,17 +1045,10 @@ public class InteropBridge : IDisposable
             && Enum.TryParse<CopyDirection>(dEl.GetString(), out var parsed))
             dir = parsed;
 
-        var topLevel = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (topLevel == null) return;
+        var path = await PickFolderAsync("Choose where to install the game");
+        if (path == null) return;
 
-        var result = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Choose where to install the game",
-            AllowMultiple = false
-        });
-        if (result.Count == 0) return;
-
-        await _viewModel.StartLocalCopyAsync(aEl.GetString() ?? string.Empty, libGuid, dir, result[0].Path.LocalPath);
+        await _viewModel.StartLocalCopyAsync(aEl.GetString() ?? string.Empty, libGuid, dir, path);
     }
 
     /// <summary>The drive root (e.g. "C:\") of a path, or "" if it can't be resolved.</summary>
@@ -1200,23 +1170,11 @@ public class InteropBridge : IDisposable
 
     private async Task HandleBrowseDriveFolderAsync()
     {
-        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
-            desktop.MainWindow == null)
-            return;
+        var path = await PickFolderAsync("Select external drive folder");
+        if (path == null) return;
 
-        var sp = desktop.MainWindow.StorageProvider;
-        var folders = await sp.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select external drive folder",
-            AllowMultiple = false,
-        });
-
-        if (folders.Count > 0)
-        {
-            var path = folders[0].Path.LocalPath;
-            var json = JsonSerializer.Serialize(path, JsonOptions);
-            await ExecuteJavaScriptAsync($"window.__driveBrowseResult && window.__driveBrowseResult({json});");
-        }
+        var json = JsonSerializer.Serialize(path, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__driveBrowseResult && window.__driveBrowseResult({json});");
     }
 
     private async Task PushExternalLibrariesAsync()
@@ -1349,23 +1307,11 @@ public class InteropBridge : IDisposable
 
     private async Task HandleBrowseEpicFolderAsync()
     {
-        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop ||
-            desktop.MainWindow == null)
-            return;
+        var path = await PickFolderAsync("Select Epic Games install folder");
+        if (path == null) return;
 
-        var sp = desktop.MainWindow.StorageProvider;
-        var folders = await sp.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select Epic Games install folder",
-            AllowMultiple = false,
-        });
-
-        if (folders.Count > 0)
-        {
-            var path = folders[0].Path.LocalPath;
-            var json = JsonSerializer.Serialize(path, JsonOptions);
-            await ExecuteJavaScriptAsync($"window.__epicBrowseResult && window.__epicBrowseResult({json});");
-        }
+        var json = JsonSerializer.Serialize(path, JsonOptions);
+        await ExecuteJavaScriptAsync($"window.__epicBrowseResult && window.__epicBrowseResult({json});");
     }
 
     private async Task ExecuteJavaScriptAsync(string script)

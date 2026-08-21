@@ -23,7 +23,51 @@ versions — so it's the least reusable thing. The genuinely reusable data acros
 **unchanged installed files**, which an update leaves on disk. That's the encrypted content the
 diff below measures.
 
+## Step 0 (do this first): is there an oracle at all?
+
+Measuring reuse is pointless if a reused range can never be **verified**. Today a skeleton is
+only promoted when the rebuild matches the genuine package's SHA — which requires the whole
+genuine package, i.e. the download we are trying to avoid. The only replacement is the package's
+own signed hash tree, and the streaming-skeletonizer spike left an unresolved warning about it
+(`"XVC Data Hash Valid: False"` on packages that were otherwise fine).
+
+This needs **one** package you already have — no old version, no update:
+
+```powershell
+.\hashtree-oracle-check.ps1 -Package <any.msixvc>
+```
+
+It reports the hash verdict on the pristine package, flips a single byte deep in user data,
+asks again, and restores the byte. If the verdict changes, the tree can verify bytes we produce
+locally and the whole design is live. If it does not, everything below is moot until the check
+is fixed in the xvdtool fork — including merging an old skeleton into a new capture.
+
+Exit codes: `0` oracle works · `3` blocked · `4` inconclusive.
+
 ## The experiment
+
+You do **not** have to wait for a real update. The CDN serves these packages to a plain
+unauthenticated ranged GET (the app's own gap-fill does exactly that — `FetchRange` sends only
+`Host:` and `Range:`), so any version can be pulled on demand — the only trick is knowing its
+URL, since the version is baked into the path and the Store only ever asks for the current one.
+
+Captured skeletons record those URLs for you: every capture writes `<name>.skl.json` with
+`CachePath` + `CacheRoot`, and the relative part *is* the CDN URL path. A skeleton captured
+before a game updated therefore hands you a working old-version URL.
+
+```powershell
+# what old versions can I fetch right now?
+.\fetch-cdn-package.ps1 -List
+
+# pull one, then diff it against the version currently cached
+.\fetch-cdn-package.ps1 -Manifest "<...>\skeletons\<Title>.skl.json" -DiffAgainst <new.msixvc>
+```
+
+The download resumes if interrupted, and it resolves the real CDN IP through a public resolver
+so it still works while the proxy's hosts redirect is active.
+
+**If you have no usable old URL** (nothing captured before an update), fall back to catching one
+update the slow way:
 
 1. Settings → Xbox → turn ON **"Also cache the full package to disk"** (`XboxCacheFullPackage`).
 2. Have the game installed at version **N** → its full `.msixvc` lands in the cache.
@@ -49,6 +93,17 @@ diff below measures.
 |---|---|---|
 | High identical % (e.g. >70%) | Same-offset reuse is valid; CIK stable, layout stable for unchanged parts | Design the reuse path (proxy gap-fill sources from local install; verify via existing SHA) |
 | Low / ~0% identical | CIK rotated or layout shifted | Same-offset reuse dead; reconsider (decrypt+re-encrypt layer, or drop the idea) |
+
+## Note on merging an OLD SKELETON into a new capture
+
+A `.skl` is a range map over U and reconstruct is content-agnostic, so two of them union
+cleanly — merging is not the hard part. But the old skeleton can only contribute the **non-file**
+bytes (~1–4.5% of the package per the feasibility table in `streaming-skeletonizer.md`);
+everything else comes off the installed files, which are on disk anyway. And that slice is
+header / hash tree / MFT metadata — precisely what an update rewrites. So order the byte sources
+by value: **installed files first** (proven byte-identical by `--restore`), **the new front
+second** (the Store usually sends it; ≤64 MB from the CDN if not), and the **old skeleton last**.
+The merge is an optimization, not the unlock. The unlock is Step 0.
 
 ## Where the reuse would eventually live (design phase, after measuring)
 
