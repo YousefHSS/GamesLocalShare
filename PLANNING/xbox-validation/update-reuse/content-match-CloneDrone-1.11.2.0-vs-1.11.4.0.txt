@@ -1,0 +1,34 @@
+﻿Content-reuse measurement (DECRYPTED plaintext)
+Title : Clone Drone in the Danger Zone
+OLD   : 1.11.2.0   NEW : 1.11.4.0   (spans two releases; 1.11.3.0 skipped)
+
+Both source packages verified intact BEFORE this ran:
+  Data Hash Tree Valid: True on both (the check step 1 proved flips on a single bad byte).
+Decrypted with: XVDTool.exe -eu -pdu --cikfolder <cik> -o <out> <pkg>
+Originals verified byte-identical afterwards by SHA256:
+  OLD EC6BA150F2FE7B8FA1B3522073D21A5E160929BE8790B2B2C69B7F0665A84B19
+  NEW 6ECDA9FEC7725629C39F544DB60AFD68D27125AC200B89FBE416B07A1887A7C7
+
+For comparison, diff-packages.ps1 on the ENCRYPTED pair gave 3.37% at the same offset.
+
+== DECRYPTED (plaintext) content match, block=4096 ==
+
+old blocks total     : 450,788
+old blocks all-zero  : 2,040  (0.45 %)
+old distinct nonzero : 426,973   (close to total => blocks are unique, so a high B/C is real)
+
+new blocks total     : 450,789
+new blocks all-zero  : 2,040  (0.45 %)
+new blocks nonzero   : 448,749
+
+A) SAME OFFSET match     : 27,513 / 450,789  = 6.10 %
+B) FOUND ANYWHERE (all)  : 443,327 / 450,789  = 98.34 %
+C) FOUND ANYWHERE (nonzero only) : 441,287 / 448,749  = 98.34 %
+
+genuinely new content : 7,462 blocks = 29.1 MB   <-- what an update would actually have to download
+
+A = what naive same-offset reuse could take.
+B = ceiling for content-addressed reuse, inflated by zero-fill.
+C = the honest ceiling: real content that survived the update.
+
+elapsed 8.4s
